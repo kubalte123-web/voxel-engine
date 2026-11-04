@@ -76,7 +76,37 @@ engine.blocks.register("ruby_ore", {
 	drops = "ruby",          -- łup: klucz przedmiotu, {item, count, chance}, lista takich albo false
 	item = true,             -- czy blok ma przedmiot (do ekwipunku i stawiania)
 	placeable = true,        -- czy pojawia się w trybie kreatywnym
+	hardness = 3.0,          -- sekundy kopania gołą ręką (rośliny domyślnie 0, reszta 1)
+	breakable = true,        -- false: nie do wykopania
+	gravity = false,         -- true: spada bez podparcia (piasek, żwir)
+	loose = nil,             -- obiekt luźny (fizyczny), opis niżej
 })
+```
+
+### Ciecze
+
+```lua
+engine.blocks.register("water", {
+	name = "Woda",
+	item = false,
+	liquid = { color = "#2a78c8", deep = "#0a2a5c", foam = "#e8f4ff", viscosity = 1, push = 1.0, emission = 0 },
+})
+```
+
+Ciecz ma 8 poziomów i zachowuje objętość: wylany blok (8 poziomów) spada, a potem wyrównuje się z sąsiadami,
+aż zostanie kałuża co najmniej 2 poziomów; cienkie warstwy powoli wysychają. Silnik rejestruje sam bloki
+`water~1` .. `water~8` (płynąca ciecz). Blok `water` to zbiornik z generatora (morze, jezioro): oddaje ciecz bez końca.
+`viscosity` mówi, co ile kroków symulacji ciecz płynie (np. lawa 4), `push` to siła prądu,
+`emission` to świecenie (lawa). Prąd spycha gracza, stworzenia i obiekty luźne.
+Powierzchnia ma fale, pianę przy brzegach i kolor zależny od głębokości (shader `scripts/shaders/water.gdshader`).
+
+### Obiekty luźne
+
+Blok z polem `loose` nie trafia do siatki świata: po postawieniu staje się bryłą fizyczną, którą można pchać,
+kopnąć (lewy przycisk) i podnieść (prawy przycisk). W cieczy działa wyporność: gęstość poniżej 1 pływa, powyżej tonie.
+
+```lua
+loose = { shape = "box" | "ball" | "cylinder", size = 0.9, mass = 10, density = 0.6, bounce = 0.1, friction = 0.8 }
 ```
 
 Tekstura to plik PNG 16x16 w folderze moda albo wzór opisany danymi (bez rysowania):
@@ -118,7 +148,12 @@ Miejsce w kontenerze to `{ item = "apple", count = 3 }` albo pusta tabela `{}`.
 ## Świat
 
 ```lua
-engine.worldgen.config({ biome_scale = 1.0, beach_height = 7 })
+engine.worldgen.config({
+	biome_scale = 1.0, beach_height = 9,
+	sea_level = 8, water = "water",                 -- woda do tej wysokości (morza i jeziora)
+	lakes = { depth = 11, amount = 1.0 },           -- niecki jezior obniżające teren
+	caves = { tunnels = 1.0, caverns = 1.0, min_y = -56 },   -- jaskinie: tunele i komory
+})
 
 engine.worldgen.biome("meadow", {
 	name = "Łąki",
@@ -127,6 +162,7 @@ engine.worldgen.biome("meadow", {
 	top = "grass", filler = "dirt", depth = 3, stone = "stone",
 	beach = { top = "sand", filler = "sand" },        -- gdy teren jest nie wyżej niż beach_height
 	peak = { height = 34, top = "snow", filler = "stone" },  -- od tej wysokości
+	water_surface = "ice",                         -- powierzchnia wody w tym biomie zamarza
 	features = {
 		{ shape = "oak", trunk = "log", leaves = "leaves", height = { 4, 6 }, radius = 2, chance = 0.004 },
 		{ structure = "ruin", chance = 0.0004 },
@@ -157,6 +193,39 @@ Inne funkcje: `engine.worldgen.get_biome(klucz)` (tabela do zmiany), `remove_bio
 `add_plant(biom, {block, chance})`. Generator liczy się w C++ (na PC) z tych danych, więc
 własne biomy i struktury nie spowalniają gry.
 
+## Stworzenia
+
+Stworzenie to model z klockowych części (jak postać gracza), zachowanie i łup. Silnik sam animuje nogi,
+skrzydła i głowę oraz prowadzi proste AI; mody dokładają zachowania w Lua.
+
+```lua
+engine.entities.register("sheep", {
+	name = "Owca", health = 8, speed = 1.1, panic_speed = 2.8,
+	size = { 0.85, 1.2 },                         -- szerokość i wysokość kolizji
+	parts = {
+		body = { pivot = { 0, 0.62, 0 }, boxes = {
+			{ size = { 0.74, 0.58, 1.02 }, pos = { 0, 0.12, 0 }, color = "#eceae2", tag = "wool" },
+		} },
+		head = { parent = "body", pivot = { 0, 0.3, -0.5 }, look = true, boxes = { ... } },
+		leg_fl = { pivot = { -0.2, 0.42, -0.3 }, swing = 1, boxes = { ... } },
+		wing_l = { parent = "body", pivot = { ... }, wing = -1, boxes = { ... } },
+	},
+	ai = { wander = true, flee = true, follow = "wheat", swim = true, slow_fall = false, avoid_cliffs = true,
+		graze = { from = "grass", to = "dirt", chance = 0.5 } },
+	drops = { { item = "mutton", count = 1, max = 2, chance = 1.0, adult_only = true } },
+	spawn = { biomes = { "meadow" }, on = { "grass" }, group = { 2, 4 }, max = 6, babies = 0.15 },
+})
+```
+
+Przód modelu to -Z. `pivot` to punkt obrotu części (względem rodzica), `pos` klocka jest względem punktu
+obrotu. `swing` kołysze nogą przy chodzie, `wing` trzepocze przy spadaniu, `look` obraca głowę do gracza
+i schyla ją przy skubaniu. `tag` pozwala ukryć albo przekolorować klocki (`engine.entities.show/color`).
+Animacje klatkowe (`engine.animation.register`) działają też na części stworzeń (`engine.entities.animate`).
+
+AI: stanie, wędrówka, skubanie (`graze` zmienia blok pod spodem i wysyła zdarzenie `entity.graze`),
+ucieczka po zranieniu, podążanie za graczem z przedmiotem `follow`, pływanie i omijanie urwisk.
+Dalekie stworzenia są usypiane i wracają, gdy gracz się zbliży; wszystko zapisuje się w świecie.
+
 ## Haki: zmiana zachowania silnika
 
 Haki działają jak prefix i postfix w Harmony:
@@ -170,10 +239,14 @@ Wyższy priorytet działa wcześniej. Po `cancel` kolejne haki „before” się
 | Hak | Pola `ctx` |
 | --- | --- |
 | `block.break` | `pos`, `block` (id), `drops` (lista `{item, count}`, można zmienić), `item` (w ręce) |
+| `block.dig` | `pos`, `block`, `time` (sekundy kopania, można zmienić, np. narzędzia), `item` |
 | `block.place` | `pos`, `block` (można zmienić na inny), `slot` (1..8), `item` |
 | `item.use` | `item`, `slot`, a gdy celujesz w blok: `pos`, `normal`, `block` |
 | `player.damage` | `amount` (można zmienić), `cause` (`fall`, `hunger`, `void`, własne) |
 | `player.respawn` | `pos` (Vector3, można zmienić) |
+| `entity.damage` | `id`, `type`, `amount` (można zmienić), `cause` |
+| `entity.interact` | prawy przycisk na stworzeniu: `id`, `type`, `item`, `slot` |
+| `item.pickup` | gracz podchodzi do przedmiotu: `item`, `count`; ustaw `ctx.taken` (ile zabrano) |
 | `camera.update` | co klatkę (tylko `after`): `mode`, `yaw`, `pitch`, `distance`, `height`, `side`, `fov_offset` |
 
 ## Zdarzenia
@@ -186,6 +259,11 @@ Wyższy priorytet działa wcześniej. Po `cancel` kolejne haki „before” się
 | `tick` | `dt` (0.1 s), `time` (godzina) – 10 razy na sekundę |
 | `player.land` | `fall` (wysokość upadku w blokach), `speed` |
 | `player.death` | `cause`, `pos` |
+| `player.underwater` | `underwater` (oczy weszły pod ciecz albo z niej wyszły) |
+| `entity.spawn` | `id`, `type`, `pos` |
+| `entity.death` | `id`, `type`, `pos`, `cause`, `data` |
+| `entity.tick` | raz na sekundę dla każdego stworzenia: `id`, `type`, `state`, `pos`, `data` |
+| `entity.graze` | `id`, `type`, `pos` (blok, który stworzenie skubało) |
 
 ## API `engine`
 
@@ -205,9 +283,16 @@ Wyższy priorytet działa wcześniej. Po `cancel` kolejne haki „before” się
 | `engine.world.get_block(pos)`, `set_block(pos, id_lub_klucz)` | Bloki w świecie |
 | `engine.world.biome(pos)`, `biome_key(pos)`, `height(x, z)`, `time()`, `set_time(h)` | Świat |
 | `engine.player.position()`, `teleport(pos)`, `velocity()`, `push(v)` | Ruch gracza |
-| `engine.player.set(stat, v)`, `get(stat)` | Statystyki: `speed`, `jump`, `gravity`, `reach`, `auto_jump`, `max_health`, `spawn` |
+| `engine.player.set(stat, v)`, `get(stat)` | Statystyki: `speed`, `jump`, `gravity`, `reach`, `auto_jump`, `max_health`, `spawn`, `break_speed`, `swim_speed` |
 | `engine.player.health()`, `max_health()`, `set_health(v)`, `heal(n)`, `damage(n, przyczyna)` | Zdrowie |
-| `engine.player.target()`, `selected_item()` | Blok, w który celuje gracz; przedmiot w ręce |
+| `engine.player.target(z_cieczami)`, `selected_item()` | Blok, w który celuje gracz; przedmiot w ręce |
+| `engine.player.in_liquid()`, `eyes_in_liquid()` | Czy gracz pływa / ma głowę pod cieczą |
+| `engine.entities.register(rodzaj, def)`, `def(rodzaj)` | Stworzenia (content) |
+| `engine.entities.spawn(rodzaj, pos, dane, skala)`, `remove(id)`, `exists(id)`, `list(rodzaj, promień)` | Tworzenie i lista stworzeń |
+| `engine.entities.type/position/health/state/scale(id)`, `data(id)`, `set_data(id, k, v)` | Stan stworzenia i jego dane (zapisywane) |
+| `engine.entities.move_to(id, pos)`, `teleport(id, pos)`, `set_scale(id, s)`, `damage(id, n)`, `animate(id, nazwa)` | Sterowanie stworzeniem |
+| `engine.entities.show(id, tag, on)`, `color(id, tag, kolor)` | Wygląd części oznaczonych tagiem |
+| `engine.entities.drop(przedmiot, ile, pos)` | Przedmiot leżący na ziemi |
 | `engine.player.animate(nazwa)`, `stop_animation()`, `colors(t)` | Animacje i kolory postaci |
 | `engine.animation.register(nazwa, def)`, `override(stan, nazwa)` | Animacje klatkowe (content) i zamiana stanów `idle`, `walk`, `jump` |
 | `engine.camera.set(k, v)`, `get(k)`, `mode(m)` | Kamera: `mode` (`third`, `first`, `shoulder`, `top`), `distance`, `height`, `side`, `pitch`, `pitch_min`, `pitch_max`, `fov_offset` |
@@ -275,13 +360,22 @@ Mod „Plecak i postać” udostępnia `engine.require("backpack").give(przedmio
 | `modkit` | biblioteka dla innych modów |
 | `backpack` | kontenery, pasek, okno postaci, łup z bloków |
 | `ores` | bloki i przedmioty ze wzorów, rudy, struktury z warstw, zmiana bloku z innego moda |
-| `survival` | zdrowie i głód na ekranie, obrażenia od upadku, jedzenie przez `item.use` |
+| `survival` | zdrowie, głód i powietrze na ekranie, upadki i topienie, jedzenie przez `item.use` |
+| `animals` | owce, krowy, kurczaki: modele, AI, strzyżenie, dojenie, jajka, rozmnażanie, młode |
+| `loose` | obiekty luźne (skrzynie, beczki, piłki, głazy) i flaga luźności dla zwykłych bloków |
 | `emotes` | animacje klatkowe, zamiana animacji w miejscu, tryby kamery, hak kamery, kolory postaci |
 | `destructible` | ustawienie `block_toggles` i anulowanie kopania |
 
+## Bezpieczeństwo
+
+Każde wywołanie kodu moda ma limit czasu (liczony w instrukcjach Lua, około 0,1–0,3 s na hak i kilka
+sekund na wczytanie pliku) i limit pamięci (256 MB na wszystkie mody). Mod, który go przekroczy, np. przez
+pętlę bez końca, zostaje wyłączony do końca gry, a gracz dostaje komunikat. Pliki modów wczytywane są tylko
+jako tekst (bez binarnego bajtkodu), `pcall` nie połknie błędu limitu, korutyny też są pod limitem,
+a wspólnej metatabeli tekstów nie da się zmienić. Test: `godot --headless --path game -s tests/lua_guard.gd`.
+
 ## Co będzie dalej
 
-- Woda, jaskinie i dalekie widoki (generator dostanie nowe pola).
-- Własne stworzenia z modelami i animacjami.
 - Gra wieloosobowa: haki i dane modów synchronizowane przez serwer.
-- Limit czasu wykonania skryptów Lua (ochrona przed zawieszeniem gry przez błędny mod).
+- Narzędzia i rzemiosło (hak `block.dig` już pozwala zmieniać czas kopania).
+- Światło (pochodnie, ciemne jaskinie).

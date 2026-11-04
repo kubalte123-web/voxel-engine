@@ -31,7 +31,7 @@ engine.on("player.land", function(e)
 end)
 
 engine.on("player.death", function(e)
-	local why = ({ fall = "upadek", hunger = "głód", void = "upadek w pustkę" })[e.cause] or e.cause
+	local why = ({ fall = "upadek", hunger = "głód", void = "upadek w pustkę", drown = "utonięcie" })[e.cause] or e.cause
 	engine.ui.notify("Przyczyna: " .. why)
 end)
 
@@ -66,4 +66,24 @@ engine.hooks.before("item.use", function(ctx)
 	set_food(food + def.food)
 	engine.player.heal(def.food / 2)
 	show()
+end)
+
+-- Powietrze pod wodą: pasek pojawia się, gdy gracz się zanurzy; po wyczerpaniu topienie.
+local MAX_AIR = 10
+local air = MAX_AIR
+kit.every(1.0, function()
+	if engine.player.eyes_in_liquid() then
+		air = air - 1
+		if air <= 0 then
+			air = 0
+			engine.player.damage(math.ceil(2 * mult), "drown")
+		end
+	else
+		air = math.min(MAX_AIR, air + 3)
+	end
+	if air < MAX_AIR then
+		engine.ui.bar({ id = "zair", label = "Powietrze", value = air, max = MAX_AIR, color = "#7ac8f0" })
+	else
+		engine.ui.remove("zair")
+	end
 end)

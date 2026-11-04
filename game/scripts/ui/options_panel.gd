@@ -12,6 +12,9 @@ func _ready() -> void:
 	var web := OS.has_feature("web")
 	add_child(UI.slider_row("Zasięg widzenia", 2, s.max_render_distance(), 1, s.render_distance,
 		func(v): return "%d chunków" % int(v), func(v): s.render_distance = int(v); s.save_settings()))
+	add_child(UI.slider_row("Daleki widok", 0, 4, 1, s.far_view,
+		func(v): return "wyłączony" if int(v) == 0 else "%d× dalej" % (int(v) + 1), func(v): s.far_view = int(v); s.save_settings()))
+	add_child(UI.check_row("Fale na wodzie", s.water_waves, func(on): s.water_waves = on; s.save_settings()))
 	add_child(UI.slider_row("Pole widzenia", 55, 100, 1, s.fov,
 		func(v): return "%d°" % int(v), func(v): s.fov = v; s.save_settings()))
 	add_child(UI.slider_row("Czułość myszy", 0.2, 3.0, 0.1, s.mouse_sensitivity,

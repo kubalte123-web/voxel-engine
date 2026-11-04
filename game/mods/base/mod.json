@@ -1,9 +1,9 @@
 {
 	"id": "base",
 	"name": "Świat podstawowy",
-	"version": "0.3.0",
+	"version": "0.4.0",
 	"author": "Jakub Lewicki",
-	"description": "Bloki, teren i biomy: łąki z kwiatami, las, pustynia i ośnieżone góry. Wszystko opisane w content.lua, więc inne mody mogą to zmieniać. Ustawienia generowania zapisują się w świecie przy jego tworzeniu.",
+	"description": "Bloki, teren, woda i biomy: łąki z kwiatami, las, pustynia i ośnieżone góry, jeziora, morza i jaskinie. Tu są też właściwości bloków (twardość, grawitacja, ciecze). Wszystko opisane w content.lua, więc inne mody mogą to zmieniać.",
 	"required": true,
 	"settings": [
 		{
@@ -49,9 +49,26 @@
 			"type": "bool",
 			"default": true,
 			"world": true
+		},
+		{
+			"key": "water",
+			"label": "Morza i jeziora",
+			"type": "bool",
+			"default": true,
+			"world": true
+		},
+		{
+			"key": "caves",
+			"label": "Jaskinie",
+			"type": "bool",
+			"default": true,
+			"world": true
 		}
 	],
 	"content": [
 		"content.lua"
+	],
+	"scripts": [
+		"main.lua"
 	]
 }

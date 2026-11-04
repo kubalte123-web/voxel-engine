@@ -17,9 +17,13 @@ namespace godot {
 class VoxelMesher : public RefCounted {
 	GDCLASS(VoxelMesher, RefCounted)
 
-	Ref<FastNoiseLite> hills, detail, temperature, humidity, mountain;
+	Ref<FastNoiseLite> hills, detail, temperature, humidity, mountain, cave_a, cave_b, cave_c, lake;
 	int64_t seed = 0;
 	int beach = 7, window = 2, nb = 0, n_ores = 0;
+	int sea = -100000, water = -1, cave_min_y = -56;
+	bool caves = false;
+	double cave_tw = 0.055, cave_tc = 0.6, lake_depth = 0.0, lake_t = 0.3;
+	std::vector<int32_t> liquid;
 	double max_sum = 0.0;
 	std::vector<double> B, F, PL, O;
 	std::vector<int32_t> T;
@@ -32,11 +36,14 @@ protected:
 public:
 	// noises: [hills, detail, temperature, humidity, mountain]; spec: wynik WorldgenSpec.compile
 	void configure(const Array &noises, const Dictionary &spec, const PackedInt32Array &tiles,
-			const PackedInt32Array &props, int atlas_cols, int atlas_rows);
+			const PackedInt32Array &props, const PackedInt32Array &liquid, int atlas_cols, int atlas_rows);
 	// Zwraca [padded (34^3), blocks (32^3)]. own i neighbors[i] mogą być puste.
 	Array prepare(const Vector3i &cpos, const PackedByteArray &own, const Array &neighbors) const;
-	// Wynik: [vertices, normals, uvs, colors, indices, collision_faces]
+	// Wynik: [vertices, normals, uvs, colors, indices, collision_faces,
+	//         ciecz: vertices, normals, uvs (kierunek prądu), colors (piana, głębokość, brzeg fali, rodzaj), indices]
 	Array build(const PackedByteArray &padded) const;
+	// Daleki widok: wysokość i biom w siatce n x n co `step` bloków od (x0, z0): [h0, b0, h1, b1, ...]
+	PackedInt32Array heights(int x0, int z0, int step, int n) const;
 
 	struct Col { int h; int biome; };
 	Col column(int x, int z) const;
@@ -44,6 +51,7 @@ public:
 	int feature_at(int x, int z, int h, int biome) const;
 	int plant_at(int x, int z, int h, int biome) const;
 	void fill_padded(const Vector3i &cpos, uint8_t *out) const;
+	void carve_caves(uint8_t *out, int bx, int by, int bz, const std::vector<Col> &cols) const;
 };
 
 } // namespace godot

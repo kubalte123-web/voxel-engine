@@ -12,12 +12,15 @@ var fov := 72.0
 var show_debug := true
 var fullscreen := false
 var shadows := true
+var far_view := 3        # daleki widok: zasięg uproszczonego terenu jako wielokrotność zasięgu chunków (0 = wyłączony)
+var water_waves := true
 
 
 func _ready() -> void:
 	if OS.has_feature("web"):
 		render_distance = 4
 		shadows = false
+		far_view = 0
 	load_settings()
 	apply_window()
 
@@ -35,6 +38,8 @@ func load_settings() -> void:
 	fullscreen = cfg.get_value("video", "fullscreen", fullscreen)
 	shadows = cfg.get_value("video", "shadows", shadows)
 	show_debug = cfg.get_value("video", "show_debug", show_debug)
+	far_view = clampi(cfg.get_value("video", "far_view", far_view), 0, 4)
+	water_waves = cfg.get_value("video", "water_waves", water_waves)
 	mouse_sensitivity = cfg.get_value("controls", "mouse_sensitivity", mouse_sensitivity)
 	touch_sensitivity = cfg.get_value("controls", "touch_sensitivity", touch_sensitivity)
 
@@ -46,6 +51,8 @@ func save_settings() -> void:
 	cfg.set_value("video", "fullscreen", fullscreen)
 	cfg.set_value("video", "shadows", shadows)
 	cfg.set_value("video", "show_debug", show_debug)
+	cfg.set_value("video", "far_view", far_view)
+	cfg.set_value("video", "water_waves", water_waves)
 	cfg.set_value("controls", "mouse_sensitivity", mouse_sensitivity)
 	cfg.set_value("controls", "touch_sensitivity", touch_sensitivity)
 	cfg.save(PATH)

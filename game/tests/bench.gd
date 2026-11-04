@@ -17,12 +17,29 @@ func _run() -> void:
 	var spec := WorldgenSpec.compile(reg.worldgen, reg, 42)
 	print("BENCH bloki: %d, przedmioty: %d, biomy: %s, bledy: %s" % [reg.count(), reg.items.size(), spec.names, spec.errors])
 	var terrain := Terrain.new(42, spec)
+	print("BENCH parametry: ", spec.params)
+	# kolumny pod poziomem morza w próbce
+	var low := 0
+	for i in 2000:
+		if terrain.height(i * 3 - 3000, (i * 7) % 900 - 450) < 7:
+			low += 1
+	print("BENCH kolumny pod wodą: ", low, "/2000")
 	var cps: Array[Vector3i] = []
 	for i in 12:
 		cps.append(Vector3i(i * 7 - 40, 0, (i * 13) % 50 - 25))
 	cps.append(Vector3i(3, 1, -2))
 	cps.append(Vector3i(5, -1, 4))
 	cps.append(Vector3i(-3, -2, 7))
+	cps.append(Vector3i(1, -1, 1))
+	cps.append(Vector3i(-6, -1, 2))
+	# chunki z wodą: szukamy kolumny pod poziomem morza
+	for i in 4000:
+		var x := i * 5 - 10000
+		var z := (i * 37) % 2000 - 1000
+		if terrain.height(x, z) < 4:
+			cps.append(Vector3i(floori(x / 32.0), 0, floori(z / 32.0)))
+			if cps.size() > 20:
+				break
 	var chunks: Array[PackedByteArray] = []
 	var t0 := Time.get_ticks_usec()
 	for c in cps:
@@ -32,7 +49,7 @@ func _run() -> void:
 	var faces_gd := 0
 	var meshes_gd := []
 	for c in chunks:
-		var a := GDMesher.build(c, reg.tiles, Registry.ATLAS_COLS, reg.atlas_rows, reg.props)
+		var a := GDMesher.build(c, reg.tiles, Registry.ATLAS_COLS, reg.atlas_rows, reg.props, reg.liquid)
 		meshes_gd.append(a)
 		faces_gd += (a[0] as PackedVector3Array).size()
 	var gd := (Time.get_ticks_usec() - t0) / 1000.0 / cps.size()
@@ -40,17 +57,21 @@ func _run() -> void:
 	print("BENCH siatka GDScript: %.2f ms/chunk" % gd)
 	var counts := {}
 	for c in chunks:
-		for k in ["log", "leaves", "cactus", "snow", "tall_grass", "flower_red", "sand", "coal_ore", "iron_ore", "ruby_ore", "cobblestone"]:
+		for k in ["log", "leaves", "cactus", "snow", "tall_grass", "flower_red", "sand", "coal_ore", "iron_ore", "ruby_ore", "cobblestone", "water", "ice", "gravel"]:
 			var id := reg.id_of(k)
 			if id > 0:
 				counts[k] = counts.get(k, 0) + c.count(id)
+	var air_below := 0
+	for c in chunks:
+		air_below += c.count(0)
+	counts["powietrze"] = air_below
 	print("BENCH bloki w probce: ", counts)
 	if not ClassDB.class_exists("VoxelMesher"):
 		print("BENCH brak rdzenia C++")
 		quit()
 		return
 	var m: Object = ClassDB.instantiate("VoxelMesher")
-	m.call("configure", terrain.native_noises(), spec, reg.tiles, reg.props, Registry.ATLAS_COLS, reg.atlas_rows)
+	m.call("configure", terrain.native_noises(), spec, reg.tiles, reg.props, reg.liquid, Registry.ATLAS_COLS, reg.atlas_rows)
 	var same := true
 	var diff_at := ""
 	t0 = Time.get_ticks_usec()
@@ -69,13 +90,30 @@ func _run() -> void:
 			diff_at += " %s(%d)" % [str(cps[i]), n]
 	t0 = Time.get_ticks_usec()
 	var faces_c := 0
+	var water_faces := 0
 	var mesh_same := true
 	for i in chunks.size():
 		var a: Array = m.call("build", chunks[i])
 		faces_c += (a[0] as PackedVector3Array).size()
-		if a[0] != meshes_gd[i][0] or a[4] != meshes_gd[i][4] or a[5] != meshes_gd[i][5]:
-			mesh_same = false
+		for k in [0, 1, 4, 5, 6, 7, 8, 9, 10]:
+			if a[k] != meshes_gd[i][k]:
+				if mesh_same:
+					print("BENCH roznica w tablicy ", k, " chunk ", cps[i], " rozmiary ", a[k].size(), "/", meshes_gd[i][k].size())
+				mesh_same = false
+		water_faces += (a[6] as PackedVector3Array).size() / 4
+		var ua: PackedVector2Array = a[2]
+		var ub: PackedVector2Array = meshes_gd[i][2]
+		for u in ua.size():
+			if not ua[u].is_equal_approx(ub[u]):
+				mesh_same = false
+				break
+		var ca: PackedColorArray = a[3]
+		var cb: PackedColorArray = meshes_gd[i][3]
+		for u in ca.size():
+			if not ca[u].is_equal_approx(cb[u]):
+				mesh_same = false
+				break
 	var cpp := (Time.get_ticks_usec() - t0) / 1000.0 / cps.size()
 	print("BENCH generowanie C++: %.2f ms/chunk, swiat zgodny z GDScript: %s%s" % [gen_c, same, diff_at])
-	print("BENCH siatka C++: %.2f ms/chunk, siatki zgodne: %s (%d/%d)" % [cpp, mesh_same, faces_c, faces_gd])
+	print("BENCH siatka C++: %.2f ms/chunk, siatki zgodne: %s (%d/%d), ściany wody: %d" % [cpp, mesh_same, faces_c, faces_gd, water_faces])
 	quit()

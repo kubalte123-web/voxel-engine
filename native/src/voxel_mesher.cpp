@@ -17,9 +17,10 @@ constexpr int S = 32;
 constexpr int P = S + 2;
 
 constexpr uint8_t AIR = 0;
-constexpr int P_OPAQUE = 1, P_CROSS = 2, P_SOLID = 4;
+constexpr int P_OPAQUE = 1, P_CROSS = 2, P_SOLID = 4, P_LIQUID = 8;
 // układ danych z game/scripts/content/worldgen_spec.gd
-constexpr int BS = 19, FS = 11, OS = 6;
+constexpr int BS = 21, FS = 11, OS = 6;
+constexpr int CG = 11; // punkty siatki szumu jaskiń na oś
 
 const int NORMALS[6][3] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 } };
 const int CORNERS[6][4][3] = {
@@ -70,18 +71,23 @@ void copy_array(V &dst, const A &src) {
 } // namespace
 
 void VoxelMesher::_bind_methods() {
-	ClassDB::bind_method(D_METHOD("configure", "noises", "spec", "tiles", "props", "atlas_cols", "atlas_rows"), &VoxelMesher::configure);
+	ClassDB::bind_method(D_METHOD("configure", "noises", "spec", "tiles", "props", "liquid", "atlas_cols", "atlas_rows"), &VoxelMesher::configure);
 	ClassDB::bind_method(D_METHOD("prepare", "cpos", "own", "neighbors"), &VoxelMesher::prepare);
 	ClassDB::bind_method(D_METHOD("build", "padded"), &VoxelMesher::build);
+	ClassDB::bind_method(D_METHOD("heights", "x0", "z0", "step", "n"), &VoxelMesher::heights);
 }
 
 void VoxelMesher::configure(const Array &noises, const Dictionary &spec, const PackedInt32Array &p_tiles,
-		const PackedInt32Array &p_props, int p_cols, int p_rows) {
+		const PackedInt32Array &p_props, const PackedInt32Array &p_liquid, int p_cols, int p_rows) {
 	hills = noises[0];
 	detail = noises[1];
 	temperature = noises[2];
 	humidity = noises[3];
 	mountain = noises[4];
+	cave_a = noises[5];
+	cave_b = noises[6];
+	cave_c = noises[7];
+	lake = noises[8];
 	copy_array(B, PackedFloat64Array(spec["biomes"]));
 	copy_array(F, PackedFloat64Array(spec["features"]));
 	copy_array(PL, PackedFloat64Array(spec["plants"]));
@@ -94,6 +100,15 @@ void VoxelMesher::configure(const Array &noises, const Dictionary &spec, const P
 	nb = int(prm[3]);
 	max_sum = prm[4];
 	n_ores = int(prm[5]);
+	sea = int(prm[6]);
+	water = int(prm[7]);
+	caves = prm[8] > 0.5;
+	cave_tw = prm[9];
+	cave_tc = prm[10];
+	cave_min_y = int(prm[11]);
+	lake_depth = prm[12];
+	lake_t = prm[13];
+	copy_array(liquid, p_liquid);
 	copy_array(tiles, p_tiles);
 	copy_array(props, p_props);
 	atlas_cols = p_cols > 0 ? p_cols : 1;
@@ -122,13 +137,38 @@ VoxelMesher::Col VoxelMesher::column(int x, int z) const {
 	amp /= wsum;
 	rough /= wsum;
 	mount /= wsum;
-	const double h = base + double(hills->get_noise_2d(x, z)) * amp + double(detail->get_noise_2d(x, z)) * rough
+	double h = base + double(hills->get_noise_2d(x, z)) * amp + double(detail->get_noise_2d(x, z)) * rough
 			+ mount * (double(mountain->get_noise_2d(x, z)) * 0.5 + 0.5);
+	if (lake_depth > 0.0) {
+		const double v = double(lake->get_noise_2d(x, z));
+		double t = (v - lake_t) / ((lake_t + 0.18) - lake_t);
+		t = t < 0.0 ? 0.0 : (t > 1.0 ? 1.0 : t);
+		h -= t * t * (3.0 - 2.0 * t) * lake_depth;
+	}
 	return { int(std::round(h)), best };
 }
 
+PackedInt32Array VoxelMesher::heights(int x0, int z0, int step, int n) const {
+	PackedInt32Array out;
+	out.resize(n * n * 2);
+	int32_t *o = out.ptrw();
+	for (int j = 0; j < n; j++)
+		for (int i = 0; i < n; i++) {
+			const Col c = nb > 0 ? column(x0 + i * step, z0 + j * step) : Col{ 0, 0 };
+			o[(i + n * j) * 2] = c.h;
+			o[(i + n * j) * 2 + 1] = c.biome;
+		}
+	return out;
+}
+
 int VoxelMesher::block_for(int wy, int h, int biome) const {
-	if (wy > h) return AIR;
+	if (wy > h) {
+		if (wy <= sea) {
+			const int ice = int(B[biome * BS + 19]);
+			return (wy == sea && ice >= 0) ? ice : water;
+		}
+		return AIR;
+	}
 	const double *b = &B[biome * BS];
 	int top = int(b[6]), filler = int(b[7]);
 	if (h >= b[12]) { top = int(b[13]); filler = int(b[14]); }
@@ -175,7 +215,7 @@ void VoxelMesher::fill_padded(const Vector3i &cpos, uint8_t *out) const {
 		for (int x = 0; x < P; x++) {
 			const Col c = column(bx + x, bz + z);
 			cols[x + P * z] = c;
-			const int top = c.h - by;
+			const int top = (c.h > sea ? c.h : sea) - by;
 			if (top >= 0) {
 				const int ymax = top + 1 < P ? top + 1 : P;
 				for (int y = 0; y < ymax; y++) out[idx(x, y, z)] = uint8_t(block_for(by + y, c.h, c.biome));
@@ -187,6 +227,7 @@ void VoxelMesher::fill_padded(const Vector3i &cpos, uint8_t *out) const {
 			}
 		}
 	}
+	if (caves) carve_caves(out, bx, by, bz, cols);
 	// rudy: w każdej komórce 16^3 najwyżej jedna żyła
 	for (int i = 0; i < n_ores; i++) {
 		const double *o = &O[i * OS];
@@ -275,6 +316,63 @@ void VoxelMesher::fill_padded(const Vector3i &cpos, uint8_t *out) const {
 	}
 }
 
+static inline double lerpd(double a, double b, double t) { return a + (b - a) * t; }
+
+static inline double tri(const std::vector<double> &n, int g, double tx, double ty, double tz) {
+	const double c00 = lerpd(n[g], n[g + 1], tx);
+	const double c10 = lerpd(n[g + CG], n[g + CG + 1], tx);
+	const double c01 = lerpd(n[g + CG * CG], n[g + CG * CG + 1], tx);
+	const double c11 = lerpd(n[g + CG * CG + CG], n[g + CG * CG + CG + 1], tx);
+	return lerpd(lerpd(c00, c10, ty), lerpd(c01, c11, ty), tz);
+}
+
+void VoxelMesher::carve_caves(uint8_t *out, int bx, int by, int bz, const std::vector<Col> &cols) const {
+	int maxh = -100000;
+	for (const Col &c : cols) maxh = c.h > maxh ? c.h : maxh;
+	if (by > maxh || by + P - 1 < cave_min_y) return;
+	const int gx0 = int(std::floor(double(bx) / 4.0)), gy0 = int(std::floor(double(by) / 4.0)), gz0 = int(std::floor(double(bz) / 4.0));
+	std::vector<double> na(CG * CG * CG), nb2(CG * CG * CG), nc(CG * CG * CG);
+	for (int k = 0; k < CG; k++)
+		for (int j = 0; j < CG; j++)
+			for (int i = 0; i < CG; i++) {
+				const double wx = double((gx0 + i) * 4);
+				const double wy = double((gy0 + j) * 4) * 1.5;
+				const double wz = double((gz0 + k) * 4);
+				const int gi = i + CG * (j + CG * k);
+				na[gi] = cave_a->get_noise_3d(wx, wy, wz);
+				nb2[gi] = cave_b->get_noise_3d(wx, wy, wz);
+				nc[gi] = cave_c->get_noise_3d(wx, wy, wz);
+			}
+	for (int z = 0; z < P; z++) {
+		for (int x = 0; x < P; x++) {
+			const int h = cols[x + P * z].h;
+			const int top = h > sea + 3 ? h : h - 5;
+			const int ymax = (P - 1) < (top - by) ? (P - 1) : (top - by);
+			const int ymin = 0 > (cave_min_y - by) ? 0 : (cave_min_y - by);
+			if (ymax < ymin) continue;
+			const int rx = (bx + x) - gx0 * 4, rz = (bz + z) - gz0 * 4;
+			const int ix = rx / 4, iz = rz / 4;
+			const double tx = double(rx - ix * 4) / 4.0, tz = double(rz - iz * 4) / 4.0;
+			for (int y = ymin; y <= ymax; y++) {
+				const int i = idx(x, y, z);
+				const uint8_t cur = out[i];
+				if (cur == 0 || int(cur) == water) continue;
+				const int ry = (by + y) - gy0 * 4;
+				const int iy = ry / 4;
+				const double ty = double(ry - iy * 4) / 4.0;
+				const int g = ix + CG * (iy + CG * iz);
+				const double a = tri(na, g, tx, ty, tz);
+				const double b = tri(nb2, g, tx, ty, tz);
+				const double c = tri(nc, g, tx, ty, tz);
+				if ((std::fabs(a) < cave_tw && std::fabs(b) < cave_tw) || c > cave_tc) {
+					out[i] = 0;
+					if (by + y == h && y + 1 < P) out[i + P] = 0;
+				}
+			}
+		}
+	}
+}
+
 Array VoxelMesher::prepare(const Vector3i &cpos, const PackedByteArray &own, const Array &neighbors) const {
 	PackedByteArray padded;
 	padded.resize(P * P * P);
@@ -322,13 +420,14 @@ Array VoxelMesher::prepare(const Vector3i &cpos, const PackedByteArray &own, con
 }
 
 Array VoxelMesher::build(const PackedByteArray &padded) const {
-	PackedVector3Array verts, norms, coll;
-	PackedVector2Array uvs;
-	PackedColorArray cols;
-	PackedInt32Array indices;
+	PackedVector3Array verts, norms, coll, wverts, wnorms;
+	PackedVector2Array uvs, wuvs;
+	PackedColorArray cols, wcols;
+	PackedInt32Array indices, windices;
 	Array out;
 	auto finish = [&]() {
 		out.append(verts); out.append(norms); out.append(uvs); out.append(cols); out.append(indices); out.append(coll);
+		out.append(wverts); out.append(wnorms); out.append(wuvs); out.append(wcols); out.append(windices);
 		return out;
 	};
 	if (padded.size() != P * P * P) return finish();
@@ -338,13 +437,17 @@ Array VoxelMesher::build(const PackedByteArray &padded) const {
 	auto prop = [&](uint8_t b) -> int { return b < prop_entries ? props[b] : (P_OPAQUE | P_SOLID); };
 	const int tile_entries = int(tiles.size());
 	auto tile_of = [&](int ti) { return ti < tile_entries ? tiles[ti] : 0; };
+	const int liq_entries = int(liquid.size());
+	auto lq = [&](int i) -> int { const uint8_t b = p[i]; return b < liq_entries ? liquid[b] : 0; };
 
-	int air = 0;
-	for (int i = 0; i < P * P * P; i++) air += (p[i] == 0);
-	if (air == 0 || air == P * P * P) return finish();
-
+	int air = 0, opaque = 0;
 	std::vector<uint8_t> op(P * P * P);
-	for (int i = 0; i < P * P * P; i++) op[i] = (prop(p[i]) & P_OPAQUE) ? 1 : 0;
+	for (int i = 0; i < P * P * P; i++) {
+		air += (p[i] == 0);
+		op[i] = (prop(p[i]) & P_OPAQUE) ? 1 : 0;
+		opaque += op[i];
+	}
+	if (opaque == P * P * P || air == P * P * P) return finish();
 
 	const float iu = 1.0f / float(atlas_cols);
 	const float iv = 1.0f / float(atlas_rows);
@@ -357,9 +460,90 @@ Array VoxelMesher::build(const PackedByteArray &padded) const {
 	for (int z = 1; z <= S; z++) {
 		for (int y = 1; y <= S; y++) {
 			for (int x = 1; x <= S; x++) {
-				const uint8_t b = p[idx(x, y, z)];
+				const int ci = idx(x, y, z);
+				const uint8_t b = p[ci];
 				if (b == 0) continue;
 				const int bp = prop(b);
+				if (bp & P_LIQUID) {
+					// ---------- ciecz: osobna siatka z gładką powierzchnią ----------
+					const int lv = lq(ci);
+					const int kind = lv / 16;
+					auto same = [&](int j) { const int w = lq(j); return w != 0 && w / 16 == kind; };
+					auto hgt = [&](int w) { return double(w % 16) / 8.0 * 0.9; };
+					const bool full_above = same(idx(x, y + 1, z));
+					double ch[2][2];
+					double foam[2][2];
+					for (int cz = 0; cz < 2; cz++) {
+						for (int cx = 0; cx < 2; cx++) {
+							double sum = 0.0;
+							int n = 0;
+							bool full = full_above;
+							bool solid = false;
+							for (int dz = cz - 1; dz <= cz; dz++) {
+								for (int dx = cx - 1; dx <= cx; dx++) {
+									const int j = idx(x + dx, y, z + dz);
+									if (same(j)) {
+										if (same(j + P)) full = true;
+										sum += hgt(lq(j));
+										n++;
+									} else if (!(prop(p[j]) & P_SOLID)) {
+										n++;
+									} else {
+										solid = true;
+									}
+								}
+							}
+							ch[cx][cz] = full ? 1.0 : sum / double(n > 0 ? n : 1);
+							foam[cx][cz] = solid ? 1.0 : 0.0;
+						}
+					}
+					int d = 0;
+					for (int yy = y - 1; yy >= 0 && same(idx(x, yy, z)); yy--) d++;
+					const double depth = (d + 1) / 8.0 > 1.0 ? 1.0 : (d + 1) / 8.0;
+					const double flow_foam = (lv % 16) < 8 ? 0.35 : 0.0;
+					const float kind_a = float(kind) / 7.0f;
+					if (!full_above) {
+						const int corner[4][2] = { { 0, 0 }, { 0, 1 }, { 1, 1 }, { 1, 0 } };
+						const double fx = (ch[0][0] + ch[0][1]) - (ch[1][0] + ch[1][1]);
+						const double fz = (ch[0][0] + ch[1][0]) - (ch[0][1] + ch[1][1]);
+						const int base = wverts.size();
+						for (int k = 0; k < 4; k++) {
+							const int cx = corner[k][0], cz = corner[k][1];
+							wverts.push_back(Vector3(float(double(x - 1 + cx)), float(double(y - 1) + ch[cx][cz]), float(double(z - 1 + cz))));
+							wnorms.push_back(Vector3(0, 1, 0));
+							wuvs.push_back(Vector2(float(fx), float(fz)));
+							const double f = foam[cx][cz] > flow_foam ? foam[cx][cz] : flow_foam;
+							wcols.push_back(Color(float(f), float(depth), 1.0f, kind_a));
+						}
+						static const int Q[6] = { 0, 2, 1, 0, 3, 2 };
+						for (int i = 0; i < 6; i++) windices.push_back(base + Q[i]);
+					}
+					for (int f = 0; f < 6; f++) {
+						if (f == 2) continue;
+						const int *nn = NORMALS[f];
+						const int j = idx(x + nn[0], y + nn[1], z + nn[2]);
+						if (same(j) || op[j]) continue;
+						double top[4];
+						bool any = f == 3;
+						for (int k = 0; k < 4; k++) {
+							const int *c = CORNERS[f][k];
+							top[k] = c[1] == 1 ? ch[c[0]][c[2]] : 0.0;
+							if (top[k] > 0.0) any = true;
+						}
+						if (!any) continue;
+						const int base = wverts.size();
+						for (int k = 0; k < 4; k++) {
+							const int *c = CORNERS[f][k];
+							wverts.push_back(Vector3(float(double(x - 1 + c[0])), float(double(y - 1) + top[k]), float(double(z - 1 + c[2]))));
+							wnorms.push_back(Vector3(float(nn[0]), float(nn[1]), float(nn[2])));
+							wuvs.push_back(Vector2(0, 0));
+							wcols.push_back(Color(0.0f, float(depth), c[1] == 1 && f != 3 ? 1.0f : 0.0f, kind_a));
+						}
+						static const int Q[6] = { 0, 2, 1, 0, 3, 2 };
+						for (int i = 0; i < 6; i++) windices.push_back(base + Q[i]);
+					}
+					continue;
+				}
 				if (bp & P_CROSS) {
 					const int tile = tile_of(b * 6);
 					for (int pl = 0; pl < 2; pl++) {

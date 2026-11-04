@@ -8,6 +8,7 @@ signal health_changed(value: float, max_value: float)
 signal died(cause: String)
 
 var world: World
+var entities: EntityManager
 var model: CharacterModel
 var pivot: Node3D
 var spring: SpringArm3D
@@ -25,6 +26,16 @@ var target: Dictionary = {}
 var frozen := true
 var ui_blocked := false  # otwarte okno moda: gracz nie reaguje na mysz
 var health := 20.0
+var in_liquid := false     # ciało w cieczy (pływanie)
+var eyes_in_liquid := false
+var digging := false       # przycisk kopania wciśnięty
+var dig_pos := Vector3i(0, -99999, 0)
+var dig_time := 0.0        # ile sekund trzeba kopać bieżący blok (-1 = nie da się)
+var dig_progress := 0.0
+var dig_cooldown := 0.0
+var swing_timer := 0.0
+var crack: MeshInstance3D
+static var crack_mats: Array[StandardMaterial3D] = []
 var fall_top := 0.0      # najwyższy punkt od oderwania od ziemi
 var was_on_floor := true
 var _rng := RandomNumberGenerator.new()
@@ -51,6 +62,8 @@ func _ready() -> void:
 	cs.position.y = 0.9
 	add_child(cs)
 	floor_snap_length = 0.3
+	collision_layer = 8          # gracz
+	collision_mask = 1 | 4       # świat i obiekty luźne (stworzenia przechodzą obok)
 
 	model = CharacterModel.new()
 	add_child(model)
@@ -77,6 +90,41 @@ func _ready() -> void:
 	highlight.visible = false
 	highlight.top_level = true
 	add_child(highlight)
+
+	crack = MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3.ONE * 1.006
+	crack.mesh = bm
+	crack.top_level = true
+	crack.visible = false
+	crack.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(crack)
+	if crack_mats.is_empty():
+		crack_mats = _make_crack_materials()
+
+
+## Pięć etapów pęknięć rysowanych w kodzie: coraz więcej ciemnych rys.
+static func _make_crack_materials() -> Array[StandardMaterial3D]:
+	var out: Array[StandardMaterial3D] = []
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 99
+	var img := Image.create(16, 16, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	for stage in 5:
+		for line in 3 + stage * 2:
+			var x := rng.randi_range(2, 13)
+			var y := rng.randi_range(2, 13)
+			for k in 2 + stage:
+				img.set_pixel(clampi(x, 0, 15), clampi(y, 0, 15), Color(0.05, 0.04, 0.03, 0.85))
+				x += rng.randi_range(-1, 1)
+				y += rng.randi_range(-1, 1)
+		var m := StandardMaterial3D.new()
+		m.albedo_texture = ImageTexture.create_from_image(img.duplicate())
+		m.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		out.append(m)
+	return out
 
 
 static func _wire_cube() -> ArrayMesh:
@@ -110,13 +158,15 @@ func _unhandled_input(event: InputEvent) -> void:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 			return
 		if event.button_index == MOUSE_BUTTON_LEFT:
-			break_block()
+			start_digging()
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
-			place_block()
+			use_item()
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			select((selected + hotbar_size() - 1) % hotbar_size())
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			select((selected + 1) % hotbar_size())
+	elif event is InputEventMouseButton and not event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		stop_digging()
 	elif event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		look(event.relative * mouse_sensitivity)
 	elif event.is_action_pressed("toggle_view"):
@@ -163,7 +213,7 @@ func _cam(key: String) -> float:
 ## Statystyki gracza: wartość domyślna albo nadpisana przez mod (engine.player.set).
 func stat(name: String) -> Variant:
 	var defaults := {"speed": SPEED, "jump": JUMP, "gravity": GRAVITY, "reach": REACH, "auto_jump": true,
-		"max_health": MAX_HEALTH, "spawn": null}
+		"max_health": MAX_HEALTH, "spawn": null, "break_speed": 1.0, "swim_speed": 1.0}
 	return Mods.player_stats.get(name, defaults.get(name))
 
 
@@ -228,9 +278,27 @@ func _physics_process(delta: float) -> void:
 		dir = dir.normalized()
 
 	var speed := float(stat("speed"))
-	velocity.x = lerpf(velocity.x, dir.x * speed, minf(1.0, delta * 12.0))
-	velocity.z = lerpf(velocity.z, dir.z * speed, minf(1.0, delta * 12.0))
-	if is_on_floor():
+	var reg := Blocks.reg
+	var feet := Vector3i(floori(global_position.x), floori(global_position.y + 0.3), floori(global_position.z))
+	var body_cell := Vector3i(feet.x, floori(global_position.y + 0.9), feet.z)
+	in_liquid = reg.is_liquid(world.get_block(feet)) or reg.is_liquid(world.get_block(body_cell))
+	var eye := camera.global_position if camera_mode() == "first" else global_position + Vector3(0, 1.6, 0)
+	eyes_in_liquid = reg.is_liquid(world.get_block(Vector3i(eye.floor())))
+	var flow := Vector3.ZERO
+	if in_liquid:
+		speed *= 0.55 * float(stat("swim_speed"))
+		flow = world.liquids.flow_at(feet) * 2.2
+	velocity.x = lerpf(velocity.x, dir.x * speed + flow.x, minf(1.0, delta * 12.0))
+	velocity.z = lerpf(velocity.z, dir.z * speed + flow.z, minf(1.0, delta * 12.0))
+	if in_liquid:
+		# pływanie: lekkie tonięcie, Spacja wynosi w górę, przy brzegu wyskok na ląd
+		var up := (Input.is_action_pressed("jump") and not ui_blocked) or touch_jump
+		var want_y := 3.2 if up else -1.2
+		velocity.y = lerpf(velocity.y, want_y + flow.y, minf(1.0, delta * 4.0))
+		if up and is_on_wall() and dir.length() > 0.3:
+			velocity.y = 6.0
+		reset_fall()
+	elif is_on_floor():
 		var want_jump := (Input.is_action_pressed("jump") and not ui_blocked) or touch_jump
 		# automatyczny skok na stopień o wysokości jednego bloku
 		if dir.length() > 0.3 and is_on_wall() and bool(stat("auto_jump")):
@@ -242,6 +310,14 @@ func _physics_process(delta: float) -> void:
 	var fall_speed := -velocity.y
 	move_and_slide()
 	_track_fall(fall_speed)
+	# pchanie obiektów luźnych
+	for i in get_slide_collision_count():
+		var col := get_slide_collision(i)
+		var body := col.get_collider()
+		if body is RigidBody3D:
+			var push := -col.get_normal()
+			push.y = 0.0
+			body.apply_central_impulse(push * 3.0 * delta * body.mass)
 
 	if global_position.y < -80.0:
 		die("void")
@@ -252,8 +328,9 @@ func _physics_process(delta: float) -> void:
 		model.rotation.y = lerp_angle(model.rotation.y, target_yaw, minf(1.0, delta * 10.0))
 	elif camera_mode() == "first":
 		model.rotation.y = yaw
-	model.animate(delta, hspeed, is_on_floor(), pitch)
+	model.animate(delta, hspeed, is_on_floor() or in_liquid, pitch)
 	_update_target()
+	_update_digging(delta)
 
 
 # ---------- zdrowie, upadki, śmierć ----------
@@ -319,6 +396,16 @@ func respawn() -> void:
 	Mods.after("player.respawn", ctx)
 
 
+## Cel z uwzględnieniem cieczy (np. dla wiadra).
+func target_with_liquids() -> Dictionary:
+	var head := global_position + Vector3(0, 1.55, 0)
+	var reach := float(stat("reach"))
+	var r: Dictionary = world.raycast(camera.global_position, -camera.global_basis.z, spring.spring_length + reach + 1.0, true)
+	if r.get("hit", false) and (Vector3(r.pos) + Vector3(0.5, 0.5, 0.5)).distance_to(head) <= reach + 0.5:
+		return r
+	return {}
+
+
 func _update_target() -> void:
 	var origin := camera.global_position
 	var dir := -camera.global_basis.z
@@ -332,6 +419,94 @@ func _update_target() -> void:
 	else:
 		target = {}
 		highlight.visible = false
+
+
+# ---------- kopanie w czasie ----------
+
+## Stworzenie albo obiekt luźny pod celownikiem, jeśli jest bliżej niż blok.
+func entity_target() -> Dictionary:
+	if entities == null:
+		return {}
+	var reach := float(stat("reach"))
+	var e := entities.pick(camera.global_position, -camera.global_basis.z, spring.spring_length + reach + 1.0)
+	if e.is_empty():
+		return {}
+	var node: Node3D = e.node
+	if node.global_position.distance_to(global_position + Vector3(0, 1.0, 0)) > reach + 1.0:
+		return {}
+	if not target.is_empty() and float(target.get("dist", 999.0)) < float(e.dist) - 0.3:
+		return {}
+	return e
+
+
+func start_digging() -> void:
+	var e := entity_target()
+	if not e.is_empty():
+		model.do_swing()
+		var node: Node3D = e.node
+		if node is Creature:
+			var it := str(current_item().get("item", ""))
+			var dmg := float(Blocks.reg.items.get(it, {}).get("data", {}).get("damage", 1.0)) if it != "" else 1.0
+			node.hit(dmg, global_position, "player")
+		elif node is Prop:
+			node.kick(-camera.global_basis.z, 6.0)
+		return
+	digging = true
+	dig_pos = Vector3i(0, -99999, 0)
+
+
+func stop_digging() -> void:
+	digging = false
+	dig_progress = 0.0
+	dig_pos = Vector3i(0, -99999, 0)
+	crack.visible = false
+
+
+## Czas kopania bloku: twardość z definicji bloku podzielona przez szybkość kopania gracza.
+## Hak „block.dig” może go zmienić (np. narzędzia) albo zabronić kopania (cancel).
+func _dig_time(pos: Vector3i) -> float:
+	var block := world.get_block(pos)
+	var hd := Blocks.reg.hardness[block] if block < Blocks.reg.hardness.size() else 1.0
+	if hd < 0.0:
+		return -1.0
+	var t := hd / maxf(0.01, float(stat("break_speed")))
+	if Mods.has_hook("before", "block.dig"):
+		var ctx := Mods.before("block.dig", {"pos": pos, "block": block, "time": t, "item": str(current_item().get("item", ""))})
+		if ctx.get("cancel", false):
+			return -1.0
+		t = float(ctx.get("time", t))
+	return t
+
+
+func _update_digging(delta: float) -> void:
+	dig_cooldown = maxf(0.0, dig_cooldown - delta)
+	if not digging or target.is_empty() or ui_blocked:
+		crack.visible = false
+		if target.is_empty():
+			dig_progress = 0.0
+		return
+	if target.pos != dig_pos:
+		dig_pos = target.pos
+		dig_progress = 0.0
+		dig_time = _dig_time(dig_pos)
+	if dig_time < 0.0 or dig_cooldown > 0.0:
+		crack.visible = false
+		return
+	swing_timer -= delta
+	if swing_timer <= 0.0:
+		swing_timer = 0.3
+		model.do_swing()
+	dig_progress += delta / maxf(dig_time, 0.0001)
+	if dig_progress >= 1.0 or dig_time <= 0.05:
+		break_block()
+		dig_progress = 0.0
+		dig_pos = Vector3i(0, -99999, 0)
+		dig_cooldown = 0.15 if dig_time > 0.05 else 0.25
+		crack.visible = false
+		return
+	crack.visible = true
+	crack.global_position = Vector3(dig_pos) + Vector3(0.5, 0.5, 0.5)
+	crack.material_override = crack_mats[clampi(int(dig_progress * 5.0), 0, 4)]
 
 
 ## Kopanie przechodzi przez haki modów: „block.break” przed (można anulować, zmienić łup) i po.
@@ -354,6 +529,20 @@ func break_block() -> void:
 
 ## Prawy przycisk: przedmiot-blok stawia blok, inny przedmiot wywołuje hak „item.use”.
 func use_item() -> void:
+	var e := entity_target()
+	if not e.is_empty():
+		var node: Node3D = e.node
+		if node is Creature:
+			var ctx := Mods.before("entity.interact", {"id": node.id, "type": node.type,
+				"item": str(current_item().get("item", "")), "slot": selected + 1})
+			if not ctx.get("cancel", false):
+				Mods.after("entity.interact", ctx)
+			model.do_swing()
+			return
+		if node is Prop:
+			if entities.pickup_prop(node):
+				model.do_swing()
+			return
 	var it := current_item()
 	var key := str(it.get("item", ""))
 	if key != "" and Blocks.reg.item_block(key) <= 0:
@@ -387,6 +576,13 @@ func place_block() -> void:
 		"item": str(current_item().get("item", ""))})
 	if ctx.get("cancel", false):
 		return
-	if world.set_block(p, int(ctx.get("block", block))):
+	var placed := int(ctx.get("block", block))
+	# blok luźny nie trafia do siatki świata, tylko staje się obiektem fizycznym
+	if Blocks.reg.loose(placed) != null and entities:
+		if entities.spawn_prop(placed, Vector3(p) + Vector3(0.5, 0.5, 0.5), Vector3(0, yaw, 0)) >= 0:
+			model.do_swing()
+			Mods.after("block.place", ctx)
+		return
+	if world.set_block(p, placed):
 		model.do_swing()
 		Mods.after("block.place", ctx)

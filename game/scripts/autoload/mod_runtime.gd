@@ -14,7 +14,7 @@ signal binds_changed
 signal hotbar_changed
 signal hud_changed
 
-const LIBS := 1 | 4 | 8 | 32 | 64 | 4096 | 8192  # base, coroutine, string, math, table, utf8, typy Godota
+const LIBS := 1 | 4 | 8 | 32 | 64 | 128 | 4096 | 8192  # base, coroutine, string, math, table, debug (tylko dla strażnika w prelude), utf8, typy Godota
 const MAX_ERRORS_SHOWN := 5
 
 var lua: Object = null
@@ -124,7 +124,7 @@ func _open_lua() -> bool:
 		push_error(load_errors["_"])
 		lua = null
 		return false
-	for k in ["dispatch", "make_env", "input", "window_action", "finalize"]:
+	for k in ["dispatch", "make_env", "input", "window_action", "finalize", "run_chunk"]:
 		_api[k] = res.get(k)
 	return true
 
@@ -200,8 +200,11 @@ func _run_files(id: String, field: String) -> void:
 		if not FileAccess.file_exists(path):
 			_fail(id, "brak pliku " + s)
 			return
-		var r: Variant = lua.do_string(FileAccess.get_file_as_string(path), "@%s/%s" % [id, s], _envs[id])
+		var r: Variant = _api.run_chunk.invoke(id, FileAccess.get_file_as_string(path), "@%s/%s" % [id, s], _envs[id])
 		if _is_error(r):
+			_fail(id, str(r))
+			return
+		if r != null:
 			_fail(id, str(r))
 			return
 
@@ -367,15 +370,16 @@ func save_data(world_dir: String) -> void:
 # ---------- funkcje gospodarza dostępne dla prelude.lua ----------
 
 func _host_table() -> Dictionary:
-	var names := ["log", "report_error", "hook_added", "setting", "storage_get", "storage_set",
+	var names := ["log", "report_error", "mod_disabled", "hook_added", "setting", "storage_get", "storage_set",
 		"block_id", "block_key", "block_name", "block_list", "item_name", "item_block", "max_stack",
 		"get_block", "set_block", "biome", "biome_key", "height", "time_of_day", "set_time",
 		"player_position", "player_teleport", "player_velocity", "player_push", "player_set", "player_get",
 		"player_health", "player_set_health", "player_damage", "player_animate", "player_colors",
-		"player_target", "selected_item", "anim_override", "camera_set", "camera_get",
+		"player_target", "player_in_liquid", "player_eyes_in_liquid", "selected_item", "anim_override", "camera_set", "camera_get",
 		"container_create", "container_size", "slot_get", "slot_set", "hotbar_bind", "hotbar_selected",
 		"ui_window", "ui_close", "ui_is_open", "notify", "hud_bar", "hud_text", "hud_remove",
-		"input_bind", "randf", "randi"]
+		"input_bind", "randf", "randi", "entity_spawn", "entity_remove", "entity_exists", "entity_get",
+		"entity_list", "entity_set", "entity_damage", "entity_tag", "entity_data", "item_drop"]
 	var t := {}
 	for n in names:
 		t[n] = Callable(self, "_h_" + n)
@@ -384,6 +388,12 @@ func _host_table() -> Dictionary:
 
 func _h_log(mod_id, msg) -> void: _log(str(mod_id), str(msg))
 func _h_report_error(mod_id, msg) -> void: report_error(str(mod_id), str(msg))
+func _h_mod_disabled(mod_id, msg) -> void:
+	load_errors[str(mod_id)] = "wyłączony: " + str(msg)
+	_errors_shown = 0
+	report_error(str(mod_id), "mod został wyłączony, bo zawieszał grę (%s)" % str(msg))
+
+
 func _h_hook_added(kind, name) -> void: _hooks[str(kind) + ":" + str(name)] = true
 
 
@@ -500,10 +510,16 @@ func _h_player_colors(t) -> void:
 			main.player.model.apply_colors(model_colors)
 
 
-func _h_player_target() -> Dictionary:
-	if main == null or main.player.target.is_empty():
+func _h_player_in_liquid() -> bool: return main.player.in_liquid if main else false
+func _h_player_eyes_in_liquid() -> bool: return main.player.eyes_in_liquid if main else false
+
+
+func _h_player_target(with_liquids) -> Dictionary:
+	if main == null:
 		return {}
-	var t: Dictionary = main.player.target
+	var t: Dictionary = main.player.target_with_liquids() if bool(with_liquids) else main.player.target
+	if t.is_empty():
+		return {}
 	return {"pos": t.pos, "normal": t.normal, "block": main.world.get_block(t.pos)}
 
 
@@ -602,3 +618,92 @@ func _h_input_bind(mod_id, id, key, label) -> void:
 
 func _h_randf() -> float: return _rng.randf()
 func _h_randi(a, b) -> int: return _rng.randi_range(int(a), int(b))
+
+
+# ---------- stworzenia i obiekty ----------
+
+func _ent(id) -> Node3D:
+	if main == null or main.entities == null:
+		return null
+	return main.entities.get_entity(int(id))
+
+
+func _h_entity_spawn(type, pos, data, scale) -> int:
+	if main == null:
+		return -1
+	return main.entities.spawn_creature(str(type), Vector3(pos), data if data is Dictionary else {}, float(scale))
+
+
+func _h_entity_remove(id) -> void:
+	if main:
+		main.entities.remove(int(id))
+
+
+func _h_entity_exists(id) -> bool: return _ent(id) != null
+
+
+func _h_entity_get(id, key) -> Variant:
+	var e := _ent(id)
+	if e == null:
+		return null
+	match str(key):
+		"type": return e.type if e is Creature else ("prop" if e is Prop else "item")
+		"pos": return e.global_position
+		"health": return e.health if e is Creature else 0.0
+		"state": return e.state if e is Creature else ""
+		"scale": return e.scale_factor if e is Creature else 1.0
+		"data": return e.data if e is Creature else {}
+	return null
+
+
+func _h_entity_list(type, radius) -> Array:
+	if main == null:
+		return []
+	return main.entities.list(str(type), main.player.global_position, float(radius))
+
+
+func _h_entity_set(id, key, v) -> void:
+	var e := _ent(id)
+	if e == null:
+		return
+	match str(key):
+		"pos":
+			e.global_position = Vector3(v)
+		"target":
+			if e is Creature:
+				e.move_to(Vector3(v))
+		"scale":
+			if e is Creature:
+				e.set_scale_factor(float(v))
+		"animate":
+			if e is Creature:
+				e.play(str(v))
+
+
+func _h_entity_damage(id, amount, cause) -> void:
+	var e := _ent(id)
+	if e is Creature:
+		e.hit(float(amount), e.global_position, str(cause))
+
+
+func _h_entity_tag(id, tag, on, color) -> void:
+	var e := _ent(id)
+	if e is Creature:
+		e.show_tag(str(tag), bool(on))
+		if color != null:
+			e.color_tag(str(tag), color if color is Color else Color.from_string(str(color), Color.WHITE))
+
+
+func _h_entity_data(id, key, v) -> void:
+	var e := _ent(id)
+	if e is Creature:
+		if v == null:
+			e.data.erase(str(key))
+		else:
+			e.data[str(key)] = v
+
+
+func _h_item_drop(item, count, pos) -> int:
+	if main == null:
+		return -1
+	return main.entities.drop_item(str(item), int(count), Vector3(pos))

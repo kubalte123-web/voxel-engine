@@ -35,6 +35,12 @@ end
 --   engine.require("backpack").give("apple", 1)
 engine.export({ give = give, HOTBAR = HOTBAR, BACKPACK = BACKPACK, EQUIPMENT = EQUIPMENT })
 
+-- przedmioty leżące na ziemi i podnoszone obiekty trafiają do plecaka
+engine.hooks.before("item.pickup", function(ctx)
+	local left = kit.inventory.add_many({ HOTBAR, BACKPACK }, ctx.item, ctx.count)
+	ctx.taken = ctx.count - left
+end)
+
 -- trawa daje ziemię (tak opisuje ją mod base); ustawienie pozwala to wyłączyć
 engine.hooks.before("block.break", function(ctx)
 	if engine.blocks.key(ctx.block) == "grass" and not engine.settings.get("grass_drops_dirt") then

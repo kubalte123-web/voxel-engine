@@ -23,6 +23,14 @@ var beach := 7
 var window := 2
 var max_sum := 0.0
 var n_ores := 0
+var sea := -100000
+var water := -1
+var caves := false
+var cave_tw := 0.055
+var cave_tc := 0.6
+var cave_min_y := -56
+var lake_depth := 0.0
+var lake_t := 0.3
 var biome_names: Array[String] = []
 var biome_keys: Array[String] = []
 
@@ -31,6 +39,12 @@ var detail := FastNoiseLite.new()
 var temperature := FastNoiseLite.new()
 var humidity := FastNoiseLite.new()
 var mountain := FastNoiseLite.new()
+var cave_a := FastNoiseLite.new()
+var cave_b := FastNoiseLite.new()
+var cave_c := FastNoiseLite.new()
+var lake := FastNoiseLite.new()
+
+const CG := 11   # punkty siatki szumu jaskiń na oś (co 4 bloki, z zapasem)
 
 
 func _init(seed_in: int = 1337, compiled: Dictionary = {}) -> void:
@@ -49,6 +63,14 @@ func _init(seed_in: int = 1337, compiled: Dictionary = {}) -> void:
 	nb = int(prm[3])
 	max_sum = prm[4]
 	n_ores = int(prm[5])
+	sea = int(prm[6])
+	water = int(prm[7])
+	caves = prm[8] > 0.5
+	cave_tw = prm[9]
+	cave_tc = prm[10]
+	cave_min_y = int(prm[11])
+	lake_depth = prm[12]
+	lake_t = prm[13]
 	biome_names = spec.names
 	biome_keys = spec.keys
 	var bs := float(spec.get("biome_scale", 1.0))
@@ -57,6 +79,10 @@ func _init(seed_in: int = 1337, compiled: Dictionary = {}) -> void:
 	_noise(temperature, seed_value + 101, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 0.0022 / bs, 2)
 	_noise(humidity, seed_value + 202, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 0.0028 / bs, 2)
 	_noise(mountain, seed_value + 303, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 0.012, 3)
+	_noise(cave_a, seed_value + 404, FastNoiseLite.TYPE_SIMPLEX, 0.022, 1)
+	_noise(cave_b, seed_value + 505, FastNoiseLite.TYPE_SIMPLEX, 0.022, 1)
+	_noise(cave_c, seed_value + 606, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 0.014, 2)
+	_noise(lake, seed_value + 707, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 0.0045, 2)
 
 
 static func _noise(n: FastNoiseLite, s: int, type: int, freq: float, octaves: int) -> void:
@@ -73,7 +99,7 @@ func max_chunk_y() -> int:
 
 ## Dane dla rdzenia w C++ (VoxelMesher.configure).
 func native_noises() -> Array:
-	return [hills, detail, temperature, humidity, mountain]
+	return [hills, detail, temperature, humidity, mountain, cave_a, cave_b, cave_c, lake]
 
 
 static func sm(a: float, b: float, x: float) -> float:
@@ -125,6 +151,9 @@ func column(x: int, z: int) -> Vector2i:
 	mount /= wsum
 	var h := base + hills.get_noise_2d(x, z) * amp + detail.get_noise_2d(x, z) * rough \
 		+ mount * (mountain.get_noise_2d(x, z) * 0.5 + 0.5)
+	if lake_depth > 0.0:
+		# niecki jezior: łagodnie obniżony teren tam, gdzie szum jezior jest wysoki
+		h -= sm(lake_t, lake_t + 0.18, lake.get_noise_2d(x, z)) * lake_depth
 	return Vector2i(int(round(h)), best)
 
 
@@ -138,6 +167,9 @@ func biome_name(i: int) -> String:
 
 func block_for(wy: int, h: int, biome: int) -> int:
 	if wy > h:
+		if wy <= sea:
+			var ice := int(B[biome * BS + 19])
+			return ice if (wy == sea and ice >= 0) else water
 		return Blocks.AIR
 	var o := biome * BS
 	var top := int(B[o + 6])
@@ -204,7 +236,7 @@ func fill_padded(cpos: Vector3i) -> PackedByteArray:
 			var c := column(bx + x, bz + z)
 			cols[Vector2i(bx + x, bz + z)] = c
 			var h := c.x
-			var top := h - by
+			var top := maxi(h, sea) - by
 			if top >= 0:
 				for y in mini(top + 1, P):
 					out[x + P * (y + P * z)] = block_for(by + y, h, c.y)
@@ -214,6 +246,8 @@ func fill_padded(cpos: Vector3i) -> PackedByteArray:
 				var pl := plant_at(bx + x, bz + z, h, c.y)
 				if pl != 0:
 					out[x + P * (py + P * z)] = pl
+	if caves:
+		_caves(out, bx, by, bz, cols)
 	_ores(out, bx, by, bz)
 	# drzewa i struktury z okna szerszego o promień największego elementu
 	var found := []
@@ -285,6 +319,103 @@ func _stamp(out: PackedByteArray, t: Array, bx: int, by: int, bz: int, soft: boo
 					if r >= 2 and absi(dx) == r and absi(dz) == r:
 						continue
 					_put(out, x0 + dx - bx, y - by, z0 + dz - bz, leaves, true)
+
+
+static func _lerp(a: float, b: float, t: float) -> float:
+	return a + (b - a) * t
+
+
+## Jaskinie: tunele tam, gdzie dwa szumy 3D są jednocześnie bliskie zera, i komory tam, gdzie trzeci szum
+## jest wysoki. Szum liczony co 4 bloki i interpolowany (szybko i tak samo w C++).
+## Na lądzie tunele mogą przebić powierzchnię (wejścia do jaskiń); pod wodą i przy brzegu nie.
+func _caves(out: PackedByteArray, bx: int, by: int, bz: int, cols: Dictionary) -> void:
+	var maxh := -100000
+	for z in P:
+		for x in P:
+			maxh = maxi(maxh, (cols[Vector2i(bx + x, bz + z)] as Vector2i).x)
+	if by > maxh or by + P - 1 < cave_min_y:
+		return
+	var gx0 := floori(bx / 4.0)
+	var gy0 := floori(by / 4.0)
+	var gz0 := floori(bz / 4.0)
+	var na := PackedFloat64Array()
+	var nb_ := PackedFloat64Array()
+	var nc := PackedFloat64Array()
+	na.resize(CG * CG * CG)
+	nb_.resize(CG * CG * CG)
+	nc.resize(CG * CG * CG)
+	for k in CG:
+		for j in CG:
+			for i in CG:
+				var wx := float((gx0 + i) * 4)
+				var wy := float((gy0 + j) * 4) * 1.5
+				var wz := float((gz0 + k) * 4)
+				var gi := i + CG * (j + CG * k)
+				na[gi] = cave_a.get_noise_3d(wx, wy, wz)
+				nb_[gi] = cave_b.get_noise_3d(wx, wy, wz)
+				nc[gi] = cave_c.get_noise_3d(wx, wy, wz)
+	# komórki siatki, w których jaskinia na pewno nie powstanie (interpolacja nie wyjdzie poza
+	# zakres wartości w rogach), pomijamy bez liczenia: wynik jest identyczny, a GDScript dużo szybszy
+	var maybe := PackedByteArray()
+	maybe.resize(CG * CG * CG)
+	for k in CG - 1:
+		for j in CG - 1:
+			for i in CG - 1:
+				var g := i + CG * (j + CG * k)
+				var amin := 9.0
+				var amax := -9.0
+				var bmin := 9.0
+				var bmax := -9.0
+				var cmax := -9.0
+				for o in [0, 1, CG, CG + 1, CG * CG, CG * CG + 1, CG * CG + CG, CG * CG + CG + 1]:
+					amin = minf(amin, na[g + o])
+					amax = maxf(amax, na[g + o])
+					bmin = minf(bmin, nb_[g + o])
+					bmax = maxf(bmax, nb_[g + o])
+					cmax = maxf(cmax, nc[g + o])
+				var tunnel := amin < cave_tw and amax > -cave_tw and bmin < cave_tw and bmax > -cave_tw
+				maybe[g] = 1 if (tunnel or cmax > cave_tc) else 0
+	for z in P:
+		for x in P:
+			var h := (cols[Vector2i(bx + x, bz + z)] as Vector2i).x
+			var top := h if h > sea + 3 else h - 5
+			var ymax := mini(P - 1, top - by)
+			var ymin := maxi(0, cave_min_y - by)
+			if ymax < ymin:
+				continue
+			var rx := (bx + x) - gx0 * 4
+			var rz := (bz + z) - gz0 * 4
+			var ix := rx / 4
+			var iz := rz / 4
+			var tx := float(rx - ix * 4) / 4.0
+			var tz := float(rz - iz * 4) / 4.0
+			for y in range(ymin, ymax + 1):
+				var idx := x + P * (y + P * z)
+				var cur := out[idx]
+				if cur == 0 or cur == water:
+					continue
+				var ry := (by + y) - gy0 * 4
+				var iy := ry / 4
+				var ty := float(ry - iy * 4) / 4.0
+				var g := ix + CG * (iy + CG * iz)
+				if maybe[g] == 0:
+					continue
+				var a := _tri(na, g, tx, ty, tz)
+				var b := _tri(nb_, g, tx, ty, tz)
+				var c := _tri(nc, g, tx, ty, tz)
+				if (absf(a) < cave_tw and absf(b) < cave_tw) or c > cave_tc:
+					out[idx] = 0
+					if by + y == h and y + 1 < P:
+						out[idx + P] = 0  # roślina nad wejściem do jaskini
+
+
+## Interpolacja trójliniowa w komórce siatki zaczynającej się w indeksie g.
+static func _tri(n: PackedFloat64Array, g: int, tx: float, ty: float, tz: float) -> float:
+	var c00 := _lerp(n[g], n[g + 1], tx)
+	var c10 := _lerp(n[g + CG], n[g + CG + 1], tx)
+	var c01 := _lerp(n[g + CG * CG], n[g + CG * CG + 1], tx)
+	var c11 := _lerp(n[g + CG * CG + CG], n[g + CG * CG + CG + 1], tx)
+	return _lerp(_lerp(c00, c10, ty), _lerp(c01, c11, ty), tz)
 
 
 ## Rudy: w każdej komórce 16^3 może powstać jedna żyła (kula o promieniu 1..rozmiar).

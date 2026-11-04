@@ -14,6 +14,7 @@ var slots: Array[Panel] = []
 var mod_box: VBoxContainer
 var mod_texts: VBoxContainer
 var flash := 0.0
+var tint := Color(0, 0, 0, 0)  # zabarwienie ekranu (np. pod wodą)
 var touch_mode := false
 var _timer := 0.0
 var _last_health := -1.0
@@ -221,6 +222,8 @@ func _process(delta: float) -> void:
 
 
 func _draw() -> void:
+	if tint.a > 0.0:
+		draw_rect(Rect2(Vector2.ZERO, size), tint)
 	if flash > 0.0:
 		draw_rect(Rect2(Vector2.ZERO, size), Color(0.8, 0.05, 0.05, flash * 0.5))
 	var c := size / 2.0

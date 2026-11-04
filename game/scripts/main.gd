@@ -2,6 +2,8 @@ extends Node3D
 ## Rozgrywka: niebo i dzień/noc, świat, gracz, interfejs, pauza, autozapis i test automatyczny.
 
 var world: World
+var far: FarTerrain
+var entities: EntityManager
 var player: Player
 var hud: Hud
 var touch: TouchControls
@@ -19,6 +21,8 @@ var dark_nights := false
 var autosave_timer := 60.0
 var tick_timer := 0.0
 var windows := {}  # id okna moda -> ModWindow
+var fog_base := 0.01
+var was_underwater := false
 
 
 func _ready() -> void:
@@ -68,6 +72,9 @@ func _ready() -> void:
 	if not GameState.current_dir.is_empty():
 		GameState.write_info(GameState.current_dir, info)
 	add_child(world)
+	far = FarTerrain.new()
+	far.setup(world)
+	add_child(far)
 
 	player = Player.new()
 	player.world = world
@@ -81,6 +88,11 @@ func _ready() -> void:
 	else:
 		player.respawn()
 	world.update_center(player.global_position)
+	entities = EntityManager.new()
+	entities.name = "Entities"
+	entities.setup(world, player)
+	player.entities = entities
+	add_child(entities)
 
 	daynight = ModManager.is_enabled("daynight")
 	day_minutes = float(ModManager.get_value("daynight", "day_minutes"))
@@ -112,6 +124,7 @@ func _ready() -> void:
 	Mods.ui_window_requested.connect(_open_mod_window)
 	Mods.ui_close_requested.connect(_close_mod_window)
 	Mods.start_scripts(self)
+	entities.load_from(GameState.current_dir)
 	player.set_health(float(ps.get("health", player.stat("max_health"))))
 	for e in spec.errors:
 		hud.notify("Generator świata: " + str(e))
@@ -130,19 +143,24 @@ func _ready() -> void:
 
 func _apply_settings() -> void:
 	world.set_radius(Settings.render_distance)
+	far.set_radius(Settings.render_distance, Settings.far_view)
+	world.water_material.set_shader_parameter("wave", 1.0 if Settings.water_waves else 0.0)
 	player.camera.fov = Settings.fov
 	player.mouse_sensitivity = 0.0028 * Settings.mouse_sensitivity
 	sun.shadow_enabled = Settings.shadows and not OS.has_feature("web")
-	var far := Settings.render_distance * 32.0
-	env.fog_density = 2.2 / far
-	player.camera.far = far + 64.0
+	var dist := maxf(Settings.render_distance * 32.0, far.radius_blocks)
+	fog_base = 2.2 / dist
+	env.fog_density = fog_base
+	player.camera.far = dist + 64.0
 
 
 func _process(delta: float) -> void:
 	world.update_center(player.global_position)
+	far.update_center(player.global_position)
 	if daynight:
 		time_of_day = fmod(time_of_day + delta * 24.0 / (day_minutes * 60.0), 24.0)
 		_update_sky()
+	_update_underwater()
 	tick_timer -= delta
 	if tick_timer <= 0.0:
 		tick_timer = 0.1
@@ -215,6 +233,25 @@ func _update_sky() -> void:
 	env.fog_light_color = hor
 
 
+## Widok pod wodą: gęsta mgła w kolorze cieczy i lekkie zabarwienie ekranu.
+func _update_underwater() -> void:
+	var under := player.eyes_in_liquid
+	if under:
+		var b := world.get_block(Vector3i(player.camera.global_position.floor()))
+		var k := Blocks.reg.liquid_kind(b)
+		var deep: Color = Blocks.reg.liquid_kinds[k].deep if k >= 0 else Color(0.05, 0.2, 0.4)
+		env.fog_density = 0.09
+		env.fog_light_color = deep.lightened(0.15)
+		hud.tint = Color(deep.r, deep.g, deep.b, 0.28)
+	elif was_underwater:
+		env.fog_density = fog_base
+		hud.tint = Color(0, 0, 0, 0)
+		_update_sky()
+	if under != was_underwater:
+		Mods.emit_event("player.underwater", {"underwater": under})
+	was_underwater = under
+
+
 func time_text() -> String:
 	return "%02d:%02d" % [int(time_of_day), int(fmod(time_of_day, 1.0) * 60.0)]
 
@@ -247,6 +284,7 @@ func save_game() -> void:
 		return
 	world.save_all()
 	Mods.save_data(GameState.current_dir)
+	entities.save(GameState.current_dir)
 	var p := player.global_position
 	info["player"] = {"pos": [p.x, p.y, p.z], "yaw": player.yaw, "pitch": player.pitch, "selected": player.selected,
 		"health": player.health}
@@ -337,6 +375,176 @@ func _find_structure() -> Vector3i:
 			if f >= 0 and int(t.F[f * Terrain.FS + 1]) == 3:
 				return Vector3i(x, c.x, z)
 	return Vector3i(999999, 0, 0)
+
+
+func _find_lake() -> Vector3i:
+	var t := world.terrain
+	for r in range(0, 900, 6):
+		for k in 24:
+			var a := k * TAU / 24.0
+			var x := int(cos(a) * r)
+			var z := int(sin(a) * r)
+			if t.height(x, z) < t.sea - 2 and t.height(x + 3, z) < t.sea - 1 and t.height(x, z + 3) < t.sea - 1:
+				return Vector3i(x, t.height(x, z), z)
+	return Vector3i(999999, 0, 0)
+
+
+func _water_volume(center: Vector3i, r: int) -> Array:
+	var vol := 0
+	var cells := 0
+	for x in range(center.x - r, center.x + r + 1):
+		for z in range(center.z - r, center.z + r + 1):
+			for y in range(center.y - 4, center.y + 6):
+				var b := world.get_block(Vector3i(x, y, z))
+				if Blocks.reg.is_liquid(b):
+					vol += Blocks.reg.liquid_level(b)
+					cells += 1
+	return [vol, cells]
+
+
+func _look_at_point(p: Vector3) -> void:
+	var to := p - (player.global_position + Vector3(0, 1.55, 0))
+	player.yaw = atan2(-to.x, -to.z)
+	player.pitch = clampf(atan2(to.y, Vector2(to.x, to.z).length()), -1.4, 1.1)
+
+
+func _test_stage5(dir: String) -> void:
+	var reg := Blocks.reg
+	# twardość: czas kopania
+	print("KOPANIE czas [s]: ziemia=", reg.hardness[Blocks.id("dirt")], " kamień=", reg.hardness[Blocks.id("stone")], " woda=", reg.hardness[Blocks.id("water")])
+	# woda wylana na płaskim terenie: objętość się zachowuje (8 poziomów = 1 blok)
+	var p0 := Vector3i(player.global_position.floor())
+	var spot := p0 + Vector3i(4, 0, 0)
+	var gy := entities._surface(spot.x, spot.z, p0.y + 6)
+	var pour := Vector3i(spot.x, gy + 3, spot.z)
+	world.set_block(pour, Blocks.id("water~8"))
+	world.set_block(pour + Vector3i(0, 0, 1), Blocks.id("water~8"))
+	await _wait(0.4)
+	var v1 := _water_volume(Vector3i(spot.x, gy, spot.z), 6)
+	await _wait(3.0)
+	var v2 := _water_volume(Vector3i(spot.x, gy, spot.z), 6)
+	print("WODA wylane=16 po 0.4 s=", v1, " po 3.4 s=", v2, " zmian symulacji=", world.liquids.moved_total)
+	_look_at_point(Vector3(spot.x, gy, spot.z))
+	await _wait(0.3)
+	await _shot(dir, "g10_water_poured")
+	# grawitacja: piasek w powietrzu spada
+	var sand_at := Vector3i(spot.x - 2, gy + 4, spot.z - 2)
+	world.set_block(sand_at, Blocks.id("sand"))
+	await _wait(2.0)
+	var landed := -1
+	for y in range(gy - 2, gy + 6):
+		if world.get_block(Vector3i(sand_at.x, y, sand_at.z)) == Blocks.id("sand"):
+			landed = y
+	print("GRAWITACJA piasek z y=", sand_at.y, " wylądował na y=", landed, " (teren ", gy, ")")
+
+	# jezioro: obiekty luźne pływają albo toną, gracz pływa
+	var lake := _find_lake()
+	if lake.x != 999999:
+		var sea := world.terrain.sea
+		await _goto(lake.x + 0.5, sea + 1.5, lake.z + 6.5)
+		await _wait(0.5)
+		var ids := {}
+		for k in ["crate", "barrel", "ball", "boulder"]:
+			ids[k] = entities.spawn_prop(Blocks.id(k), Vector3(lake.x + 0.5 + ids.size() * 1.3 - 2.0, sea + 2.5, lake.z + 0.5), Vector3.ZERO)
+		await _wait(5.0)
+		var ys := {}
+		for k in ids:
+			var e := entities.get_entity(ids[k])
+			ys[k] = snappedf(e.global_position.y, 0.01) if e else "brak"
+		print("PŁYWANIE poziom wody=", sea + 1, " wysokości obiektów: ", ys)
+		_look_at_point(Vector3(lake.x + 0.5, sea + 1, lake.z + 0.5))
+		player.global_position.y = sea + 3.0
+		await _wait(0.5)
+		await _shot(dir, "g11_lake_props")
+		# pod wodą
+		player.global_position = Vector3(lake.x + 0.5, sea - 1.2, lake.z + 3.5)
+		player.velocity = Vector3.ZERO
+		player.first_person = true
+		await _wait(0.6)
+		print("PŁYWA gracz w cieczy=", player.in_liquid, " oczy pod wodą=", player.eyes_in_liquid)
+		await _shot(dir, "g12_underwater")
+		player.first_person = false
+		await _wait(1.5)
+	else:
+		print("JEZIORO nie znaleziono")
+
+	# zwierzęta: czekamy, aż się pojawią, i patrzymy na najbliższe
+	await _goto(0.5, world.terrain.height(0, 0) + 2.0, 0.5)
+	var t0 := Time.get_ticks_msec()
+	while entities.list().size() < 4 and Time.get_ticks_msec() - t0 < 30000:
+		await _wait(0.5)
+	var by_type := {}
+	for id in entities.list():
+		var c: Creature = entities.get_entity(id)
+		by_type[c.type] = by_type.get(c.type, 0) + 1
+	print("ZWIERZĘTA ", by_type)
+	for type in ["sheep", "cow", "chicken"]:
+		var lst := entities.list(type)
+		if lst.is_empty():
+			continue
+		var c: Creature = entities.get_entity(lst[0])
+		for id in lst:
+			var cc: Creature = entities.get_entity(id)
+			if cc.scale_factor >= 1.0:
+				c = cc
+				break
+		var cp := c.global_position
+		var hh := world.terrain.height(floori(cp.x) + 2, floori(cp.z) + 2)
+		await _goto(cp.x + 2.2, maxf(cp.y, hh + 1.0) + 0.5, cp.z + 2.2)
+		Mods.camera_stats["mode"] = "first"
+		for i in 6:
+			await _wait(0.25)
+			cp = c.global_position
+			_look_at_point(cp + Vector3(0, 0.3, 0))
+		await _shot(dir, "g13_animal_" + type)
+		Mods.camera_stats.erase("mode")
+		if type == "sheep":
+			var before := _inv_total()
+			Mods.set_slot("backpack", 20, {"item": "shears", "count": 1})
+			player.select(7)
+			var ctx := Mods.before("entity.interact", {"id": c.id, "type": "sheep", "item": "shears", "slot": 8})
+			await _wait(2.0)
+			print("STRZYŻENIE ostrzyżona=", c.data.get("sheared", false), " wełna na ziemi/plecaku: przed=", before, " po=", _inv_total())
+			var hp := c.health
+			c.hit(2.0, player.global_position, "test")
+			print("UDERZENIE zdrowie owcy ", hp, " -> ", c.health, " stan=", c.state)
+
+	# jaskinia: kolumna z pustką pod powierzchnią
+	var cave := Vector3i(999999, 0, 0)
+	for x in range(-60, 60, 3):
+		for z in range(-60, 60, 3):
+			var h := world.terrain.height(x, z)
+			for y in range(h - 30, h - 6):
+				if world.is_loaded(Vector3i(x, y, z)) and world.get_block(Vector3i(x, y, z)) == Blocks.AIR \
+						and world.get_block(Vector3i(x, y + 1, z)) == Blocks.AIR and world.get_block(Vector3i(x, y - 1, z)) != Blocks.AIR:
+					cave = Vector3i(x, y, z)
+					break
+			if cave.x != 999999:
+				break
+		if cave.x != 999999:
+			break
+	if cave.x != 999999:
+		player.global_position = Vector3(cave.x + 0.5, cave.y + 0.05, cave.z + 0.5)
+		player.velocity = Vector3.ZERO
+		Mods.camera_stats["distance"] = 2.0
+		player.pitch = -0.1
+		await _wait(1.0)
+		await _shot(dir, "g14_cave")
+		Mods.camera_stats.erase("distance")
+		print("JASKINIA w ", cave)
+
+	# daleki widok z wysoka
+	var hz := world.terrain.height(0, 0)
+	Mods.player_stats["gravity"] = 0.0
+	await _goto(0.5, hz + 30.0, 0.5)
+	player.velocity = Vector3.ZERO
+	player.pitch = -0.12
+	player.yaw = 0.9
+	await _wait(3.0)
+	await _shot(dir, "g15_far_view")
+	print("DALEKI WIDOK kafle=", far.tiles.size())
+	Mods.player_stats.erase("gravity")
+	player.respawn()
 
 
 func _goto(x: float, y: float, z: float) -> void:
@@ -432,6 +640,8 @@ func _autotest(dir: String) -> void:
 		for c in world.data:
 			ore_counts[k] = ore_counts.get(k, 0) + (world.data[c] as PackedByteArray).count(id)
 	print("ORES ", ore_counts)
+
+	await _test_stage5(dir)
 
 	# struktura (ruiny albo studnia)
 	var st := _find_structure()

@@ -12,10 +12,14 @@ var tiles: PackedInt32Array
 var props: PackedInt32Array
 var atlas: Texture2D
 var material: StandardMaterial3D
+var water_material: ShaderMaterial
+var water_nodes := {}  # Vector3i -> MeshInstance3D (powierzchnia cieczy)
+var liquids: LiquidSim
+var falling: Node3D    # spadające bloki (piasek, żwir)
 var save_dir := ""  # pusty = świat tymczasowy, bez zapisu
 
 var radius := 6
-var y_min := -1
+var y_min := -2
 var y_max := 1
 var max_queued := 4
 var threaded := true
@@ -55,6 +59,13 @@ func _ready() -> void:
 	tiles = reg.tiles
 	props = reg.props
 	atlas = reg.atlas
+	water_material = make_water_material(reg)
+	liquids = LiquidSim.new()
+	liquids.world = self
+	add_child(liquids)
+	falling = Node3D.new()
+	falling.name = "Falling"
+	add_child(falling)
 	material = StandardMaterial3D.new()
 	material.albedo_texture = atlas
 	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
@@ -66,7 +77,7 @@ func _ready() -> void:
 	material.alpha_scissor_threshold = 0.5
 	if ClassDB.class_exists("VoxelMesher"):
 		native = ClassDB.instantiate("VoxelMesher")
-		native.call("configure", terrain.native_noises(), terrain.spec, tiles, props, Registry.ATLAS_COLS, reg.atlas_rows)
+		native.call("configure", terrain.native_noises(), terrain.spec, tiles, props, reg.liquid, Registry.ATLAS_COLS, reg.atlas_rows)
 		mesher_name = "C++"
 	if OS.has_feature("web"):
 		threaded = false
@@ -154,6 +165,9 @@ func _unload_far() -> void:
 			if nodes.has(c):
 				nodes[c].queue_free()
 				nodes.erase(c)
+			if water_nodes.has(c):
+				water_nodes[c].queue_free()
+				water_nodes.erase(c)
 			if unsaved.has(c):
 				_save_chunk(c)
 			if not edited.has(c) or not save_dir.is_empty():
@@ -188,7 +202,7 @@ func _job(c: Vector3i) -> void:
 		for i in 6:
 			if neigh[i] != null:
 				_copy_border(padded, neigh[i], i)
-		arrays = GDMesher.build(padded, tiles, Registry.ATLAS_COLS, reg.atlas_rows, props)
+		arrays = GDMesher.build(padded, tiles, Registry.ATLAS_COLS, reg.atlas_rows, props, reg.liquid)
 	var ms := (Time.get_ticks_usec() - t0) / 1000.0
 	mutex.lock()
 	results.append([c, arrays, blocks, ms])
@@ -231,6 +245,26 @@ func _apply(c: Vector3i, arrays: Array, blocks: PackedByteArray, ms: float) -> v
 	if nodes.has(c):
 		nodes[c].queue_free()
 		nodes.erase(c)
+	if water_nodes.has(c):
+		water_nodes[c].queue_free()
+		water_nodes.erase(c)
+	if arrays.size() > 6 and not (arrays[6] as PackedVector3Array).is_empty():
+		var warr := []
+		warr.resize(Mesh.ARRAY_MAX)
+		warr[Mesh.ARRAY_VERTEX] = arrays[6]
+		warr[Mesh.ARRAY_NORMAL] = arrays[7]
+		warr[Mesh.ARRAY_TEX_UV] = arrays[8]
+		warr[Mesh.ARRAY_COLOR] = arrays[9]
+		warr[Mesh.ARRAY_INDEX] = arrays[10]
+		var wm := ArrayMesh.new()
+		wm.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, warr)
+		wm.surface_set_material(0, water_material)
+		var wmi := MeshInstance3D.new()
+		wmi.mesh = wm
+		wmi.position = Vector3(c * S)
+		wmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(wmi)
+		water_nodes[c] = wmi
 	var verts: PackedVector3Array = arrays[0]
 	if not verts.is_empty():
 		var arr := []
@@ -277,7 +311,11 @@ func get_block(p: Vector3i) -> int:
 	return d[l.x + S * (l.y + S * l.z)]
 
 
-func set_block(p: Vector3i, id: int) -> bool:
+## Zmiana bloku bez przebudowy siatki (dla symulacji cieczy): chunki do przebudowy trafiają do `pending`.
+var pending := {}
+
+
+func set_block_quiet(p: Vector3i, id: int) -> bool:
 	var c := chunk_of(p)
 	if not data.has(c) or not built.has(c):
 		return false
@@ -289,19 +327,59 @@ func set_block(p: Vector3i, id: int) -> bool:
 	mutex.unlock()
 	edited[c] = true
 	unsaved[c] = true
-	_remesh(c)
-	if l.x == 0: _remesh(c + Vector3i(-1, 0, 0))
-	if l.x == S - 1: _remesh(c + Vector3i(1, 0, 0))
-	if l.y == 0: _remesh(c + Vector3i(0, -1, 0))
-	if l.y == S - 1: _remesh(c + Vector3i(0, 1, 0))
-	if l.z == 0: _remesh(c + Vector3i(0, 0, -1))
-	if l.z == S - 1: _remesh(c + Vector3i(0, 0, 1))
+	pending[c] = true
+	if l.x == 0: pending[c + Vector3i(-1, 0, 0)] = true
+	if l.x == S - 1: pending[c + Vector3i(1, 0, 0)] = true
+	if l.y == 0: pending[c + Vector3i(0, -1, 0)] = true
+	if l.y == S - 1: pending[c + Vector3i(0, 1, 0)] = true
+	if l.z == 0: pending[c + Vector3i(0, 0, -1)] = true
+	if l.z == S - 1: pending[c + Vector3i(0, 0, 1)] = true
+	return true
+
+
+func flush_pending() -> void:
+	for c in pending:
+		_remesh(c)
+	pending.clear()
+
+
+func is_loaded(p: Vector3i) -> bool:
+	return data.has(chunk_of(p)) and built.has(chunk_of(p))
+
+
+func set_block(p: Vector3i, id: int) -> bool:
+	if not set_block_quiet(p, id):
+		return false
+	flush_pending()
 	# roślina bez podłoża znika razem z blokiem pod nią
-	if id == Blocks.AIR:
+	if id == Blocks.AIR or reg.is_liquid(id):
 		var above := p + Vector3i(0, 1, 0)
 		if Blocks.props(get_block(above)) & Blocks.CROSS:
 			set_block(above, Blocks.AIR)
+	# ciecze w pobliżu ruszają, bloki z grawitacją spadają
+	liquids.activate_around(p)
+	check_fall(p + Vector3i(0, 1, 0))
+	check_fall(p)
 	return true
+
+
+## Blok z grawitacją (piasek, żwir) bez podparcia zamienia się w spadający blok.
+func check_fall(p: Vector3i) -> void:
+	var b := get_block(p)
+	if b <= 0 or not reg.has_gravity(b):
+		return
+	var below := get_block(p + Vector3i(0, -1, 0))
+	if below != Blocks.AIR and (Blocks.props(below) & Blocks.SOLID) != 0:
+		return
+	if not set_block_quiet(p, Blocks.AIR):
+		return
+	flush_pending()
+	var fb := FallingBlock.new()
+	fb.world = self
+	fb.block = b
+	falling.add_child(fb)
+	fb.global_position = Vector3(p) + Vector3(0.5, 0.0, 0.5)
+	check_fall(p + Vector3i(0, 1, 0))
 
 
 func _remesh(c: Vector3i) -> void:
@@ -317,7 +395,7 @@ func _remesh(c: Vector3i) -> void:
 
 
 ## Przejście promienia przez siatkę bloków (DDA). Zwraca trafiony blok i ścianę wejścia.
-func raycast(origin: Vector3, dir: Vector3, max_dist: float) -> Dictionary:
+func raycast(origin: Vector3, dir: Vector3, max_dist: float, with_liquids: bool = false) -> Dictionary:
 	dir = dir.normalized()
 	var pos := Vector3i(floori(origin.x), floori(origin.y), floori(origin.z))
 	var step := Vector3i(int(signf(dir.x)), int(signf(dir.y)), int(signf(dir.z)))
@@ -332,7 +410,8 @@ func raycast(origin: Vector3, dir: Vector3, max_dist: float) -> Dictionary:
 	var normal := Vector3i.ZERO
 	var t := 0.0
 	while t <= max_dist:
-		if get_block(pos) != Blocks.AIR:
+		var hb := get_block(pos)
+		if hb != Blocks.AIR and (with_liquids or not reg.is_liquid(hb)):
 			return {"hit": true, "pos": pos, "normal": normal, "dist": t}
 		if t_max.x < t_max.y and t_max.x < t_max.z:
 			pos.x += step.x; t = t_max.x; t_max.x += t_delta.x; normal = Vector3i(-step.x, 0, 0)
@@ -411,3 +490,25 @@ func save_all() -> int:
 func stats() -> String:
 	var avg := mesh_ms_total / maxf(1.0, float(mesh_count))
 	return "chunki: %d  w kolejce: %d  budowa: %.1f ms/chunk (%s)" % [nodes.size(), queued.size(), avg, mesher_name]
+
+
+static func make_water_material(r: Registry) -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = load("res://scripts/shaders/water.gdshader")
+	var sh := []
+	var dp := []
+	var fo := []
+	var em := []
+	for i in 8:
+		var k: Dictionary = r.liquid_kinds[i] if i < r.liquid_kinds.size() else {}
+		var c: Color = k.get("color", Color(0.16, 0.45, 0.78))
+		var d: Color = k.get("deep", Color(0.04, 0.16, 0.36))
+		sh.append(Color(c.r, c.g, c.b, 0.55 if c.a >= 0.99 else c.a))
+		dp.append(Color(d.r, d.g, d.b, 0.88 if d.a >= 0.99 else d.a))
+		fo.append(k.get("foam", Color(0.92, 0.96, 1.0)))
+		em.append(float(k.get("emission", 0.0)))
+	m.set_shader_parameter("shallow", sh)
+	m.set_shader_parameter("deep", dp)
+	m.set_shader_parameter("foam_color", fo)
+	m.set_shader_parameter("emission", PackedFloat32Array(em))
+	return m

@@ -3,14 +3,49 @@
 	"name": "Przetrwanie",
 	"version": "0.1.0",
 	"author": "Jakub Lewicki",
-	"description": "Zdrowie i głód na ekranie, obrażenia od upadku, jabłka z liści do jedzenia. Przykład haków player.damage, player.land, item.use i pasków na ekranie.",
-	"requires": ["modkit", "backpack"],
-	"content": ["content.lua"],
-	"scripts": ["main.lua"],
+	"description": "Zdrowie, głód i powietrze pod wodą na ekranie, obrażenia od upadku i topienie się, jedzenie (jabłka z liści, mięso, jajka). Przykład haków player.damage, player.land, item.use i pasków na ekranie.",
+	"requires": [
+		"modkit",
+		"backpack"
+	],
+	"content": [
+		"content.lua"
+	],
+	"scripts": [
+		"main.lua"
+	],
 	"settings": [
-		{"key": "fall_damage", "label": "Obrażenia od upadku", "type": "bool", "default": true},
-		{"key": "hunger", "label": "Głód", "type": "bool", "default": true},
-		{"key": "hunger_minutes", "label": "Minuty od pełnego do pustego żołądka", "type": "int", "default": 15, "min": 3, "max": 60, "step": 1},
-		{"key": "difficulty", "label": "Poziom trudności", "type": "choice", "options": ["Łagodny", "Normalny", "Trudny"], "default": "Normalny"}
+		{
+			"key": "fall_damage",
+			"label": "Obrażenia od upadku",
+			"type": "bool",
+			"default": true
+		},
+		{
+			"key": "hunger",
+			"label": "Głód",
+			"type": "bool",
+			"default": true
+		},
+		{
+			"key": "hunger_minutes",
+			"label": "Minuty od pełnego do pustego żołądka",
+			"type": "int",
+			"default": 15,
+			"min": 3,
+			"max": 60,
+			"step": 1
+		},
+		{
+			"key": "difficulty",
+			"label": "Poziom trudności",
+			"type": "choice",
+			"options": [
+				"Łagodny",
+				"Normalny",
+				"Trudny"
+			],
+			"default": "Normalny"
+		}
 	]
 }

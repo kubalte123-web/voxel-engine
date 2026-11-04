@@ -20,6 +20,8 @@ a mody mogą udostępniać sobie biblioteki przez `engine.export` i `engine.requ
 - [Świat podstawowy](game/mods/base/content.lua): bloki z PNG, biomy, drzewa, rośliny
 - [Rudy i ruiny](game/mods/ores/content.lua): tekstury ze wzorów, przedmioty, rudy, struktury z warstw, zmiana bloku innego moda
 - [Przetrwanie](game/mods/survival/main.lua): zdrowie i głód na ekranie, obrażenia od upadku, jedzenie przez hak item.use
+- [Zwierzęta](game/mods/animals/content.lua): modele stworzeń z klocków, AI, łup, pojawianie się ([skrypty](game/mods/animals/main.lua): strzyżenie, jajka, rozmnażanie)
+- [Luźne przedmioty](game/mods/loose/content.lua): obiekty fizyczne (pchanie, toczenie, pływanie)
 - [Gesty, kamera i wygląd](game/mods/emotes/content.lua): animacje klatkowe, tryby kamery, kolory postaci ([skrypty](game/mods/emotes/main.lua))
 - [Zestaw modera](game/mods/modkit/main.lua): biblioteka z łatkami, ekwipunkiem i licznikami czasu
 - [Plecak i postać](game/mods/backpack/main.lua): kontenery, pasek z kontenera, okno postaci, łup z bloków
@@ -32,5 +34,7 @@ a mody mogą udostępniać sobie biblioteki przez `engine.export` i `engine.requ
 - Przedmioty to klucze tekstowe; miejsce w kontenerze to `{item = "stone", count = 5}` albo `{}`.
 - Pozycje bloków to `Vector3i(x, y, z)`; bloki w świecie to liczby, zamiana przez `engine.blocks.id("stone")` i `engine.blocks.key(id)`.
 - Tekstury: PNG 16x16 w folderze moda albo wzór `{pattern = "ore", color = "#rrggbb", spots = "#rrggbb"}`.
-- Klucze bloków moda base: grass, dirt, stone, planks, sand, log, leaves, snow, cactus, tall_grass, flower_red, flower_yellow, glass, bricks.
+- Klucze bloków moda base: grass, dirt, stone, planks, sand, log, leaves, snow, cactus, tall_grass, flower_red, flower_yellow, glass, bricks, gravel, ice, bedrock, water (płynąca: water~1 .. water~8).
+- Przedmioty moda base: bucket, water_bucket. Stworzenia moda animals: sheep, cow, chicken.
+- Kod moda ma limit czasu i pamięci; długie obliczenia rozkładaj na zdarzenia `tick`.
 - Klucze biomów moda base: meadow, forest, desert, snowy.

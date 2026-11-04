@@ -6,6 +6,7 @@ const AIR := 0
 const OPAQUE := Registry.OPAQUE
 const CROSS := Registry.CROSS
 const SOLID := Registry.SOLID
+const LIQUID := Registry.LIQUID
 
 ## Kolejność bloków w światach zapisanych przed rejestrem (etapy 1–3), gdy world.json nie ma palety.
 const LEGACY_KEYS := ["air", "grass", "dirt", "stone", "planks", "sand", "log", "leaves",

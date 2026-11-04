@@ -4,13 +4,13 @@ class_name WorldgenSpec
 ##
 ## Biom (BS liczb): temp, wilgotność, wysokość, wzgórza, chropowatość, góry, góra, wypełnienie, głębokość,
 ##   skała, plaża-góra, plaża-wypełnienie, szczyt-wysokość, szczyt-góra, szczyt-wypełnienie,
-##   początek i liczba elementów, początek i liczba roślin.
+##   początek i liczba elementów, początek i liczba roślin, blok na powierzchni wody (lód, -1 brak), zapas.
 ## Element (FS): szansa, rodzaj (0 dąb, 1 świerk, 2 kolumna, 3 struktura), pień, liście, wys. min, wys. max,
 ##   promień, początek i liczba bloków struktury, min. i max. wysokość terenu.
 ## Struktura: po 5 liczb całkowitych na blok: dx, dy, dz, blok, tylko_w_powietrze.
 ## Ruda (ORE_S): blok, zastępowany blok, min y, max y, szansa na komórkę 16^3, rozmiar.
 
-const BS := 19
+const BS := 21
 const FS := 11
 const ORE_S := 6
 const SHAPES := {"oak": 0, "spruce": 1, "column": 2}
@@ -110,7 +110,8 @@ static func compile(raw: Dictionary, reg: Registry, seed_value: int) -> Dictiona
 			_num(peak_d, "height", 1e9) if not peak_d.is_empty() else 1e9,
 			_block(reg, peak_d.get("top"), top, errors) if not peak_d.is_empty() else top,
 			_block(reg, peak_d.get("filler"), rock, errors) if not peak_d.is_empty() else filler,
-			feat_start, features.size() / FS - feat_start, plant_start, plants.size() / 2 - plant_start])
+			feat_start, features.size() / FS - feat_start, plant_start, plants.size() / 2 - plant_start,
+			_block(reg, b.get("water_surface"), -1, errors) if b.get("water_surface") != null else -1.0, 0.0])
 	for o in Registry.arr(raw.get("ores")):
 		if not o is Dictionary:
 			continue
@@ -120,10 +121,24 @@ static func compile(raw: Dictionary, reg: Registry, seed_value: int) -> Dictiona
 		# bez biomów świat jest płaski z jednego bloku (np. gdy wyłączono mod base)
 		names.append("Pustka")
 		bkeys.append("void")
-		biomes.append_array([0, 0, 0, 0, 0, 0, maxi(stone, 0), maxi(stone, 0), 3, maxi(stone, 0), -1, -1, 1e9, 0, 0, 0, 0, 0, 0])
+		biomes.append_array([0, 0, 0, 0, 0, 0, maxi(stone, 0), maxi(stone, 0), 3, maxi(stone, 0), -1, -1, 1e9, 0, 0, 0, 0, 0, 0, -1, 0])
+	# morze: bloki do poziomu sea_level wypełnia źródłowa ciecz (np. "water")
+	var sea := -100000.0
+	var water := -1
+	if cfg.get("sea_level") != null and cfg.get("water") != null:
+		water = _block(reg, cfg.water, -1, errors)
+		if water > 0:
+			sea = _num(cfg, "sea_level", -100000.0)
+	# jaskinie: tunele z dwóch szumów 3D i komory z trzeciego
+	var caves: Dictionary = cfg.get("caves") if cfg.get("caves") is Dictionary else {}
+	var lakes: Dictionary = cfg.get("lakes") if cfg.get("lakes") is Dictionary else {}
+	var caves_on := 1.0 if not caves.is_empty() and bool(caves.get("enabled", true)) else 0.0
 	return {
 		"biomes": biomes, "features": features, "plants": plants, "templates": templates, "ores": ores,
-		"params": PackedFloat64Array([seed_value, beach, mini(window, MAX_WINDOW), names.size(), max_sum, ores.size() / ORE_S]),
+		"params": PackedFloat64Array([seed_value, beach, mini(window, MAX_WINDOW), names.size(), max_sum, ores.size() / ORE_S,
+			sea, water, caves_on, 0.055 * _num(caves, "tunnels", 1.0), 0.72 - 0.12 * _num(caves, "caverns", 1.0),
+			_num(caves, "min_y", -56),
+			_num(lakes, "depth", 0.0), 0.42 - 0.12 * _num(lakes, "amount", 1.0)]),
 		"biome_scale": _num(cfg, "biome_scale", 1.0), "names": names, "keys": bkeys, "errors": errors,
 		"max_height": _max_height(biomes, names.size()),
 	}

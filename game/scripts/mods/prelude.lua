@@ -50,6 +50,108 @@ local function to_godot(v)
 end
 
 ---------------------------------------------------------------------------
+-- Strażnik: limit czasu (liczba instrukcji) i pamięci dla kodu modów.
+-- Każde wejście silnika do Lua dostaje budżet; mod, który go przekroczy (np. pętla bez końca),
+-- zostaje wyłączony do końca gry, a gra działa dalej.
+---------------------------------------------------------------------------
+local sethook = debug.sethook
+local collectgarbage = collectgarbage
+local co_create, co_resume = coroutine.create, coroutine.resume
+local STEP = 1000                 -- co ile instrukcji sprawdzamy limity
+local LIMIT_CALL = 30000000       -- instrukcji na jedno wywołanie (około 0,1–0,3 s)
+local LIMIT_LOAD = 300000000      -- instrukcji na wczytanie pliku moda
+local MEMORY_KB = 256 * 1024      -- pamięć całego stanu Lua
+local guard = { used = 0, limit = LIMIT_LOAD, owner = "?", tripped = false, depth = 0, checks = 0 }
+local disabled = {}
+
+local function hook()
+	if guard.depth == 0 then
+		guard.used = 0  -- kod silnika (prelude) nie ma limitu czasu
+	end
+	guard.used = guard.used + STEP
+	if guard.depth > 0 and (guard.tripped or guard.used > guard.limit) then
+		guard.tripped = true
+		error("przekroczony limit czasu wykonania (pętla bez końca?)", 2)
+	end
+	guard.checks = guard.checks + 1
+	if guard.checks % 16 == 0 and collectgarbage("count") > MEMORY_KB then
+		collectgarbage("collect")
+		if collectgarbage("count") > MEMORY_KB then
+			guard.tripped = true
+			error("przekroczony limit pamięci", 2)
+		end
+	end
+end
+sethook(hook, "", STEP)
+
+-- Wywołanie kodu moda pod limitem. Zwraca ok, błąd.
+local function guarded(owner, limit, fn, ...)
+	if disabled[owner] then return false, nil end
+	local saved_used, saved_limit, saved_owner = guard.used, guard.limit, guard.owner
+	if guard.depth == 0 then guard.tripped = false end
+	guard.depth = guard.depth + 1
+	guard.used, guard.limit, guard.owner = 0, limit, owner
+	local ok, err = pcall(fn, ...)
+	local tripped = guard.tripped
+	guard.depth = guard.depth - 1
+	guard.used, guard.limit, guard.owner = saved_used + guard.used, saved_limit, saved_owner
+	if guard.depth == 0 then guard.tripped = false end
+	if tripped and not disabled[owner] then
+		disabled[owner] = true
+		host.mod_disabled(owner, tostring(err))
+	end
+	return ok, err
+end
+
+-- Korutyny modów też podlegają limitom.
+local function safe_coroutine()
+	local c = {}
+	for k, v in pairs(coroutine) do c[k] = v end
+	c.create = function(f)
+		local co = co_create(f)
+		sethook(co, hook, "", STEP)
+		return co
+	end
+	c.wrap = function(f)
+		local co = c.create(f)
+		return function(...)
+			local r = table.pack(co_resume(co, ...))
+			if not r[1] then error(r[2], 2) end
+			return table.unpack(r, 2, r.n)
+		end
+	end
+	return c
+end
+
+-- string.rep potrafi zająć gigabajty jednym wywołaniem, zanim strażnik zdąży zareagować
+local function safe_string()
+	local s = {}
+	for k, v in pairs(string) do s[k] = v end
+	local rep = string.rep
+	s.rep = function(str, n, sep)
+		if #tostring(str) * (tonumber(n) or 0) > 16 * 1024 * 1024 then error("string.rep: wynik za duży", 2) end
+		return rep(str, n, sep)
+	end
+	return s
+end
+
+-- pcall i xpcall modów nie mogą połknąć błędu strażnika (np. pętla wokół pcall)
+local raw_pcall, raw_xpcall = pcall, xpcall
+local function safe_pcall(f, ...)
+	local r = table.pack(raw_pcall(f, ...))
+	if guard.tripped then error(r[2], 0) end
+	return table.unpack(r, 1, r.n)
+end
+local function safe_xpcall(f, h, ...)
+	local r = table.pack(raw_xpcall(f, h, ...))
+	if guard.tripped then error(r[2], 0) end
+	return table.unpack(r, 1, r.n)
+end
+
+-- mody nie mogą podmienić wspólnej metatabeli tekstów
+getmetatable("").__metatable = false
+
+---------------------------------------------------------------------------
 -- Haki (przed / po, jak prefix i postfix w Harmony) oraz zdarzenia
 ---------------------------------------------------------------------------
 local handlers = { before = {}, after = {}, event = {} }
@@ -76,9 +178,10 @@ end
 local function run(kind, name, ctx)
 	local list = handlers[kind][name]
 	if not list then return ctx end
+	if guard.depth == 0 then guard.tripped = false end
 	for _, h in ipairs(list) do
-		local ok, err = pcall(h.fn, ctx)
-		if not ok then host.report_error(h.owner, name .. ": " .. tostring(err)) end
+		local ok, err = guarded(h.owner, LIMIT_CALL, h.fn, ctx)
+		if not ok and err ~= nil then host.report_error(h.owner, name .. ": " .. tostring(err)) end
 		if kind == "before" and ctx.cancel then break end
 	end
 	return ctx
@@ -94,17 +197,26 @@ end
 local function input(id)
 	local b = binds[id]
 	if b then
-		local ok, err = pcall(b.fn)
-		if not ok then host.report_error(b.owner, "klawisz " .. id .. ": " .. tostring(err)) end
+		local ok, err = guarded(b.owner, LIMIT_CALL, b.fn)
+		if not ok and err ~= nil then host.report_error(b.owner, "klawisz " .. id .. ": " .. tostring(err)) end
 	end
 end
 
 local function window_action(id)
 	local a = window_actions[id]
 	if a then
-		local ok, err = pcall(a.fn)
-		if not ok then host.report_error(a.owner, "przycisk " .. id .. ": " .. tostring(err)) end
+		local ok, err = guarded(a.owner, LIMIT_CALL, a.fn)
+		if not ok and err ~= nil then host.report_error(a.owner, "przycisk " .. id .. ": " .. tostring(err)) end
 	end
+end
+
+-- Wczytanie pliku moda: tylko kod tekstowy (bez binarnego bajtkodu), pod limitem czasu.
+local function run_chunk(mod_id, code, chunkname, env)
+	local f, err = load(code, chunkname, "t", env)
+	if not f then return tostring(err) end
+	local ok, e = guarded(mod_id, LIMIT_LOAD, f)
+	if not ok then return tostring(e or "mod wyłączony") end
+	return nil
 end
 
 ---------------------------------------------------------------------------
@@ -121,6 +233,7 @@ local R = {
 	structures = {},
 	config = { biome_scale = 1.0, beach_height = 7 },
 	animations = {},
+	entities = {},
 }
 
 local function open_registry(what)
@@ -208,7 +321,7 @@ local function finalize()
 	local structures = {}
 	for key, s in pairs(R.structures) do structures[key] = norm_structure(s) end
 	return to_godot({
-		blocks = blocks, items = items, animations = copy(R.animations),
+		blocks = blocks, items = items, animations = copy(R.animations), entities = copy(R.entities),
 		worldgen = { config = copy(R.config), biomes = biomes, ores = ores, structures = structures },
 	})
 end
@@ -352,6 +465,39 @@ local function make_api(mod_id)
 		override = function(state, name) host.anim_override(state, name or "") end,
 	}
 
+	E.entities = {
+		-- rodzaj stworzenia: części modelu, AI, łup, pojawianie się (opis w docs/MODDING.md)
+		register = function(type, def)
+			open_registry("entities.register")
+			local d = copy(def or {})
+			d.mod = mod_id
+			d.name = d.name or type
+			R.entities[type] = d
+			return d
+		end,
+		def = function(type) return R.entities[type] end,
+		spawn = function(type, pos, data, scale) return host.entity_spawn(type, pos, to_godot(data or {}), scale or 1.0) end,
+		remove = function(id) host.entity_remove(id) end,
+		exists = function(id) return host.entity_exists(id) end,
+		type = function(id) return host.entity_get(id, "type") end,
+		position = function(id) return host.entity_get(id, "pos") end,
+		health = function(id) return host.entity_get(id, "health") end,
+		state = function(id) return host.entity_get(id, "state") end,
+		scale = function(id) return host.entity_get(id, "scale") end,
+		list = function(type, radius) return to_lua(host.entity_list(type or "", radius or 0)) end,
+		teleport = function(id, pos) host.entity_set(id, "pos", pos) end,
+		move_to = function(id, pos) host.entity_set(id, "target", pos) end,
+		set_scale = function(id, s) host.entity_set(id, "scale", s) end,
+		damage = function(id, amount, cause) host.entity_damage(id, amount, cause or "mod") end,
+		animate = function(id, name) host.entity_set(id, "animate", name) end,
+		show = function(id, tag, on) host.entity_tag(id, tag, on ~= false, nil) end,
+		color = function(id, tag, color) host.entity_tag(id, tag, true, color) end,
+		data = function(id) return to_lua(host.entity_get(id, "data")) or {} end,
+		set_data = function(id, key, value) host.entity_data(id, key, to_godot(value)) end,
+		-- przedmiot leżący na ziemi; gracz podnosi go, podchodząc (hak item.pickup)
+		drop = function(item, count, pos) return host.item_drop(item, count or 1, pos) end,
+	}
+
 	E.world = {
 		get_block = function(pos) return host.get_block(pos) end,
 		set_block = function(pos, id)
@@ -381,7 +527,10 @@ local function make_api(mod_id)
 		stop_animation = function() host.player_animate("") end,
 		-- kolory części postaci: {tunic = "#aa3333", scarf = Color(...)} (klucze w docs/MODDING.md)
 		colors = function(t) host.player_colors(to_godot(t)) end,
-		target = function() return to_lua(host.player_target()) end,
+		-- blok, w który celuje gracz: {pos, normal, block}; with_liquids = true uwzględnia ciecze
+		target = function(with_liquids) return to_lua(host.player_target(with_liquids == true)) end,
+		in_liquid = function() return host.player_in_liquid() end,
+		eyes_in_liquid = function() return host.player_eyes_in_liquid() end,
 		selected_item = function() return to_lua(host.selected_item()) end,
 	}
 
@@ -456,10 +605,14 @@ local function make_env(mod_id)
 		-- biblioteki kopiujemy, żeby jeden mod nie mógł podmienić funkcji innym
 		env[k] = LIB_TABLES[k] and copy(_G[k]) or _G[k]
 	end
+	env.coroutine = safe_coroutine()
+	env.string = safe_string()
+	env.pcall = safe_pcall
+	env.xpcall = safe_xpcall
 	env.engine = make_api(mod_id)
 	env.print = env.engine.log
 	env._G = env
 	return env
 end
 
-return { dispatch = dispatch, make_env = make_env, input = input, window_action = window_action, finalize = finalize }
+return { dispatch = dispatch, make_env = make_env, input = input, window_action = window_action, finalize = finalize, run_chunk = run_chunk }

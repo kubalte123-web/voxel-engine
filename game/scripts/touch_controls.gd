@@ -102,7 +102,8 @@ func _press(name: String, down: bool) -> void:
 		"jump":
 			player.touch_jump = down
 		"break":
-			if down: player.break_block()
+			if down: player.start_digging()
+			else: player.stop_digging()
 		"place":
 			if down: player.use_item()
 		"next":

@@ -1,0 +1,55 @@
+class_name ItemDrop
+extends Node3D
+## Przedmiot leżący na ziemi (np. łup ze zwierzęcia): obraca się, spada, a gdy gracz podejdzie,
+## silnik pyta mody hakiem "item.pickup" (ctx.taken = ile zabrano; plecak dodaje do ekwipunku).
+
+var manager: Node
+var world: World
+var id := 0
+var item := ""
+var count := 1
+var vy := 2.5
+var age := 0.0
+var sprite: Sprite3D
+
+
+func _ready() -> void:
+	sprite = Sprite3D.new()
+	sprite.texture = world.reg.icon(item)
+	sprite.pixel_size = 0.4 / maxf(1.0, float(sprite.texture.get_width()))
+	sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	sprite.shaded = false
+	add_child(sprite)
+
+
+func _physics_process(delta: float) -> void:
+	age += delta
+	var below := Vector3i((global_position - Vector3(0, 0.15, 0)).floor())
+	var bb := world.get_block(below)
+	var on_ground := bb != Blocks.AIR and (Blocks.props(bb) & Blocks.SOLID) != 0
+	if world.reg.is_liquid(world.get_block(Vector3i(global_position.floor()))):
+		vy = lerpf(vy, 0.8, delta * 3.0)  # przedmioty wypływają
+	elif on_ground and vy <= 0.0:
+		vy = 0.0
+		global_position.y = float(below.y + 1) + 0.15
+	else:
+		vy -= 18.0 * delta
+	global_position.y += vy * delta
+	sprite.rotation.y += delta * 2.0
+	sprite.position.y = 0.15 + sin(age * 2.5) * 0.06
+	if age > 0.6 and manager.player and manager.player.global_position.distance_to(global_position) < 1.6:
+		var ctx := Mods.before("item.pickup", {"item": item, "count": count})
+		var taken := int(ctx.get("taken", 0))
+		if taken > 0:
+			count -= taken
+			if count <= 0:
+				manager.remove(id)
+				return
+	if age > 300.0 or global_position.y < -90.0:
+		manager.remove(id)
+
+
+func save_state() -> Dictionary:
+	var p := global_position
+	return {"item": item, "count": count, "pos": [p.x, p.y, p.z]}

@@ -7,6 +7,8 @@ extends RefCounted
 const OPAQUE := 1
 const CROSS := 2
 const SOLID := 4
+const LIQUID := 8
+const LEVELS := 8          # poziomy cieczy: 1 (cienka warstwa) .. 8 (pełny blok)
 const MAX_BLOCKS := 256
 const ATLAS_COLS := 16
 const PX := 16
@@ -18,6 +20,10 @@ var defs: Array = [{"key": "air", "name": "Powietrze", "drops": []}]
 var props := PackedInt32Array([0])
 var tiles := PackedInt32Array([0, 0, 0, 0, 0, 0])
 var tile_images: Array[Image] = []
+var liquid := PackedInt32Array([0])  # id bloku -> rodzaj cieczy * 16 + poziom (0 = nie ciecz)
+var liquid_kinds: Array = []         # [{key, name, source, levels: [id dla poziomu 0..8], color, deep, viscosity, ...}]
+var hardness := PackedFloat32Array([0.0])
+var tile_colors: Array[Color] = []   # średni kolor kafelka (dalekie widoki, cząsteczki)
 var atlas: ImageTexture
 var atlas_rows := 1
 
@@ -26,6 +32,7 @@ var item_keys: Array[String] = []
 var placeable: Array[String] = []  # przedmioty-bloki do stawiania (tryb kreatywny)
 var worldgen := {}
 var animations := {}
+var entities := {}                 # rodzaj stworzenia -> definicja (części modelu, AI, łup, pojawianie się)
 var errors: Array[String] = []
 
 var mod_paths := {}  # id moda -> folder (do wczytywania tekstur)
@@ -64,6 +71,30 @@ func _face_spec(tex: Dictionary, face: int) -> Variant:
 	return tex.get("all", null)
 
 
+func _add_block(d: Dictionary, key: String, p: int, liq: int) -> int:
+	if keys.size() >= MAX_BLOCKS:
+		errors.append("Za dużo bloków (limit %d), pominięto: %s" % [MAX_BLOCKS, key])
+		return -1
+	var id := keys.size()
+	var mod_id := str(d.get("mod", ""))
+	keys.append(key)
+	names.append(str(d.get("name", key)))
+	index[key] = id
+	defs.append(d)
+	props.append(p)
+	liquid.append(liq)
+	var shape := str(d.get("shape", "cube"))
+	var hd := float(d.get("hardness", 0.0 if shape == "cross" else 1.0))
+	if not bool(d.get("breakable", true)) or liq != 0:
+		hd = -1.0  # nie do wykopania
+	hardness.append(hd)
+	var tex: Dictionary = d.get("textures", {}) if d.get("textures") is Dictionary else {}
+	for f in 6:
+		var spec: Variant = _face_spec(tex, f)
+		tiles.append(_tile(spec, mod_id) if spec != null else _tile({"pattern": "noise"}, mod_id))
+	return id
+
+
 func build(content: Dictionary, paths: Dictionary = {}) -> void:
 	mod_paths = paths
 	_tile({"pattern": "solid", "color": "#00000000"}, "")  # kafelek 0: pusty
@@ -73,15 +104,9 @@ func build(content: Dictionary, paths: Dictionary = {}) -> void:
 		var key := str(d.get("key", ""))
 		if key == "" or index.has(key):
 			continue
-		if keys.size() >= MAX_BLOCKS:
-			errors.append("Za dużo bloków (limit %d), pominięto: %s" % [MAX_BLOCKS, key])
+		if d.get("liquid") is Dictionary:
+			_add_liquid(d, key)
 			continue
-		var id := keys.size()
-		var mod_id := str(d.get("mod", ""))
-		keys.append(key)
-		names.append(str(d.get("name", key)))
-		index[key] = id
-		defs.append(d)
 		var shape := str(d.get("shape", "cube"))
 		var transparent := bool(d.get("transparent", false))
 		var p := 0
@@ -94,11 +119,7 @@ func build(content: Dictionary, paths: Dictionary = {}) -> void:
 				p |= OPAQUE
 			if bool(d.get("solid", true)):
 				p |= SOLID
-		props.append(p)
-		var tex: Dictionary = d.get("textures", {}) if d.get("textures") is Dictionary else {}
-		for f in 6:
-			var spec: Variant = _face_spec(tex, f)
-			tiles.append(_tile(spec, mod_id) if spec != null else _tile({"pattern": "noise"}, mod_id))
+		_add_block(d, key, p, 0)
 	for d in arr(content.get("items")):
 		if not d is Dictionary or str(d.get("key", "")) == "":
 			continue
@@ -113,10 +134,82 @@ func build(content: Dictionary, paths: Dictionary = {}) -> void:
 			placeable.append(key)
 	worldgen = content.get("worldgen", {}) if content.get("worldgen") is Dictionary else {}
 	animations = content.get("animations", {}) if content.get("animations") is Dictionary else {}
+	entities = content.get("entities", {}) if content.get("entities") is Dictionary else {}
 	_build_atlas()
 
 
+## Ciecz: blok źródłowy (klucz, nieskończony zbiornik z generatora) i 8 poziomów płynącej cieczy
+## ("woda~1" .. "woda~8"), które zachowują objętość. Pole liquid w definicji:
+## {color, deep, foam, viscosity (co ile kroków symulacji płynie), push (siła prądu), emission}.
+func _add_liquid(d: Dictionary, key: String) -> void:
+	var ld: Dictionary = d.liquid
+	var kind := liquid_kinds.size()
+	if kind >= 8:
+		errors.append("Za dużo rodzajów cieczy (limit 8): " + key)
+		return
+	var info := {
+		"key": key, "name": str(d.get("name", key)), "levels": [], "source": -1,
+		"color": TexGen._col(ld.get("color"), Color(0.16, 0.45, 0.78)),
+		"deep": TexGen._col(ld.get("deep"), Color(0.04, 0.16, 0.36)),
+		"foam": TexGen._col(ld.get("foam"), Color(0.92, 0.96, 1.0)),
+		"viscosity": maxi(1, int(ld.get("viscosity", 1))), "push": float(ld.get("push", 1.0)),
+		"emission": float(ld.get("emission", 0.0)), "def": d,
+	}
+	liquid_kinds.append(info)
+	var levels := [0]
+	for lv in range(1, LEVELS + 1):
+		var vd := d.duplicate()
+		vd["item"] = false
+		vd["flow_level"] = lv
+		levels.append(_add_block(vd, "%s~%d" % [key, lv], LIQUID, kind * 16 + lv))
+	info.levels = levels
+	info.source = _add_block(d, key, LIQUID, kind * 16 + LEVELS)
+
+
+func liquid_kind(id: int) -> int:
+	var v := liquid[id] if id >= 0 and id < liquid.size() else 0
+	return -1 if v == 0 else v / 16
+
+
+func liquid_level(id: int) -> int:
+	var v := liquid[id] if id >= 0 and id < liquid.size() else 0
+	return v % 16
+
+
+func is_source(id: int) -> bool:
+	var k := liquid_kind(id)
+	return k >= 0 and liquid_kinds[k].source == id
+
+
+func is_liquid(id: int) -> bool:
+	return id > 0 and id < liquid.size() and liquid[id] != 0
+
+
+func def_of(id: int) -> Dictionary:
+	return defs[id] if id >= 0 and id < defs.size() else {}
+
+
+func has_gravity(id: int) -> bool:
+	return bool(def_of(id).get("gravity", false))
+
+
+func loose(id: int) -> Variant:
+	var l: Variant = def_of(id).get("loose")
+	return l if l is Dictionary else null
+
+
 func _build_atlas() -> void:
+	tile_colors.clear()
+	for img in tile_images:
+		var sum := Color(0, 0, 0, 0)
+		var n := 0
+		for y in PX:
+			for x in PX:
+				var c := img.get_pixel(x, y)
+				if c.a > 0.5:
+					sum += c
+					n += 1
+		tile_colors.append(sum / maxf(1.0, float(n)) if n > 0 else Color(0, 0, 0, 0))
 	atlas_rows = maxi(1, ceili(tile_images.size() / float(ATLAS_COLS)))
 	var img := Image.create(ATLAS_COLS * PX, atlas_rows * PX, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0, 0, 0, 0))

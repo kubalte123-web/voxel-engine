@@ -1,0 +1,14 @@
+{
+	"id": "loose",
+	"name": "Luźne przedmioty",
+	"version": "0.1.0",
+	"author": "Jakub Lewicki",
+	"description": "Skrzynie, beczki, piłki i głazy, które nie przyczepiają się do świata: można je pchać, kopnąć (lewy przycisk), podnieść (prawy przycisk), toczą się i pływają po wodzie zależnie od gęstości. W ustawieniach możesz zrobić luźnymi także zwykłe bloki.",
+	"requires": ["backpack"],
+	"content": ["content.lua"],
+	"scripts": ["main.lua"],
+	"settings": [
+		{"key": "starter", "label": "Kilka przedmiotów na start", "type": "bool", "default": true},
+		{"key": "loose_blocks", "label": "Zwykłe bloki stawiane jako luźne", "type": "block_toggles", "default": false}
+	]
+}
