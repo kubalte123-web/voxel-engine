@@ -54,8 +54,8 @@ void fragment() {
 	col = mix(col, foam_color[k].rgb, fm);
 	float fr = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 4.0);
 	float sl = pow(0.8, (1.0 - lightv.x) * 15.0);
-	float bl = lightv.y > 0.01 ? pow(0.8, (1.0 - lightv.y) * 15.0) : 0.0;
-	EMISSION += col * vec3(1.0, 0.78, 0.5) * bl * 0.8;
+	float bl = lightv.y > 0.01 ? pow(0.86, (1.0 - lightv.y) * 15.0) : 0.0;
+	EMISSION += col * vec3(1.0, 0.78, 0.5) * bl * 2.2;
 	col *= max(sl, min_light);
 	ALBEDO = col;
 	ALPHA = clamp(a + fm * 0.5 + fr * 0.35, 0.0, 1.0);

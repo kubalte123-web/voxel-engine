@@ -262,7 +262,7 @@ static func _thin(x: int, y: int, z: int, b: int, tiles: PackedInt32Array, cols_
 		cols: PackedColorArray, idx: PackedInt32Array) -> void:
 	var a := 7.0 / 16.0
 	var bb := 9.0 / 16.0
-	var h := 10.0 / 16.0
+	var h := 11.0 / 16.0
 	var sk := float(l >> 4) / 15.0
 	var bl := float(l & 15) / 15.0
 	for f in 6:
@@ -280,10 +280,10 @@ static func _thin(x: int, y: int, z: int, b: int, tiles: PackedInt32Array, cols_
 			var v := 0.0
 			if f == 2 or f == 3:
 				u = bb if cc.x == 1 else a
-				v = (8.0 if cc.z == 1 else 6.0) / 16.0
+				v = (4.0 if cc.z == 1 else 2.0) / 16.0
 			else:
 				u = ((bb if cc.z == 1 else a) if (f == 0 or f == 1) else (bb if cc.x == 1 else a))
-				v = 6.0 / 16.0 if cc.y == 1 else 1.0
+				v = 2.0 / 16.0 if cc.y == 1 else 1.0
 			uvs.append(Vector2((t % cols_n + clampf(u, eps, 1.0 - eps)) * iu, (t / cols_n + clampf(v, eps, 1.0 - eps)) * iv))
 			cols.append(Color(FACE_SHADE[f], sk, bl))
 		for q in [0, 2, 1, 0, 3, 2]:

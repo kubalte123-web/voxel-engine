@@ -8,10 +8,10 @@ render_mode diffuse_lambert, specular_disabled;
 uniform sampler2D atlas : source_color, filter_nearest;
 uniform float min_light = 0.025;
 uniform vec3 torch_color : source_color = vec3(1.0, 0.78, 0.5);
-uniform float torch_strength = 0.9;
+uniform float torch_strength = 2.6;
 uniform vec3 hand_pos = vec3(0.0, -10000.0, 0.0);
 uniform float hand_light = 0.0;
-instance uniform vec2 light_override = vec2(-1.0, -1.0);
+uniform vec2 light_override = vec2(-1.0, -1.0);  // obiekty poza chunkami (własna kopia materiału)
 
 varying vec3 wpos;
 
@@ -39,7 +39,8 @@ void fragment() {
 	float ao = pow(COLOR.r, 2.2);
 	vec3 base = tex.rgb * 0.8 * ao;
 	float s = curve(sky);
-	float b = blk > 0.01 ? curve(blk) : 0.0;
+	// światło bloków słabnie łagodniej niż niebo, żeby pochodnia oświetlała okolicę jak w MC
+	float b = blk > 0.01 ? pow(0.86, (1.0 - blk) * 15.0) : 0.0;
 	ALBEDO = base * max(s, min_light);
 	EMISSION = base * torch_color * b * torch_strength;
 	ALPHA = tex.a;

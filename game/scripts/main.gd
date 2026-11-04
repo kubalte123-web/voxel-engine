@@ -232,7 +232,8 @@ func _update_sky() -> void:
 	sun.light_energy = 0.75 * day
 	sun.light_color = Color(1, 1, 1).lerp(Color(1.0, 0.72, 0.5), dusk)
 	sun.visible = day > 0.01
-	env.ambient_light_energy = lerpf(0.08 if dark_nights else 0.2, 0.3, day)
+	# noc jest ciemna, żeby pochodnie miały znaczenie (Ciemne noce: prawie czarno)
+	env.ambient_light_energy = lerpf(0.025 if dark_nights else 0.07, 0.3, day)
 	env.fog_light_color = hor
 
 
@@ -421,6 +422,48 @@ func _look_at_point(p: Vector3) -> void:
 	player.pitch = clampf(atan2(to.y, Vector2(to.x, to.z).length()), -1.4, 1.1)
 
 
+## Szybki test samego światła: noc z pochodniami i lampą, pochodnia w ręce.
+func _test_light(dir: String) -> void:
+	Settings.render_distance = 3
+	_apply_settings()
+	await _wait_loaded()
+	var hz0 := world.terrain.height(0, 0)
+	time_of_day = 23.0
+	_update_sky()
+	var tbase := Vector3i(player.global_position.floor())
+	var placed: Array[Vector3i] = []
+	for i in 4:
+		var a := i * TAU / 4.0 + 0.4
+		var x := tbase.x + roundi(cos(a) * 4.0)
+		var z := tbase.z + roundi(sin(a) * 4.0)
+		var ty := entities._surface(x, z, tbase.y + 6)
+		if ty != -99999:
+			world.set_block(Vector3i(x, ty + 1, z), Blocks.id("torch"))
+			placed.append(Vector3i(x, ty + 1, z))
+	world.set_block(Vector3i(tbase.x - 5, entities._surface(tbase.x - 5, tbase.z, tbase.y + 4) + 1, tbase.z), Blocks.id("lamp"))
+	await _wait(2.0)
+	var tq: Vector3i = placed[0] if not placed.is_empty() else tbase
+	var cc := World.chunk_of(tq)
+	var mb := 0.0
+	if world.nodes.has(cc):
+		var cols: PackedColorArray = (world.nodes[cc].mesh as ArrayMesh).surface_get_arrays(0)[Mesh.ARRAY_COLOR]
+		for col in cols:
+			mb = maxf(mb, col.b)
+	print("ŚWIATŁO pochodnia ", Blocks.key(world.get_block(tq)), " w ", tq, " obok=", world.light_at(Vector3(tq) + Vector3(1.5, 0.5, 0.5)), " max b w siatce chunka=", mb)
+	player.pitch = -0.45
+	Mods.camera_stats["distance"] = 6.0
+	await _wait(0.8)
+	await _shot(dir, "l1_night_torches")
+	Mods.set_slot("hotbar", 0, {"item": "torch", "count": 5})
+	player.select(0)
+	world.set_block(Vector3i(tbase.x, tbase.y, tbase.z) + Vector3i(0, -1, 0), Blocks.id("dirt"))
+	time_of_day = 12.0
+	_update_sky()
+	await _wait(0.6)
+	await _shot(dir, "l2_day")
+	get_tree().quit()
+
+
 func _test_stage5(dir: String) -> void:
 	var reg := Blocks.reg
 	# twardość: czas kopania
@@ -603,6 +646,9 @@ func _goto(x: float, y: float, z: float) -> void:
 
 
 func _autotest(dir: String) -> void:
+	if OS.get_cmdline_user_args().has("--light-only"):
+		await _test_light(dir)
+		return
 	Settings.render_distance = 4
 	_apply_settings()
 	await _wait_loaded()

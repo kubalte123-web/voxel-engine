@@ -74,7 +74,7 @@ func _ready() -> void:
 			sh.size = Vector3.ONE * size
 			cs.shape = sh
 			mi.mesh = BlockMesh.cube(world.reg, block, size)
-			mi.material_override = world.material
+			mi.material_override = world.material.duplicate()
 			mi.position = Vector3.ONE * -size * 0.5
 	add_child(cs)
 	add_child(mi)
@@ -88,7 +88,7 @@ func _update_light(delta: float) -> void:
 	light_timer = 0.3
 	var l := world.light_at(global_position + Vector3(0, 0.3, 0))
 	if mesh_node.material_override is ShaderMaterial:
-		mesh_node.set_instance_shader_parameter("light_override", l)
+		(mesh_node.material_override as ShaderMaterial).set_shader_parameter("light_override", l)
 	else:
 		EntityLight.apply([mesh_node.material_override], l)
 

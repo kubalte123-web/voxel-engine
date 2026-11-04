@@ -694,7 +694,7 @@ Array VoxelMesher::build(const PackedByteArray &padded, const PackedByteArray &p
 				if (bp & P_THIN) {
 					// cienki słupek (pochodnia): 2/16 szerokości, 10/16 wysokości, światło z własnej komórki
 					const float sk = float(double(lt(ci) >> 4) / 15.0), bl = float(double(lt(ci) & 15) / 15.0);
-					const float a = 7.0f / 16.0f, bb = 9.0f / 16.0f, h = 10.0f / 16.0f;
+					const float a = 7.0f / 16.0f, bb = 9.0f / 16.0f, h = 11.0f / 16.0f;
 					for (int f = 0; f < 6; f++) {
 						const int tile = tile_of(b * 6 + f);
 						const int base = verts.size();
@@ -704,8 +704,8 @@ Array VoxelMesher::build(const PackedByteArray &padded, const PackedByteArray &p
 							verts.push_back(Vector3(float(x - 1) + vx, float(y - 1) + vy, float(z - 1) + vz));
 							norms.push_back(Vector3(float(NORMALS[f][0]), float(NORMALS[f][1]), float(NORMALS[f][2])));
 							float u, v;
-							if (f == 2 || f == 3) { u = cc[0] ? bb : a; v = (cc[2] ? 8.0f : 6.0f) / 16.0f; }
-							else { u = (f == 0 || f == 1) ? (cc[2] ? bb : a) : (cc[0] ? bb : a); v = cc[1] ? 6.0f / 16.0f : 1.0f; }
+							if (f == 2 || f == 3) { u = cc[0] ? bb : a; v = (cc[2] ? 4.0f : 2.0f) / 16.0f; }
+							else { u = (f == 0 || f == 1) ? (cc[2] ? bb : a) : (cc[0] ? bb : a); v = cc[1] ? 2.0f / 16.0f : 1.0f; }
 							uvs.push_back(uv_of(tile, u, v));
 							cols.push_back(Color(FACE_SHADE[f], sk, bl));
 						}

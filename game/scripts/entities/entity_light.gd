@@ -12,7 +12,8 @@ static func min_light() -> float:
 
 ## Mnożnik koloru (światło nieba) i siła świecenia (światło bloków) dla wartości Vector2(niebo, bloki).
 static func factors(l: Vector2) -> Vector2:
-	return Vector2(maxf(World.light_curve(l.x) if l.x > 0.01 else 0.0, min_light()), World.light_curve(l.y) * 0.9)
+	var blk := pow(0.86, (1.0 - l.y) * 15.0) * 2.0 if l.y > 0.01 else 0.0
+	return Vector2(maxf(World.light_curve(l.x) if l.x > 0.01 else 0.0, min_light()), blk)
 
 
 ## Ustawia materiały: kolor bazowy (meta "base") razy światło nieba, świecenie od pochodni.
