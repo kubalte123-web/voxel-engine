@@ -14,6 +14,10 @@ func _ready() -> void:
 	mi.material_override = world.material
 	mi.position = Vector3(-0.5, 0.0, -0.5)
 	add_child(mi)
+	mesh = mi
+
+
+var mesh: MeshInstance3D
 
 
 func _physics_process(delta: float) -> void:
@@ -31,5 +35,6 @@ func _physics_process(delta: float) -> void:
 		queue_free()
 		return
 	global_position.y = ny
+	mesh.set_instance_shader_parameter("light_override", world.light_at(global_position + Vector3(0, 0.5, 0)))
 	if global_position.y < -120.0:
 		queue_free()

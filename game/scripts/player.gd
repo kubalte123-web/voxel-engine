@@ -34,6 +34,7 @@ var dig_time := 0.0        # ile sekund trzeba kopać bieżący blok (-1 = nie d
 var dig_progress := 0.0
 var dig_cooldown := 0.0
 var swing_timer := 0.0
+var light_timer := 0.0
 var crack: MeshInstance3D
 static var crack_mats: Array[StandardMaterial3D] = []
 var fall_top := 0.0      # najwyższy punkt od oderwania od ziemi
@@ -329,6 +330,10 @@ func _physics_process(delta: float) -> void:
 	elif camera_mode() == "first":
 		model.rotation.y = yaw
 	model.animate(delta, hspeed, is_on_floor() or in_liquid, pitch)
+	light_timer -= delta
+	if light_timer <= 0.0:
+		light_timer = 0.2
+		model.set_light(world.light_at(global_position + Vector3(0, 1.2, 0)))
 	_update_target()
 	_update_digging(delta)
 

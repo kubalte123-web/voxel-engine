@@ -37,6 +37,10 @@ func _physics_process(delta: float) -> void:
 		vy -= 18.0 * delta
 	global_position.y += vy * delta
 	sprite.rotation.y += delta * 2.0
+	if int(age * 4.0) != int((age - delta) * 4.0):
+		var f := EntityLight.factors(world.light_at(global_position + Vector3(0, 0.3, 0)))
+		var v := clampf(f.x + f.y, 0.0, 1.0)
+		sprite.modulate = Color(v, v * (0.9 if f.y > f.x else 1.0), v * (0.8 if f.y > f.x else 1.0))
 	sprite.position.y = 0.15 + sin(age * 2.5) * 0.06
 	if age > 0.6 and manager.player and manager.player.global_position.distance_to(global_position) < 1.6:
 		var ctx := Mods.before("item.pickup", {"item": item, "count": count})

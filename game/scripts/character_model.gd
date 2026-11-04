@@ -41,7 +41,19 @@ func _mat(slot: String) -> StandardMaterial3D:
 func apply_colors(colors: Dictionary) -> void:
 	for k in colors:
 		if mats.has(k):
+			mats[k].set_meta("base", colors[k])
 			mats[k].albedo_color = colors[k]
+	if light_value.x >= 0.0:
+		set_light(light_value)
+
+
+var light_value := Vector2(-1, 0)
+
+
+## Oświetlenie postaci światłem z mapy światła (Vector2(niebo, bloki), 0..1).
+func set_light(l: Vector2) -> void:
+	light_value = l
+	EntityLight.apply(mats.values(), l)
 
 
 func _box(parent: Node3D, size: Vector3, pos: Vector3, slot: String) -> MeshInstance3D:

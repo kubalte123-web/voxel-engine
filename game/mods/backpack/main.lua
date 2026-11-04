@@ -21,6 +21,7 @@ local stats = engine.storage.get("stats", { mined = 0, placed = 0 })
 if engine.settings.get("starter") and not engine.storage.get("started", false) then
 	kit.inventory.add(HOTBAR, "planks", 32)
 	kit.inventory.add(HOTBAR, "stone", 16)
+	kit.inventory.add(BACKPACK, "torch", 32)
 	engine.storage.set("started", true)
 end
 

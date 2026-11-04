@@ -16,7 +16,7 @@ engine.blocks.register("cobblestone", {
 })
 engine.blocks.register("coal_ore", { name = "Ruda węgla", texture = ore_texture("#202022"), drops = "coal" })
 engine.blocks.register("iron_ore", { name = "Ruda żelaza", texture = ore_texture("#c89a72"), drops = "raw_iron" })
-engine.blocks.register("ruby_ore", { name = "Ruda rubinu", texture = ore_texture("#d0203a"), drops = { item = "ruby", count = 1 } })
+engine.blocks.register("ruby_ore", { name = "Ruda rubinu", texture = ore_texture("#d0203a"), drops = { item = "ruby", count = 1 }, light = 4 })
 
 engine.items.register("coal", { name = "Węgiel", icon = { pattern = "gem", color = "#2a2a2e", color2 = "#151517" } })
 engine.items.register("raw_iron", { name = "Surowe żelazo", icon = { pattern = "ingot", color = "#c89a72", color2 = "#9a7254" } })

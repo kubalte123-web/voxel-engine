@@ -24,6 +24,7 @@ class VoxelMesher : public RefCounted {
 	bool caves = false;
 	double cave_tw = 0.055, cave_tc = 0.6, lake_depth = 0.0, lake_t = 0.3;
 	std::vector<int32_t> liquid;
+	std::vector<int32_t> lprops;  // id -> świecenie (0..15) | 16 nieprzezroczysty | 32 ciecz
 	double max_sum = 0.0;
 	std::vector<double> B, F, PL, O;
 	std::vector<int32_t> T;
@@ -37,11 +38,17 @@ public:
 	// noises: [hills, detail, temperature, humidity, mountain]; spec: wynik WorldgenSpec.compile
 	void configure(const Array &noises, const Dictionary &spec, const PackedInt32Array &tiles,
 			const PackedInt32Array &props, const PackedInt32Array &liquid, int atlas_cols, int atlas_rows);
+	void set_light_props(const PackedInt32Array &lp);
+	// Światło chunka cpos: obszar chunka z marginesem `margin` bloków (27 chunków: own i sąsiedzi, null =
+	// brak danych, przybliżane mapą wysokości), skyh = najwyższy nieprzezroczysty blok w kolumnach obszaru.
+	// Zwraca [światło obwódki P^3, światło wnętrza S^3, najwyższe nieprzezroczyste bloki kolumn chunka S^2];
+	// bajt światła = niebo << 4 | bloki.
+	Array light(const Vector3i &cpos, const Array &chunks, const PackedInt32Array &skyh, int margin) const;
 	// Zwraca [padded (34^3), blocks (32^3)]. own i neighbors[i] mogą być puste.
 	Array prepare(const Vector3i &cpos, const PackedByteArray &own, const Array &neighbors) const;
 	// Wynik: [vertices, normals, uvs, colors, indices, collision_faces,
 	//         ciecz: vertices, normals, uvs (kierunek prądu), colors (piana, głębokość, brzeg fali, rodzaj), indices]
-	Array build(const PackedByteArray &padded) const;
+	Array build(const PackedByteArray &padded, const PackedByteArray &plight) const;
 	// Daleki widok: wysokość i biom w siatce n x n co `step` bloków od (x0, z0): [h0, b0, h1, b1, ...]
 	PackedInt32Array heights(int x0, int z0, int step, int n) const;
 

@@ -1,7 +1,7 @@
 class_name TexGen
 ## Tekstury bloków i przedmiotów 16x16: z pliku PNG moda albo z prostego wzoru opisanego danymi.
 ##
-## Wzory (pole "pattern"): solid, noise, speckle, bricks, planks, stripes, ore, glass, gem, ingot, food, plant.
+## Wzory (pole "pattern"): solid, noise, speckle, bricks, planks, stripes, ore, glass, lamp, gem, ingot, food, plant, torch.
 ## Kolory: "color" (główny), "color2" (drugi), "spots" (plamki, np. ruda), "seed" (losowość).
 
 const PX := 16
@@ -92,6 +92,11 @@ static func pattern(d: Dictionary) -> Image:
 					var edge := x == 0 or y == 0 or x == PX - 1 or y == PX - 1
 					var glint := (x - y == 3 and x > 4 and x < 9) or (x - y == 6 and x > 8 and x < 12)
 					c = a if edge else (b if glint else Color(0, 0, 0, 0))
+				"lamp":
+					# świecący blok: jasny środek, ciemniejsza rama i kratka
+					var edge := x == 0 or y == 0 or x == PX - 1 or y == PX - 1
+					var grid := x == 7 or x == 8 or y == 7 or y == 8
+					c = b if edge else (a.darkened(0.25) if grid else a.lerp(a.lightened(0.3), rng.randf()))
 				"ore":
 					c = a.lerp(b, rng.randf() * 0.5)
 					var cx := (x + 3) % 6
@@ -99,7 +104,7 @@ static func pattern(d: Dictionary) -> Image:
 					if (cx - 2) * (cx - 2) + (cy - 2) * (cy - 2) <= 1 + int(rng.randf() < 0.3):
 						c = spots.lerp(spots.lightened(0.3), rng.randf() * 0.5)
 			img.set_pixel(x, y, c)
-	if kind in ["gem", "ingot", "food", "plant"]:
+	if kind in ["gem", "ingot", "food", "plant", "torch"]:
 		_shape(img, kind, a, b, rng)
 	return img
 
@@ -130,6 +135,19 @@ static func _shape(img: Image, kind: String, a: Color, b: Color, rng: RandomNumb
 				img.set_pixel(8, y, Color(0.35, 0.22, 0.1))
 			img.set_pixel(9, 2, Color(0.25, 0.55, 0.2))
 			img.set_pixel(10, 2, Color(0.25, 0.55, 0.2))
+		"torch":
+			# patyk (kolumny 7-8, wiersze 6-15) i płomień nad nim; ściany pochodni biorą ten wycinek
+			for y in range(6, 16):
+				img.set_pixel(7, y, Color(0.42, 0.28, 0.14))
+				img.set_pixel(8, y, Color(0.34, 0.22, 0.1))
+			for y in range(2, 7):
+				for x in range(6, 10):
+					var hot := y >= 4 and x >= 7 and x <= 8
+					img.set_pixel(x, y, Color(1.0, 0.95, 0.6) if hot else Color(1.0, 0.62, 0.15))
+			img.set_pixel(7, 6, Color(1.0, 0.9, 0.5))
+			img.set_pixel(8, 6, Color(1.0, 0.8, 0.3))
+			img.set_pixel(7, 7, Color(1.0, 0.85, 0.4))
+			img.set_pixel(8, 7, Color(1.0, 0.75, 0.3))
 		"plant":
 			for i in 7:
 				var bx := 2 + i * 2

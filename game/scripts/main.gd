@@ -145,6 +145,8 @@ func _apply_settings() -> void:
 	world.set_radius(Settings.render_distance)
 	far.set_radius(Settings.render_distance, Settings.far_view)
 	world.water_material.set_shader_parameter("wave", 1.0 if Settings.water_waves else 0.0)
+	world.material.set_shader_parameter("min_light", EntityLight.min_light())
+	world.water_material.set_shader_parameter("min_light", EntityLight.min_light())
 	player.camera.fov = Settings.fov
 	player.mouse_sensitivity = 0.0028 * Settings.mouse_sensitivity
 	sun.shadow_enabled = Settings.shadows and not OS.has_feature("web")
@@ -161,6 +163,7 @@ func _process(delta: float) -> void:
 		time_of_day = fmod(time_of_day + delta * 24.0 / (day_minutes * 60.0), 24.0)
 		_update_sky()
 	_update_underwater()
+	_update_hand_light()
 	tick_timer -= delta
 	if tick_timer <= 0.0:
 		tick_timer = 0.1
@@ -231,6 +234,16 @@ func _update_sky() -> void:
 	sun.visible = day > 0.01
 	env.ambient_light_energy = lerpf(0.08 if dark_nights else 0.2, 0.3, day)
 	env.fog_light_color = hor
+
+
+## Przedmiot świecący w ręce (pochodnia) oświetla okolicę gracza.
+func _update_hand_light() -> void:
+	var b := player.current_block()
+	var l := 0
+	if b > 0:
+		l = Blocks.reg.lprops[b] & 15
+	world.material.set_shader_parameter("hand_light", float(l) / 15.0)
+	world.material.set_shader_parameter("hand_pos", player.global_position + Vector3(0, 1.3, 0))
 
 
 ## Widok pod wodą: gęsta mgła w kolorze cieczy i lekkie zabarwienie ekranu.
@@ -530,8 +543,41 @@ func _test_stage5(dir: String) -> void:
 		player.pitch = -0.1
 		await _wait(1.0)
 		await _shot(dir, "g14_cave")
+		var dark := world.light_at(Vector3(cave) + Vector3(0.5, 0.5, 0.5))
+		# pochodnia obok gracza rozjaśnia jaskinię
+		var tp := cave + Vector3i(2, 0, 0)
+		if world.get_block(tp) != Blocks.AIR:
+			tp = cave + Vector3i(0, 0, 2)
+		world.set_block(tp, Blocks.id("torch"))
+		await _wait(1.5)
+		var lit := world.light_at(Vector3(cave) + Vector3(0.5, 0.5, 0.5))
+		await _shot(dir, "g14b_cave_torch")
 		Mods.camera_stats.erase("distance")
-		print("JASKINIA w ", cave)
+		print("JASKINIA w ", cave, " światło (niebo, bloki) bez pochodni=", dark, " z pochodnią=", lit)
+
+	# noc z pochodniami
+	var hz0 := world.terrain.height(0, 0)
+	await _goto(0.5, hz0 + 2.0, 0.5)
+	var tod := time_of_day
+	time_of_day = 23.0
+	_update_sky()
+	var base := Vector3i(player.global_position.floor())
+	for i in 4:
+		var a := i * TAU / 4.0 + 0.4
+		var x := base.x + roundi(cos(a) * 3.0)
+		var z := base.z + roundi(sin(a) * 3.0)
+		var gy := entities._surface(x, z, base.y + 4)
+		if gy != -99999:
+			world.set_block(Vector3i(x, gy + 1, z), Blocks.id("torch"))
+	world.set_block(Vector3i(base.x + 4, entities._surface(base.x + 4, base.z, base.y + 4) + 1, base.z), Blocks.id("lamp"))
+	await _wait(1.5)
+	player.pitch = -0.35
+	Mods.camera_stats["distance"] = 5.0
+	await _wait(0.5)
+	await _shot(dir, "g16_night_torches")
+	Mods.camera_stats.erase("distance")
+	time_of_day = tod
+	_update_sky()
 
 	# daleki widok z wysoka
 	var hz := world.terrain.height(0, 0)

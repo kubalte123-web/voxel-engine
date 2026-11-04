@@ -29,7 +29,7 @@ const PLANT_SHADE := 0.9
 
 
 static func build(padded: PackedByteArray, tiles: PackedInt32Array, cols_n: int, rows_n: int, props: PackedInt32Array,
-		liquid: PackedInt32Array = PackedInt32Array()) -> Array:
+		liquid: PackedInt32Array = PackedInt32Array(), plight: PackedByteArray = PackedByteArray()) -> Array:
 	var verts := PackedVector3Array()
 	var norms := PackedVector3Array()
 	var uvs := PackedVector2Array()
@@ -41,6 +41,12 @@ static func build(padded: PackedByteArray, tiles: PackedInt32Array, cols_n: int,
 	var wu := PackedVector2Array()
 	var wc := PackedColorArray()
 	var wi := PackedInt32Array()
+	var wl := PackedVector2Array()
+	var lt := plight
+	if lt.size() != P * P * P:
+		lt = PackedByteArray()
+		lt.resize(P * P * P)
+		lt.fill(0xF0)
 
 	# tablica nieprzezroczystości całego chunka z obwódką (1 = zasłania sąsiada)
 	var op := PackedByteArray()
@@ -50,7 +56,7 @@ static func build(padded: PackedByteArray, tiles: PackedInt32Array, cols_n: int,
 		op[i] = props[padded[i]] & Blocks.OPAQUE
 		opaque += op[i]
 	if padded.count(0) == padded.size() or opaque == padded.size():
-		return [verts, norms, uvs, cols, idx, coll, wv, wn, wu, wc, wi]
+		return [verts, norms, uvs, cols, idx, coll, wv, wn, wu, wc, wi, wl]
 	var lq := PackedInt32Array()
 	lq.resize(padded.size())
 	for i in padded.size():
@@ -68,10 +74,14 @@ static func build(padded: PackedByteArray, tiles: PackedInt32Array, cols_n: int,
 					continue
 				var pr := props[b]
 				if pr & Blocks.LIQUID:
-					_liquid(x, y, z, lq, op, props, padded, wv, wn, wu, wc, wi)
+					_liquid(x, y, z, lq, op, props, padded, wv, wn, wu, wc, wi, wl, lt)
+					continue
+				var ci := x + P * (y + P * z)
+				if pr & Blocks.THIN:
+					_thin(x, y, z, b, tiles, cols_n, iu, iv, eps, lt[ci], verts, norms, uvs, cols, idx)
 					continue
 				if pr & Blocks.CROSS:
-					_cross(x, y, z, tiles[b * 6], cols_n, iu, iv, eps, verts, norms, uvs, cols, idx)
+					_cross(x, y, z, tiles[b * 6], cols_n, iu, iv, eps, lt[ci], verts, norms, uvs, cols, idx)
 					continue
 				var solid := pr & Blocks.SOLID
 				var see_through := (pr & Blocks.OPAQUE) == 0
@@ -113,12 +123,31 @@ static func build(padded: PackedByteArray, tiles: PackedInt32Array, cols_n: int,
 						var cc := op[(fx + d1.x + d2.x) + P * ((fy + d1.y + d2.y) + P * (fz + d1.z + d2.z))]
 						var level := 0 if (s1 == 1 and s2 == 1) else 3 - (s1 + s2 + cc)
 						ao[k] = level
+						# gładkie światło: średnia z komórek przed ścianą wokół wierzchołka (bez nieprzezroczystych)
+						var c1 := (fx + d1.x) + P * ((fy + d1.y) + P * (fz + d1.z))
+						var c2 := (fx + d2.x) + P * ((fy + d2.y) + P * (fz + d2.z))
+						var c3 := (fx + d1.x + d2.x) + P * ((fy + d1.y + d2.y) + P * (fz + d1.z + d2.z))
+						var lsum := lt[ni] >> 4
+						var bsum := lt[ni] & 15
+						var ln := 1
+						if s1 == 0:
+							lsum += lt[c1] >> 4
+							bsum += lt[c1] & 15
+							ln += 1
+						if s2 == 0:
+							lsum += lt[c2] >> 4
+							bsum += lt[c2] & 15
+							ln += 1
+						if cc == 0 and not (s1 == 1 and s2 == 1):
+							lsum += lt[c3] >> 4
+							bsum += lt[c3] & 15
+							ln += 1
 						verts.append(Vector3(x - 1 + c.x, y - 1 + c.y, z - 1 + c.z))
 						norms.append(Vector3(n))
 						var uv: Vector2 = uvset[k]
 						uvs.append(Vector2((t % cols_n + clampf(uv.x, eps, 1.0 - eps)) * iu, (t / cols_n + clampf(uv.y, eps, 1.0 - eps)) * iv))
 						var shade: float = AO_LEVELS[level] * FACE_SHADE[f]
-						cols.append(Color(shade, shade, shade))
+						cols.append(Color(shade, float(lsum) / float(ln) / 15.0, float(bsum) / float(ln) / 15.0))
 					# kolejność zgodna z ruchem wskazówek zegara (przód ściany w Godocie);
 					# przekątna czworokąta wybrana tak, żeby cienie w rogach były gładkie
 					var q: Array
@@ -130,7 +159,7 @@ static func build(padded: PackedByteArray, tiles: PackedInt32Array, cols_n: int,
 						idx.append(base + q[i])
 						if solid:
 							coll.append(verts[base + q[i]])
-	return [verts, norms, uvs, cols, idx, coll, wv, wn, wu, wc, wi]
+	return [verts, norms, uvs, cols, idx, coll, wv, wn, wu, wc, wi, wl]
 
 
 static func _hgt(v: int) -> float:
@@ -142,7 +171,7 @@ static func _hgt(v: int) -> float:
 ## głębokość, znacznik krawędzi fali i rodzaj cieczy. Musi dawać to samo co C++.
 static func _liquid(x: int, y: int, z: int, lq: PackedInt32Array, op: PackedByteArray, props: PackedInt32Array,
 		padded: PackedByteArray, wv: PackedVector3Array, wn: PackedVector3Array, wu: PackedVector2Array,
-		wc: PackedColorArray, wi: PackedInt32Array) -> void:
+		wc: PackedColorArray, wi: PackedInt32Array, wl: PackedVector2Array, lt: PackedByteArray) -> void:
 	var ci := x + P * (y + P * z)
 	var lv := lq[ci]
 	var kind := lv / 16
@@ -181,6 +210,7 @@ static func _liquid(x: int, y: int, z: int, lq: PackedInt32Array, op: PackedByte
 	var depth := minf(1.0, (d + 1) / 8.0)
 	var flow_foam := 0.35 if (lv % 16) < 8 else 0.0
 	var kind_a := float(kind) / 7.0
+	var own_l := Vector2(float(lt[ci] >> 4) / 15.0, float(lt[ci] & 15) / 15.0)
 	if not full_above:
 		var corner := [[0, 0], [0, 1], [1, 1], [1, 0]]
 		var fx: float = (ch[0][0] + ch[0][1]) - (ch[1][0] + ch[1][1])
@@ -193,6 +223,7 @@ static func _liquid(x: int, y: int, z: int, lq: PackedInt32Array, op: PackedByte
 			wn.append(Vector3.UP)
 			wu.append(Vector2(fx, fz))
 			wc.append(Color(maxf(foam[cx][cz], flow_foam), depth, 1.0, kind_a))
+			wl.append(own_l)
 		for q in [0, 2, 1, 0, 3, 2]:
 			wi.append(base + q)
 	for f in 6:
@@ -219,12 +250,47 @@ static func _liquid(x: int, y: int, z: int, lq: PackedInt32Array, op: PackedByte
 			wn.append(Vector3(nn))
 			wu.append(Vector2.ZERO)
 			wc.append(Color(0.0, depth, 1.0 if (c.y == 1 and f != 3) else 0.0, kind_a))
+			wl.append(own_l)
 		for q in [0, 2, 1, 0, 3, 2]:
 			wi.append(base + q)
 
 
 ## Roślina: dwie skrzyżowane ściany, każda widoczna z obu stron. Bez kolizji.
-static func _cross(x: int, y: int, z: int, t: int, cols_n: int, iu: float, iv: float, eps: float,
+## Cienki słupek (pochodnia): 2/16 szerokości i 10/16 wysokości, światło z własnej komórki.
+static func _thin(x: int, y: int, z: int, b: int, tiles: PackedInt32Array, cols_n: int, iu: float, iv: float, eps: float,
+		l: int, verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array,
+		cols: PackedColorArray, idx: PackedInt32Array) -> void:
+	var a := 7.0 / 16.0
+	var bb := 9.0 / 16.0
+	var h := 10.0 / 16.0
+	var sk := float(l >> 4) / 15.0
+	var bl := float(l & 15) / 15.0
+	for f in 6:
+		var t := tiles[b * 6 + f]
+		var base := verts.size()
+		var corners: Array = CORNERS[f]
+		for k in 4:
+			var cc: Vector3i = corners[k]
+			var vx := bb if cc.x == 1 else a
+			var vy := h if cc.y == 1 else 0.0
+			var vz := bb if cc.z == 1 else a
+			verts.append(Vector3(float(x - 1) + vx, float(y - 1) + vy, float(z - 1) + vz))
+			norms.append(Vector3(NORMALS[f]))
+			var u := 0.0
+			var v := 0.0
+			if f == 2 or f == 3:
+				u = bb if cc.x == 1 else a
+				v = (8.0 if cc.z == 1 else 6.0) / 16.0
+			else:
+				u = ((bb if cc.z == 1 else a) if (f == 0 or f == 1) else (bb if cc.x == 1 else a))
+				v = 6.0 / 16.0 if cc.y == 1 else 1.0
+			uvs.append(Vector2((t % cols_n + clampf(u, eps, 1.0 - eps)) * iu, (t / cols_n + clampf(v, eps, 1.0 - eps)) * iv))
+			cols.append(Color(FACE_SHADE[f], sk, bl))
+		for q in [0, 2, 1, 0, 3, 2]:
+			idx.append(base + q)
+
+
+static func _cross(x: int, y: int, z: int, t: int, cols_n: int, iu: float, iv: float, eps: float, l: int,
 		verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array,
 		cols: PackedColorArray, idx: PackedInt32Array) -> void:
 	for plane in CROSS_CORNERS:
@@ -235,6 +301,6 @@ static func _cross(x: int, y: int, z: int, t: int, cols_n: int, iu: float, iv: f
 			norms.append(Vector3.UP)
 			var uv: Vector2 = SIDE_UV[k]
 			uvs.append(Vector2((t % cols_n + clampf(uv.x, eps, 1.0 - eps)) * iu, (t / cols_n + clampf(uv.y, eps, 1.0 - eps)) * iv))
-			cols.append(Color(PLANT_SHADE, PLANT_SHADE, PLANT_SHADE))
+			cols.append(Color(PLANT_SHADE, float(l >> 4) / 15.0, float(l & 15) / 15.0))
 		idx.append_array([base, base + 2, base + 1, base, base + 3, base + 2,
 			base, base + 1, base + 2, base, base + 2, base + 3])

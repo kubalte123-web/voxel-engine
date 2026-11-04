@@ -14,6 +14,8 @@ func _ready() -> void:
 		func(v): return "%d chunków" % int(v), func(v): s.render_distance = int(v); s.save_settings()))
 	add_child(UI.slider_row("Daleki widok", 0, 4, 1, s.far_view,
 		func(v): return "wyłączony" if int(v) == 0 else "%d× dalej" % (int(v) + 1), func(v): s.far_view = int(v); s.save_settings()))
+	add_child(UI.slider_row("Jasność w ciemności", 0.0, 1.0, 0.05, s.brightness,
+		func(v): return "%d%%" % int(v * 100), func(v): s.brightness = v; s.save_settings()))
 	add_child(UI.check_row("Fale na wodzie", s.water_waves, func(on): s.water_waves = on; s.save_settings()))
 	add_child(UI.slider_row("Pole widzenia", 55, 100, 1, s.fov,
 		func(v): return "%d°" % int(v), func(v): s.fov = v; s.save_settings()))

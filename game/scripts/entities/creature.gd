@@ -41,6 +41,8 @@ var anim := {}       # animacja klatkowa: {def, time}
 var rng := RandomNumberGenerator.new()
 var in_liquid := false
 var stuck_time := 0.0
+var light_timer := 0.0
+var light_value := Vector2(1, 0)
 
 
 func setup(p_manager: Node, p_world: World, p_id: int, p_type: String, p_def: Dictionary) -> void:
@@ -143,6 +145,7 @@ func color_tag(tag: String, c: Color) -> void:
 	for mi in tagged.get(tag, []):
 		var m: StandardMaterial3D = (mi.material_override as StandardMaterial3D).duplicate()
 		m.albedo_color = c
+		m.set_meta("base", c)
 		mi.material_override = m
 
 
@@ -387,12 +390,17 @@ func _animate(delta: float, hspeed: float) -> void:
 		head.rotation.x = lerpf(head.rotation.x, hp, minf(1.0, delta * 6.0))
 	if parts.has("body"):
 		parts.body.position.y = vec(def.parts.body.get("pivot")).y + absf(s) * 0.04 * moving + sin(t * 2.0) * 0.01
-	# czerwony błysk po zranieniu
-	for m in mats.values():
-		m.emission_enabled = hurt > 0.0
-		if hurt > 0.0:
-			m.emission = Color(0.9, 0.1, 0.1)
-			m.emission_energy_multiplier = 0.6
+	# światło z mapy światła i czerwony błysk po zranieniu
+	light_timer -= delta
+	if light_timer <= 0.0 or hurt > 0.0:
+		light_timer = 0.25
+		light_value = world.light_at(global_position + Vector3(0, 0.6, 0))
+		var all_mats := mats.values()
+		for list in tagged.values():
+			for mi in list:
+				if not all_mats.has(mi.material_override):
+					all_mats.append(mi.material_override)
+		EntityLight.apply(all_mats, light_value, Color(0.5, 0.05, 0.05) if hurt > 0.0 else Color(0, 0, 0))
 	if not anim.is_empty():
 		var adef: Dictionary = anim.def
 		var length := maxf(0.05, float(adef.get("length", 1.0)))

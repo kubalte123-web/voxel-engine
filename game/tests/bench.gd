@@ -93,9 +93,9 @@ func _run() -> void:
 	var water_faces := 0
 	var mesh_same := true
 	for i in chunks.size():
-		var a: Array = m.call("build", chunks[i])
+		var a: Array = m.call("build", chunks[i], PackedByteArray())
 		faces_c += (a[0] as PackedVector3Array).size()
-		for k in [0, 1, 4, 5, 6, 7, 8, 9, 10]:
+		for k in [0, 1, 4, 5, 6, 7, 8, 9, 10, 11]:
 			if a[k] != meshes_gd[i][k]:
 				if mesh_same:
 					print("BENCH roznica w tablicy ", k, " chunk ", cps[i], " rozmiary ", a[k].size(), "/", meshes_gd[i][k].size())
@@ -115,5 +115,45 @@ func _run() -> void:
 				break
 	var cpp := (Time.get_ticks_usec() - t0) / 1000.0 / cps.size()
 	print("BENCH generowanie C++: %.2f ms/chunk, swiat zgodny z GDScript: %s%s" % [gen_c, same, diff_at])
+	# światło: ten sam obszar (chunk + margines 6, sąsiedzi przybliżeni mapą wysokości) w obu wersjach
+	m.call("set_light_props", reg.lprops)
+	var light_same := true
+	var t_lc := 0.0
+	var t_lg := 0.0
+	var lit_dark := 0
+	for i in cps.size():
+		var c: Vector3i = cps[i]
+		var around := []
+		around.resize(27)
+		around[13] = Terrain.interior(chunks[i])
+		var M := 6
+		var N := 32 + 2 * M
+		var skyh := PackedInt32Array()
+		skyh.resize(N * N)
+		for iz in N:
+			for ix in N:
+				skyh[ix + N * iz] = terrain.height(c.x * 32 - M + ix, c.z * 32 - M + iz)
+		var t1 := Time.get_ticks_usec()
+		var lc: Array = m.call("light", c, around, skyh, M)
+		t_lc += (Time.get_ticks_usec() - t1) / 1000.0
+		t1 = Time.get_ticks_usec()
+		var lg: Array = LightCalc.compute(c, around, skyh, M, reg.lprops)
+		t_lg += (Time.get_ticks_usec() - t1) / 1000.0
+		if lc[0] != lg[0] or lc[1] != lg[1] or lc[2] != lg[2]:
+			light_same = false
+		var ma: Array = m.call("build", chunks[i], lc[0])
+		var mb: Array = GDMesher.build(chunks[i], reg.tiles, Registry.ATLAS_COLS, reg.atlas_rows, reg.props, reg.liquid, lg[0])
+		if ma[0] != mb[0] or ma[11] != mb[11]:
+			light_same = false
+		var ca: PackedColorArray = ma[3]
+		var cb: PackedColorArray = mb[3]
+		for u in ca.size():
+			if not ca[u].is_equal_approx(cb[u]):
+				light_same = false
+				break
+		for v in (lc[1] as PackedByteArray):
+			if v >> 4 < 4:
+				lit_dark += 1
+	print("BENCH swiatlo C++: %.2f ms/chunk, GDScript: %.2f ms/chunk, zgodne: %s, ciemnych komórek: %d" % [t_lc / cps.size(), t_lg / cps.size(), light_same, lit_dark])
 	print("BENCH siatka C++: %.2f ms/chunk, siatki zgodne: %s (%d/%d), ściany wody: %d" % [cpp, mesh_same, faces_c, faces_gd, water_faces])
 	quit()

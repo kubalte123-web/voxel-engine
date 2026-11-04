@@ -11,7 +11,11 @@ var reg: Registry
 var tiles: PackedInt32Array
 var props: PackedInt32Array
 var atlas: Texture2D
-var material: StandardMaterial3D
+var material: ShaderMaterial
+var light := {}        # Vector3i -> PackedByteArray S^3 (niebo << 4 | bloki), do oświetlania stworzeń
+var heightmap := {}    # Vector2i (kolumna chunków) -> PackedInt32Array S^2: najwyższy nieprzezroczysty blok
+var relight := {}      # chunki policzone bez wszystkich sąsiadów: przeliczymy, gdy się wczytają
+var light_margin := 15
 var water_material: ShaderMaterial
 var water_nodes := {}  # Vector3i -> MeshInstance3D (powierzchnia cieczy)
 var liquids: LiquidSim
@@ -66,19 +70,16 @@ func _ready() -> void:
 	falling = Node3D.new()
 	falling.name = "Falling"
 	add_child(falling)
-	material = StandardMaterial3D.new()
-	material.albedo_texture = atlas
-	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-	material.vertex_color_use_as_albedo = true
-	material.vertex_color_is_srgb = true
-	material.roughness = 1.0
-	material.albedo_color = Color(0.8, 0.8, 0.8)
-	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
-	material.alpha_scissor_threshold = 0.5
+	material = ShaderMaterial.new()
+	material.shader = load("res://scripts/shaders/terrain.gdshader")
+	material.set_shader_parameter("atlas", atlas)
 	if ClassDB.class_exists("VoxelMesher"):
 		native = ClassDB.instantiate("VoxelMesher")
 		native.call("configure", terrain.native_noises(), terrain.spec, tiles, props, reg.liquid, Registry.ATLAS_COLS, reg.atlas_rows)
+		native.call("set_light_props", reg.lprops)
 		mesher_name = "C++"
+	else:
+		light_margin = 6  # wersja w GDScript (przeglądarka): mniejszy zasięg światła spoza chunka
 	if OS.has_feature("web"):
 		threaded = false
 	max_queued = maxi(2, OS.get_processor_count())
@@ -116,6 +117,8 @@ func _process(_delta: float) -> void:
 		return
 	_collect_results()
 	_schedule_missing()
+	if queued.size() < max_queued:
+		_process_relight()
 	_unload_far()
 	if not threaded and not sync_queue.is_empty():
 		var c: Vector3i = sync_queue.pop_front()
@@ -129,6 +132,53 @@ func _collect_results() -> void:
 	mutex.unlock()
 	for r in ready:
 		_apply(r[0], r[1], r[2], r[3])
+		if r.size() > 4:
+			_apply_light(r[0], r[4], r[5], r[6])
+
+
+func _apply_light(c: Vector3i, il: PackedByteArray, tops: PackedInt32Array, exact: bool) -> void:
+	if not built.has(c):
+		return
+	light[c] = il
+	var col := Vector2i(c.x, c.z)
+	var hm: Variant = heightmap.get(col)
+	if hm != null:
+		var changed := false
+		var h: PackedInt32Array = hm
+		for i in S * S:
+			if tops[i] > h[i]:
+				h[i] = tops[i]
+				changed = true
+		if changed:
+			mutex.lock()
+			heightmap[col] = h
+			mutex.unlock()
+	if not exact and native != null:
+		relight[c] = true
+	else:
+		relight.erase(c)
+
+
+## Chunki policzone bez części sąsiadów przeliczamy, gdy sąsiedzi są już wczytani (bez szwów światła).
+func _process_relight() -> void:
+	var budget := 2
+	for c in relight.keys():
+		if budget <= 0:
+			return
+		if not built.has(c):
+			relight.erase(c)
+			continue
+		var all := true
+		for dz in range(-1, 2):
+			for dy in range(-1, 2):
+				for dx in range(-1, 2):
+					var n: Vector3i = c + Vector3i(dx, dy, dz)
+					if not data.has(n) and n.y >= y_min and n.y <= y_max:
+						all = false
+		if all and not queued.has(c):
+			relight.erase(c)
+			_remesh(c)
+			budget -= 1
 
 
 func _schedule_missing() -> void:
@@ -148,6 +198,9 @@ func _schedule_missing() -> void:
 func _schedule(c: Vector3i) -> void:
 	if not data.has(c):
 		_load_chunk(c)
+	for dz in range(-1, 2):
+		for dx in range(-1, 2):
+			ensure_heightmap(Vector2i(c.x + dx, c.z + dz))
 	queued[c] = true
 	if threaded:
 		WorkerThreadPool.add_task(_job.bind(c))
@@ -168,6 +221,8 @@ func _unload_far() -> void:
 			if water_nodes.has(c):
 				water_nodes[c].queue_free()
 				water_nodes.erase(c)
+			light.erase(c)
+			relight.erase(c)
 			if unsaved.has(c):
 				_save_chunk(c)
 			if not edited.has(c) or not save_dir.is_empty():
@@ -183,6 +238,15 @@ func _job(c: Vector3i) -> void:
 	var neigh := []
 	for n in GDMesher.NORMALS:
 		neigh.append(data.get(c + n))
+	var around := []
+	for dz in range(-1, 2):
+		for dy in range(-1, 2):
+			for dx in range(-1, 2):
+				around.append(data.get(c + Vector3i(dx, dy, dz)))
+	var hms := []
+	for dz in range(-1, 2):
+		for dx in range(-1, 2):
+			hms.append(heightmap.get(Vector2i(c.x + dx, c.z + dz)))
 	mutex.unlock()
 	var padded: PackedByteArray
 	var blocks: PackedByteArray
@@ -191,7 +255,6 @@ func _job(c: Vector3i) -> void:
 		var prep: Array = native.call("prepare", c, own if own != null else PackedByteArray(), neigh)
 		padded = prep[0]
 		blocks = prep[1]
-		arrays = native.call("build", padded)
 	else:
 		padded = terrain.fill_padded(c)
 		if own == null:
@@ -202,11 +265,80 @@ func _job(c: Vector3i) -> void:
 		for i in 6:
 			if neigh[i] != null:
 				_copy_border(padded, neigh[i], i)
-		arrays = GDMesher.build(padded, tiles, Registry.ATLAS_COLS, reg.atlas_rows, props, reg.liquid)
+	# światło: chunk z marginesem; brakujący sąsiedzi są przybliżani mapą wysokości
+	around[13] = blocks
+	var exact := true
+	for k in 27:
+		var ny := c.y + (k / 3) % 3 - 1
+		if around[k] == null and ny >= y_min and ny <= y_max:
+			exact = false
+	var skyh := _skyh_region(c, hms)
+	var lres: Array
+	if native != null:
+		lres = native.call("light", c, around, skyh, light_margin)
+		arrays = native.call("build", padded, lres[0])
+	else:
+		lres = LightCalc.compute(c, around, skyh, light_margin, reg.lprops)
+		arrays = GDMesher.build(padded, tiles, Registry.ATLAS_COLS, reg.atlas_rows, props, reg.liquid, lres[0])
 	var ms := (Time.get_ticks_usec() - t0) / 1000.0
 	mutex.lock()
-	results.append([c, arrays, blocks, ms])
+	results.append([c, arrays, blocks, ms, lres[1], lres[2], exact])
 	mutex.unlock()
+
+
+## Mapa wysokości nieba dla obszaru światła (N x N kolumn) z map 3 x 3 kolumn chunków.
+func _skyh_region(c: Vector3i, hms: Array) -> PackedInt32Array:
+	var M := light_margin
+	var N := S + 2 * M
+	var out := PackedInt32Array()
+	out.resize(N * N)
+	var ox := c.x * S - M
+	var oz := c.z * S - M
+	for iz in N:
+		var wz := oz + iz
+		var cz := floori(wz / float(S))
+		var lz := wz - cz * S
+		for ix in N:
+			var wx := ox + ix
+			var cx := floori(wx / float(S))
+			var hm: Variant = hms[(cx - c.x + 1) + 3 * (cz - c.z + 1)]
+			out[ix + N * iz] = hm[(wx - cx * S) + S * lz] if hm != null else 100000
+	return out
+
+
+## Mapa wysokości kolumny chunków: na start wysokość terenu z generatora (przed drzewami i edycjami).
+func ensure_heightmap(col: Vector2i) -> void:
+	if heightmap.has(col):
+		return
+	var hm := PackedInt32Array()
+	hm.resize(S * S)
+	if native != null:
+		var hb: PackedInt32Array = native.call("heights", col.x * S, col.y * S, 1, S)
+		for i in S * S:
+			hm[i] = hb[i * 2]
+	else:
+		for z in S:
+			for x in S:
+				hm[x + S * z] = terrain.height(col.x * S + x, col.y * S + z)
+	mutex.lock()
+	heightmap[col] = hm
+	mutex.unlock()
+
+
+## Światło w punkcie: Vector2(niebo, bloki) w zakresie 0..1.
+func light_at(p: Vector3) -> Vector2:
+	var b := Vector3i(p.floor())
+	var c := chunk_of(b)
+	var l: Variant = light.get(c)
+	if l == null:
+		return Vector2(1, 0)
+	var q := b - c * S
+	var v: int = l[q.x + S * (q.y + S * q.z)]
+	return Vector2(float(v >> 4) / 15.0, float(v & 15) / 15.0)
+
+
+static func light_curve(v: float) -> float:
+	return pow(0.8, (1.0 - v) * 15.0) if v > 0.01 else 0.0
 
 
 ## Kopiuje graniczną warstwę bloków sąsiada (z edycjami) do obwódki.
@@ -256,6 +388,8 @@ func _apply(c: Vector3i, arrays: Array, blocks: PackedByteArray, ms: float) -> v
 		warr[Mesh.ARRAY_TEX_UV] = arrays[8]
 		warr[Mesh.ARRAY_COLOR] = arrays[9]
 		warr[Mesh.ARRAY_INDEX] = arrays[10]
+		if arrays.size() > 11:
+			warr[Mesh.ARRAY_TEX_UV2] = arrays[11]
 		var wm := ArrayMesh.new()
 		wm.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, warr)
 		wm.surface_set_material(0, water_material)
@@ -356,11 +490,44 @@ func set_block(p: Vector3i, id: int) -> bool:
 		var above := p + Vector3i(0, 1, 0)
 		if Blocks.props(get_block(above)) & Blocks.CROSS:
 			set_block(above, Blocks.AIR)
+	_update_light_after_edit(p, id)
 	# ciecze w pobliżu ruszają, bloki z grawitacją spadają
 	liquids.activate_around(p)
 	check_fall(p + Vector3i(0, 1, 0))
 	check_fall(p)
 	return true
+
+
+## Po zmianie bloku: mapa wysokości nieba i przeliczenie światła w chunkach w zasięgu światła.
+func _update_light_after_edit(p: Vector3i, id: int) -> void:
+	var col := Vector2i(floori(p.x / float(S)), floori(p.z / float(S)))
+	var hm: Variant = heightmap.get(col)
+	if hm != null:
+		var h: PackedInt32Array = hm
+		var i := (p.x - col.x * S) + S * (p.z - col.y * S)
+		if (reg.lprops[id] & 16) != 0 and p.y > h[i]:
+			h[i] = p.y
+		elif (reg.lprops[id] & 16) == 0 and p.y == h[i]:
+			var y := p.y - 1
+			while y > p.y - 96 and (reg.lprops[get_block(Vector3i(p.x, y, p.z))] & 16) == 0:
+				y -= 1
+			h[i] = y
+		mutex.lock()
+		heightmap[col] = h
+		mutex.unlock()
+	var r := 15
+	var c0 := chunk_of(p)
+	for dz in range(-1, 2):
+		for dy in range(-1, 2):
+			for dx in range(-1, 2):
+				var c := c0 + Vector3i(dx, dy, dz)
+				if c == c0 or not built.has(c):
+					continue
+				var lo := Vector3(c * S)
+				var hi := lo + Vector3(S, S, S)
+				var q := Vector3(p).clamp(lo, hi)
+				if q.distance_to(Vector3(p)) <= r:
+					_remesh(c)
 
 
 ## Blok z grawitacją (piasek, żwir) bez podparcia zamienia się w spadający blok.

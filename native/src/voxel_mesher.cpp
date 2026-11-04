@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <algorithm>
 #include <map>
 #include <vector>
 
@@ -17,7 +18,7 @@ constexpr int S = 32;
 constexpr int P = S + 2;
 
 constexpr uint8_t AIR = 0;
-constexpr int P_OPAQUE = 1, P_CROSS = 2, P_SOLID = 4, P_LIQUID = 8;
+constexpr int P_OPAQUE = 1, P_CROSS = 2, P_SOLID = 4, P_LIQUID = 8, P_THIN = 16;
 // układ danych z game/scripts/content/worldgen_spec.gd
 constexpr int BS = 21, FS = 11, OS = 6;
 constexpr int CG = 11; // punkty siatki szumu jaskiń na oś
@@ -73,7 +74,9 @@ void copy_array(V &dst, const A &src) {
 void VoxelMesher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("configure", "noises", "spec", "tiles", "props", "liquid", "atlas_cols", "atlas_rows"), &VoxelMesher::configure);
 	ClassDB::bind_method(D_METHOD("prepare", "cpos", "own", "neighbors"), &VoxelMesher::prepare);
-	ClassDB::bind_method(D_METHOD("build", "padded"), &VoxelMesher::build);
+	ClassDB::bind_method(D_METHOD("build", "padded", "plight"), &VoxelMesher::build);
+	ClassDB::bind_method(D_METHOD("set_light_props", "lprops"), &VoxelMesher::set_light_props);
+	ClassDB::bind_method(D_METHOD("light", "cpos", "chunks", "skyh", "margin"), &VoxelMesher::light);
 	ClassDB::bind_method(D_METHOD("heights", "x0", "z0", "step", "n"), &VoxelMesher::heights);
 }
 
@@ -146,6 +149,144 @@ VoxelMesher::Col VoxelMesher::column(int x, int z) const {
 		h -= t * t * (3.0 - 2.0 * t) * lake_depth;
 	}
 	return { int(std::round(h)), best };
+}
+
+void VoxelMesher::set_light_props(const PackedInt32Array &lp) { copy_array(lprops, lp); }
+
+Array VoxelMesher::light(const Vector3i &cpos, const Array &chunks, const PackedInt32Array &skyh, int M) const {
+	const int N = S + 2 * M;
+	const int NN = N * N, NNN = N * N * N;
+	const int ox = cpos.x * S - M, oy = cpos.y * S - M, oz = cpos.z * S - M;
+	const int lp_n = int(lprops.size());
+	// właściwości komórek obszaru: 0 = przepuszcza (osłabienie 1), 1 = ciecz (osłabienie 2), 2 = nieprzezroczysta
+	std::vector<uint8_t> kind(NNN), emit(NNN);
+	const uint8_t *cd[27];
+	PackedByteArray keep[27];
+	for (int i = 0; i < 27; i++) {
+		cd[i] = nullptr;
+		if (i < chunks.size() && chunks[i].get_type() == Variant::PACKED_BYTE_ARRAY) {
+			keep[i] = chunks[i];
+			if (keep[i].size() == S * S * S) cd[i] = keep[i].ptr();
+		}
+	}
+	const int32_t *sh = skyh.ptr();
+	for (int iz = 0; iz < N; iz++) {
+		const int wz = oz + iz;
+		const int cz = (wz >= cpos.z * S + S) ? 2 : (wz < cpos.z * S ? 0 : 1);
+		const int lz = wz - (cpos.z + cz - 1) * S;
+		for (int iy = 0; iy < N; iy++) {
+			const int wy = oy + iy;
+			const int cy = (wy >= cpos.y * S + S) ? 2 : (wy < cpos.y * S ? 0 : 1);
+			const int ly = wy - (cpos.y + cy - 1) * S;
+			for (int ix = 0; ix < N; ix++) {
+				const int wx = ox + ix;
+				const int cx = (wx >= cpos.x * S + S) ? 2 : (wx < cpos.x * S ? 0 : 1);
+				const int lx = wx - (cpos.x + cx - 1) * S;
+				const int ri = ix + N * (iy + N * iz);
+				const uint8_t *c = cd[cx + 3 * (cy + 3 * cz)];
+				if (c) {
+					const uint8_t b = c[lx + S * (ly + S * lz)];
+					const int v = b < lp_n ? lprops[b] : 16;
+					kind[ri] = (v & 16) ? 2 : ((v & 32) ? 1 : 0);
+					emit[ri] = uint8_t(v & 15);
+				} else {
+					kind[ri] = wy <= sh[ix + N * iz] ? 2 : 0;
+					emit[ri] = 0;
+				}
+			}
+		}
+	}
+	std::vector<uint8_t> sky(NNN, 0), blk(NNN, 0);
+	std::vector<int32_t> q;
+	q.reserve(NNN / 4);
+	auto bfs = [&](std::vector<uint8_t> &L) {
+		size_t head = 0;
+		while (head < q.size()) {
+			const int i = q[head++];
+			const int v = L[i];
+			const int ix = i % N, iy = (i / N) % N, iz = i / NN;
+			const int nb[6] = { ix > 0 ? i - 1 : -1, ix < N - 1 ? i + 1 : -1, iy > 0 ? i - N : -1,
+				iy < N - 1 ? i + N : -1, iz > 0 ? i - NN : -1, iz < N - 1 ? i + NN : -1 };
+			for (int k = 0; k < 6; k++) {
+				const int j = nb[k];
+				if (j < 0 || kind[j] == 2) continue;
+				const int nv = v - (kind[j] == 1 ? 2 : 1);
+				if (nv > L[j]) {
+					L[j] = uint8_t(nv);
+					q.push_back(j);
+				}
+			}
+		}
+		q.clear();
+	};
+	// niebo: komórki ponad najwyższym nieprzezroczystym blokiem kolumny mają 15; do kolejki trafia tylko
+	// „brzeg” (od najniższej oświetlonej komórki do wysokości sąsiednich kolumn), reszta i tak nic nie zmieni
+	std::vector<int> lowest(NN, N);
+	for (int iz = 0; iz < N; iz++)
+		for (int ix = 0; ix < N; ix++) {
+			const int hy = sh[ix + N * iz] - oy;
+			for (int iy = N - 1; iy > hy && iy >= 0; iy--) {
+				const int ri = ix + N * (iy + N * iz);
+				if (kind[ri] != 0) break;
+				sky[ri] = 15;
+				lowest[ix + N * iz] = iy;
+			}
+		}
+	for (int iz = 0; iz < N; iz++)
+		for (int ix = 0; ix < N; ix++) {
+			const int lo = lowest[ix + N * iz];
+			if (lo >= N) continue;
+			int top = sh[ix + N * iz] - oy;
+			if (ix > 0) top = std::max(top, sh[ix - 1 + N * iz] - oy);
+			if (ix < N - 1) top = std::max(top, sh[ix + 1 + N * iz] - oy);
+			if (iz > 0) top = std::max(top, sh[ix + N * (iz - 1)] - oy);
+			if (iz < N - 1) top = std::max(top, sh[ix + N * (iz + 1)] - oy);
+			const int hi = std::min(N - 1, top + 1);
+			for (int iy = lo; iy <= hi; iy++) {
+				const int ri = ix + N * (iy + N * iz);
+				if (sky[ri] == 15) q.push_back(ri);
+			}
+		}
+	bfs(sky);
+	for (int i = 0; i < NNN; i++)
+		if (emit[i] > 0) {
+			blk[i] = emit[i];  // także świecący blok nieprzezroczysty (lampa) świeci na sąsiadów
+			q.push_back(i);
+		}
+	bfs(blk);
+	PackedByteArray pl, il;
+	pl.resize(P * P * P);
+	il.resize(S * S * S);
+	uint8_t *pp = pl.ptrw();
+	uint8_t *ip = il.ptrw();
+	for (int z = 0; z < P; z++)
+		for (int y = 0; y < P; y++)
+			for (int x = 0; x < P; x++) {
+				const int ri = (x - 1 + M) + N * ((y - 1 + M) + N * (z - 1 + M));
+				const uint8_t v = uint8_t((sky[ri] << 4) | blk[ri]);
+				pp[idx(x, y, z)] = v;
+				if (x >= 1 && x <= S && y >= 1 && y <= S && z >= 1 && z <= S) ip[(x - 1) + S * ((y - 1) + S * (z - 1))] = v;
+			}
+	// najwyższy nieprzezroczysty blok każdej kolumny tego chunka (do mapy wysokości nieba)
+	PackedInt32Array tops;
+	tops.resize(S * S);
+	int32_t *tp = tops.ptrw();
+	for (int z = 0; z < S; z++)
+		for (int x = 0; x < S; x++) {
+			int t = -100000;
+			if (cd[13]) {
+				for (int y = S - 1; y >= 0; y--) {
+					const uint8_t b = cd[13][x + S * (y + S * z)];
+					if (b < lp_n && (lprops[b] & 16)) { t = cpos.y * S + y; break; }
+				}
+			}
+			tp[x + S * z] = t;
+		}
+	Array out;
+	out.append(pl);
+	out.append(il);
+	out.append(tops);
+	return out;
 }
 
 PackedInt32Array VoxelMesher::heights(int x0, int z0, int step, int n) const {
@@ -419,15 +560,16 @@ Array VoxelMesher::prepare(const Vector3i &cpos, const PackedByteArray &own, con
 	return out;
 }
 
-Array VoxelMesher::build(const PackedByteArray &padded) const {
+Array VoxelMesher::build(const PackedByteArray &padded, const PackedByteArray &plight) const {
 	PackedVector3Array verts, norms, coll, wverts, wnorms;
-	PackedVector2Array uvs, wuvs;
+	PackedVector2Array uvs, wuvs, wuv2;
 	PackedColorArray cols, wcols;
 	PackedInt32Array indices, windices;
 	Array out;
 	auto finish = [&]() {
 		out.append(verts); out.append(norms); out.append(uvs); out.append(cols); out.append(indices); out.append(coll);
 		out.append(wverts); out.append(wnorms); out.append(wuvs); out.append(wcols); out.append(windices);
+		out.append(wuv2);
 		return out;
 	};
 	if (padded.size() != P * P * P) return finish();
@@ -440,6 +582,9 @@ Array VoxelMesher::build(const PackedByteArray &padded) const {
 	const int liq_entries = int(liquid.size());
 	auto lq = [&](int i) -> int { const uint8_t b = p[i]; return b < liq_entries ? liquid[b] : 0; };
 
+	const bool has_light = plight.size() == P * P * P;
+	const uint8_t *lp = has_light ? plight.ptr() : nullptr;
+	auto lt = [&](int i) -> int { return has_light ? lp[i] : 0xF0; };
 	int air = 0, opaque = 0;
 	std::vector<uint8_t> op(P * P * P);
 	for (int i = 0; i < P * P * P; i++) {
@@ -514,6 +659,7 @@ Array VoxelMesher::build(const PackedByteArray &padded) const {
 							wuvs.push_back(Vector2(float(fx), float(fz)));
 							const double f = foam[cx][cz] > flow_foam ? foam[cx][cz] : flow_foam;
 							wcols.push_back(Color(float(f), float(depth), 1.0f, kind_a));
+							wuv2.push_back(Vector2(float(double(lt(ci) >> 4) / 15.0), float(double(lt(ci) & 15) / 15.0)));
 						}
 						static const int Q[6] = { 0, 2, 1, 0, 3, 2 };
 						for (int i = 0; i < 6; i++) windices.push_back(base + Q[i]);
@@ -538,14 +684,39 @@ Array VoxelMesher::build(const PackedByteArray &padded) const {
 							wnorms.push_back(Vector3(float(nn[0]), float(nn[1]), float(nn[2])));
 							wuvs.push_back(Vector2(0, 0));
 							wcols.push_back(Color(0.0f, float(depth), c[1] == 1 && f != 3 ? 1.0f : 0.0f, kind_a));
+							wuv2.push_back(Vector2(float(double(lt(ci) >> 4) / 15.0), float(double(lt(ci) & 15) / 15.0)));
 						}
 						static const int Q[6] = { 0, 2, 1, 0, 3, 2 };
 						for (int i = 0; i < 6; i++) windices.push_back(base + Q[i]);
 					}
 					continue;
 				}
+				if (bp & P_THIN) {
+					// cienki słupek (pochodnia): 2/16 szerokości, 10/16 wysokości, światło z własnej komórki
+					const float sk = float(double(lt(ci) >> 4) / 15.0), bl = float(double(lt(ci) & 15) / 15.0);
+					const float a = 7.0f / 16.0f, bb = 9.0f / 16.0f, h = 10.0f / 16.0f;
+					for (int f = 0; f < 6; f++) {
+						const int tile = tile_of(b * 6 + f);
+						const int base = verts.size();
+						for (int k = 0; k < 4; k++) {
+							const int *cc = CORNERS[f][k];
+							const float vx = cc[0] ? bb : a, vy = cc[1] ? h : 0.0f, vz = cc[2] ? bb : a;
+							verts.push_back(Vector3(float(x - 1) + vx, float(y - 1) + vy, float(z - 1) + vz));
+							norms.push_back(Vector3(float(NORMALS[f][0]), float(NORMALS[f][1]), float(NORMALS[f][2])));
+							float u, v;
+							if (f == 2 || f == 3) { u = cc[0] ? bb : a; v = (cc[2] ? 8.0f : 6.0f) / 16.0f; }
+							else { u = (f == 0 || f == 1) ? (cc[2] ? bb : a) : (cc[0] ? bb : a); v = cc[1] ? 6.0f / 16.0f : 1.0f; }
+							uvs.push_back(uv_of(tile, u, v));
+							cols.push_back(Color(FACE_SHADE[f], sk, bl));
+						}
+						static const int Q[6] = { 0, 2, 1, 0, 3, 2 };
+						for (int i = 0; i < 6; i++) indices.push_back(base + Q[i]);
+					}
+					continue;
+				}
 				if (bp & P_CROSS) {
 					const int tile = tile_of(b * 6);
+					const float sk = float(double(lt(ci) >> 4) / 15.0), bl = float(double(lt(ci) & 15) / 15.0);
 					for (int pl = 0; pl < 2; pl++) {
 						const int base = verts.size();
 						for (int k = 0; k < 4; k++) {
@@ -553,7 +724,7 @@ Array VoxelMesher::build(const PackedByteArray &padded) const {
 							verts.push_back(Vector3(float(x - 1) + c[0], float(y - 1) + c[1], float(z - 1) + c[2]));
 							norms.push_back(Vector3(0, 1, 0));
 							uvs.push_back(uv_of(tile, SIDE_UV[k][0], SIDE_UV[k][1]));
-							cols.push_back(Color(PLANT_SHADE, PLANT_SHADE, PLANT_SHADE));
+							cols.push_back(Color(PLANT_SHADE, sk, bl));
 						}
 						const int q[12] = { 0, 2, 1, 0, 3, 2, 0, 1, 2, 0, 2, 3 };
 						for (int i = 0; i < 12; i++) indices.push_back(base + q[i]);
@@ -585,12 +756,23 @@ Array VoxelMesher::build(const PackedByteArray &padded) const {
 						const int cc = op[idx(fx + d1[0] + d2[0], fy + d1[1] + d2[1], fz + d1[2] + d2[2])];
 						const int level = (s1 && s2) ? 0 : 3 - (s1 + s2 + cc);
 						ao[k] = level;
+						// gładkie światło: średnia z komórek przed ścianą wokół wierzchołka (bez nieprzezroczystych)
+						int lsum = 0, bsum = 0, ln = 0;
+						const int cells[4] = { ni, idx(fx + d1[0], fy + d1[1], fz + d1[2]), idx(fx + d2[0], fy + d2[1], fz + d2[2]),
+							idx(fx + d1[0] + d2[0], fy + d1[1] + d2[1], fz + d1[2] + d2[2]) };
+						for (int m = 0; m < 4; m++) {
+							if (m > 0 && op[cells[m]]) continue;
+							if (m == 3 && s1 && s2) continue;
+							lsum += lt(cells[m]) >> 4;
+							bsum += lt(cells[m]) & 15;
+							ln++;
+						}
 						v[k] = Vector3(float(x - 1 + c[0]), float(y - 1 + c[1]), float(z - 1 + c[2]));
 						verts.push_back(v[k]);
 						norms.push_back(Vector3(float(n[0]), float(n[1]), float(n[2])));
 						uvs.push_back(uv_of(tile, uvset[k][0], uvset[k][1]));
 						const float shade = AO_LEVELS[level] * FACE_SHADE[f];
-						cols.push_back(Color(shade, shade, shade));
+						cols.push_back(Color(shade, float(double(lsum) / double(ln) / 15.0), float(double(bsum) / double(ln) / 15.0)));
 					}
 					// kolejność zgodna z ruchem wskazówek zegara (przód ściany w Godocie)
 					static const int QA[6] = { 0, 2, 1, 0, 3, 2 };

@@ -71,6 +71,21 @@ engine.blocks.register("bedrock", {
 	breakable = false,
 })
 
+-- Światło: pole light = 0..15 (jak jasno świeci blok; światło słabnie o 1 na każdy blok odległości)
+engine.blocks.register("torch", {
+	name = "Pochodnia",
+	shape = "torch",            -- cienki słupek, bez kolizji
+	texture = { pattern = "torch" },
+	light = 14,
+	hardness = 0,
+})
+engine.blocks.register("lamp", {
+	name = "Lampa",
+	texture = { pattern = "lamp", color = "#f8d878", color2 = "#7a5a2a" },
+	light = 15,
+	hardness = 0.4,
+})
+
 -- Woda: ciecz z 8 poziomami, która zachowuje objętość (wylana rozlewa się w kałużę i powoli wysycha).
 -- Blok "water" to zbiornik (morza, jeziora): oddaje wodę bez końca. Płynące poziomy to "water~1".."water~8".
 engine.blocks.register("water", {

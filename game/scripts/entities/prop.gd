@@ -16,6 +16,8 @@ var size := 1.0
 var density := 0.6
 var shape_kind := "box"
 var sleeping_far := false
+var mesh_node: MeshInstance3D
+var light_timer := 0.0
 
 
 func setup(p_manager: Node, p_world: World, p_id: int, p_block: int) -> void:
@@ -76,9 +78,23 @@ func _ready() -> void:
 			mi.position = Vector3.ONE * -size * 0.5
 	add_child(cs)
 	add_child(mi)
+	mesh_node = mi
+
+
+func _update_light(delta: float) -> void:
+	light_timer -= delta
+	if light_timer > 0.0:
+		return
+	light_timer = 0.3
+	var l := world.light_at(global_position + Vector3(0, 0.3, 0))
+	if mesh_node.material_override is ShaderMaterial:
+		mesh_node.set_instance_shader_parameter("light_override", l)
+	else:
+		EntityLight.apply([mesh_node.material_override], l)
 
 
 func _physics_process(delta: float) -> void:
+	_update_light(delta)
 	var cell := Vector3i(global_position.floor())
 	# chunk pod spodem niegotowy albo usunięty: zamrażamy, żeby nie spaść przez świat
 	var ready := world.is_loaded(cell) and world.is_loaded(cell + Vector3i(0, -1, 0))

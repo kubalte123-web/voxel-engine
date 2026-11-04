@@ -15,12 +15,15 @@ varying vec3 wpos;
 varying vec4 info;
 varying vec2 flow;
 varying float top;
+varying vec2 lightv;
+uniform float min_light = 0.025;
 
 void vertex() {
 	vec3 world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 	info = COLOR;
 	flow = UV;
 	top = NORMAL.y;
+	lightv = UV2;
 	if (COLOR.b > 0.5) {
 		float t = TIME;
 		float h = sin(world.x * 0.7 + t * 1.3) * 0.035 + sin(world.z * 0.9 - t * 1.1) * 0.035
@@ -50,9 +53,13 @@ void fragment() {
 	float fm = smoothstep(0.35, 0.85, info.r * (0.55 + 0.6 * pat));
 	col = mix(col, foam_color[k].rgb, fm);
 	float fr = pow(1.0 - clamp(dot(NORMAL, VIEW), 0.0, 1.0), 4.0);
+	float sl = pow(0.8, (1.0 - lightv.x) * 15.0);
+	float bl = lightv.y > 0.01 ? pow(0.8, (1.0 - lightv.y) * 15.0) : 0.0;
+	EMISSION += col * vec3(1.0, 0.78, 0.5) * bl * 0.8;
+	col *= max(sl, min_light);
 	ALBEDO = col;
 	ALPHA = clamp(a + fm * 0.5 + fr * 0.35, 0.0, 1.0);
 	ROUGHNESS = 0.06;
 	SPECULAR = 0.7;
-	EMISSION = col * emission[k];
+	EMISSION += col * emission[k];
 }

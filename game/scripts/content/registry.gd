@@ -8,6 +8,7 @@ const OPAQUE := 1
 const CROSS := 2
 const SOLID := 4
 const LIQUID := 8
+const THIN := 16           # cienki słupek (pochodnia)
 const LEVELS := 8          # poziomy cieczy: 1 (cienka warstwa) .. 8 (pełny blok)
 const MAX_BLOCKS := 256
 const ATLAS_COLS := 16
@@ -23,6 +24,7 @@ var tile_images: Array[Image] = []
 var liquid := PackedInt32Array([0])  # id bloku -> rodzaj cieczy * 16 + poziom (0 = nie ciecz)
 var liquid_kinds: Array = []         # [{key, name, source, levels: [id dla poziomu 0..8], color, deep, viscosity, ...}]
 var hardness := PackedFloat32Array([0.0])
+var lprops := PackedInt32Array([0])  # id -> świecenie 0..15 | 16 nieprzezroczysty | 32 ciecz
 var tile_colors: Array[Color] = []   # średni kolor kafelka (dalekie widoki, cząsteczki)
 var atlas: ImageTexture
 var atlas_rows := 1
@@ -83,8 +85,10 @@ func _add_block(d: Dictionary, key: String, p: int, liq: int) -> int:
 	defs.append(d)
 	props.append(p)
 	liquid.append(liq)
+	var emit := clampi(int(d.get("light", 0)), 0, 15)
+	lprops.append(emit | (16 if (p & OPAQUE) != 0 else 0) | (32 if liq != 0 else 0))
 	var shape := str(d.get("shape", "cube"))
-	var hd := float(d.get("hardness", 0.0 if shape == "cross" else 1.0))
+	var hd := float(d.get("hardness", 0.0 if (shape == "cross" or shape == "torch") else 1.0))
 	if not bool(d.get("breakable", true)) or liq != 0:
 		hd = -1.0  # nie do wykopania
 	hardness.append(hd)
@@ -110,8 +114,8 @@ func build(content: Dictionary, paths: Dictionary = {}) -> void:
 		var shape := str(d.get("shape", "cube"))
 		var transparent := bool(d.get("transparent", false))
 		var p := 0
-		if shape == "cross":
-			p = CROSS
+		if shape == "cross" or shape == "torch":
+			p = CROSS if shape == "cross" else THIN
 			if bool(d.get("solid", false)):
 				p |= SOLID
 		else:
@@ -262,7 +266,7 @@ func icon(item_key: String) -> Texture2D:
 	var img: Image
 	var b := int(it.get("block", -1))
 	if b > 0:
-		if props[b] & CROSS:
+		if props[b] & (CROSS | THIN):
 			img = tile_images[tiles[b * 6]]
 		else:
 			img = TexGen.cube_icon(tile_images[tiles[b * 6 + 2]], tile_images[tiles[b * 6 + 0]], tile_images[tiles[b * 6 + 4]])
