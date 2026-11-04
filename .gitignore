@@ -1,0 +1,11 @@
+.godot/
+*.import
+native/godot-cpp/
+native/**/*.os
+native/**/*.o
+.sconsign.dblite
+build/
+export/
+game/bin/*.so
+game/bin/*.dll
+game/bin/*.wasm

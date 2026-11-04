@@ -1,0 +1,11 @@
+[configuration]
+
+entry_symbol = "voxelcore_library_init"
+compatibility_minimum = "4.5"
+reloadable = false
+
+[libraries]
+
+linux.x86_64 = "res://bin/libvoxelcore.linux.template_release.x86_64.so"
+windows.x86_64 = "res://bin/libvoxelcore.windows.template_release.x86_64.dll"
+web.wasm32 = "res://bin/libvoxelcore.web.template_release.wasm32.nothreads.wasm"

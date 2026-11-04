@@ -1,0 +1,84 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.6.2"
+  GODOT_CPP_BRANCH: "godot-4.5-stable"
+
+jobs:
+  native-windows:
+    name: Rdzeń C++ (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pobierz godot-cpp
+        run: git clone --depth 1 --branch ${{ env.GODOT_CPP_BRANCH }} https://github.com/godotengine/godot-cpp native/godot-cpp
+      - name: Zbuduj
+        run: |
+          cmake -S native -B native/build
+          cmake --build native/build --config Release --parallel 4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-windows
+          path: game/bin/*.dll
+          if-no-files-found: error
+
+  export:
+    name: Eksport (Windows i przeglądarka)
+    needs: native-windows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-windows
+          path: game/bin
+      - name: Pobierz Godota i szablony eksportu
+        run: |
+          base=https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable
+          wget -q $base/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
+          wget -q $base/Godot_v${GODOT_VERSION}-stable_export_templates.tpz
+          unzip -q Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip
+          mv Godot_v${GODOT_VERSION}-stable_linux.x86_64 godot
+          dir=~/.local/share/godot/export_templates/${GODOT_VERSION}.stable
+          mkdir -p $dir
+          unzip -q Godot_v${GODOT_VERSION}-stable_export_templates.tpz
+          mv templates/* $dir/
+      - name: Eksportuj
+        run: |
+          mkdir -p build/web build/windows
+          ./godot --headless --path game --import || true
+          ./godot --headless --path game --export-release "Web" ../build/web/index.html
+          ./godot --headless --path game --export-release "Windows" ../build/windows/VoxelEngine.exe
+          ls -la build/web build/windows
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VoxelEngine-windows
+          path: build/windows
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+  pages:
+    name: Strona z grą
+    needs: export
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
