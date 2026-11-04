@@ -561,15 +561,15 @@ func _test_stage5(dir: String) -> void:
 	var tod := time_of_day
 	time_of_day = 23.0
 	_update_sky()
-	var base := Vector3i(player.global_position.floor())
+	var tbase := Vector3i(player.global_position.floor())
 	for i in 4:
 		var a := i * TAU / 4.0 + 0.4
-		var x := base.x + roundi(cos(a) * 3.0)
-		var z := base.z + roundi(sin(a) * 3.0)
-		var gy := entities._surface(x, z, base.y + 4)
-		if gy != -99999:
-			world.set_block(Vector3i(x, gy + 1, z), Blocks.id("torch"))
-	world.set_block(Vector3i(base.x + 4, entities._surface(base.x + 4, base.z, base.y + 4) + 1, base.z), Blocks.id("lamp"))
+		var x := tbase.x + roundi(cos(a) * 3.0)
+		var z := tbase.z + roundi(sin(a) * 3.0)
+		var ty := entities._surface(x, z, tbase.y + 4)
+		if ty != -99999:
+			world.set_block(Vector3i(x, ty + 1, z), Blocks.id("torch"))
+	world.set_block(Vector3i(tbase.x + 4, entities._surface(tbase.x + 4, tbase.z, tbase.y + 4) + 1, tbase.z), Blocks.id("lamp"))
 	await _wait(1.5)
 	player.pitch = -0.35
 	Mods.camera_stats["distance"] = 5.0
