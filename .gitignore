@@ -9,3 +9,4 @@ export/
 game/bin/*.so
 game/bin/*.dll
 game/bin/*.wasm
+!game/addons/lua-gdextension/build/
