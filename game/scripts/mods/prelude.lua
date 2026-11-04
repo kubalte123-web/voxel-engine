@@ -202,10 +202,10 @@ local function input(id)
 	end
 end
 
-local function window_action(id)
+local function window_action(id, fields)
 	local a = window_actions[id]
 	if a then
-		local ok, err = guarded(a.owner, LIMIT_CALL, a.fn)
+		local ok, err = guarded(a.owner, LIMIT_CALL, a.fn, to_lua(fields) or {})
 		if not ok and err ~= nil then host.report_error(a.owner, "przycisk " .. id .. ": " .. tostring(err)) end
 	end
 end
@@ -404,7 +404,8 @@ local function make_api(mod_id)
 		def = function(key) return R.items[key] end,
 		name = function(key) return host.item_name(key) end,
 		block_of = function(key) local b = host.item_block(key); if b <= 0 then return nil end; return b end,
-		container = function(id, size, persist) host.container_create(mod_id, id, size, persist ~= false) end,
+		-- per_player = true: każdy gracz ma własną kopię (ekwipunek); funkcje działają na kopii bieżącego gracza
+		container = function(id, size, persist, per_player) host.container_create(mod_id, id, size, persist ~= false, per_player == true) end,
 		size = function(id) return host.container_size(id) end,
 		get = function(id, index) return to_lua(host.slot_get(id, index - 1)) end,
 		set = function(id, index, slot) host.slot_set(id, index - 1, to_godot(slot or {})) end,
@@ -511,7 +512,49 @@ local function make_api(mod_id)
 		set_time = function(h) host.set_time(h) end,
 	}
 
+	-- gracze: w grze wieloosobowej kod moda działa zawsze w imieniu jednego gracza (ten, kto kopie,
+	-- klika, naciska klawisz); engine.player.* dotyczy właśnie jego
+	E.players = {
+		list = function() return to_lua(host.players_list()) end,
+		-- wywołuje fn(gracz) w imieniu każdego zalogowanego gracza (np. głód co sekundę)
+		each = function(fn)
+			local prev = host.get_ctx()
+			for _, p in ipairs(to_lua(host.players_list())) do
+				host.set_ctx(p.id)
+				local ok, err = pcall(fn, p)
+				if not ok then host.report_error(mod_id, "players.each: " .. tostring(err)) end
+			end
+			host.set_ctx(prev)
+		end,
+		-- logowanie: przyjęcie gracza na konto (zwraca nil albo opis błędu) i wyrzucenie z serwera
+		accept = function(id, account) local r = host.players_accept(id, account); if r == "" then return nil end; return r end,
+		kick = function(id, reason) host.players_kick(id, reason or "") end,
+	}
+
+	function E.as_player(id, fn)
+		local prev = host.get_ctx()
+		host.set_ctx(id)
+		local ok, err = pcall(fn)
+		host.set_ctx(prev)
+		if not ok then error(err, 2) end
+	end
+
+	E.is_multiplayer = function() return host.is_multiplayer() end
+	E.hash = function(text) return host.hash(tostring(text)) end
+
 	E.player = {
+		id = function() return host.player_id() end,
+		name = function() return host.player_name() end,
+		is_host = function() return host.player_is_host() end,
+		-- dane moda zapisywane osobno dla każdego konta gracza
+		storage = {
+			get = function(key, default)
+				local v = host.pstorage_get(mod_id, key)
+				if v == nil then return default end
+				return to_lua(v)
+			end,
+			set = function(key, value) host.pstorage_set(mod_id, key, to_godot(value)) end,
+		},
 		position = function() return host.player_position() end,
 		teleport = function(pos) host.player_teleport(pos) end,
 		velocity = function() return host.player_velocity() end,
@@ -547,7 +590,8 @@ local function make_api(mod_id)
 	}
 
 	E.ui = {
-		-- okno opisane danymi: {id, title, sections = {{type="character"|"slots"|"text"|"button", ...}}}
+		-- okno opisane danymi: {id, title, sections = {{type="character"|"slots"|"text"|"button"|"input"|"progress", ...}}}
+		-- przycisk dostaje tabelę wartości pól "input": on_press(fields), np. fields.login
 		window = function(spec)
 			for _, s in ipairs(spec.sections or {}) do
 				if s.type == "button" and type(s.on_press) == "function" then
@@ -565,6 +609,9 @@ local function make_api(mod_id)
 		-- napis na ekranie gry: {id, text, color}
 		text = function(spec) host.hud_text(mod_id, to_godot(spec)) end,
 		remove = function(id) host.hud_remove(id) end,
+		-- przedmiot trzymany kursorem w oknie: {item, count} albo {}
+		held = function() return to_lua(host.ui_held()) end,
+		set_held = function(v) host.ui_set_held(to_godot(v or {})) end,
 	}
 
 	E.input = {

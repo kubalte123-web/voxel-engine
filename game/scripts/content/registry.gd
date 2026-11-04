@@ -222,6 +222,11 @@ func _build_atlas() -> void:
 	atlas = ImageTexture.create_from_image(img)
 
 
+## Skrót treści: ten sam zestaw bloków, przedmiotów, stworzeń i opisu świata u klienta i serwera.
+func content_hash() -> String:
+	return var_to_str([keys, item_keys, entities.keys(), worldgen, lprops, props]).sha256_text()
+
+
 # ---------- zapytania ----------
 
 func id_of(key: String) -> int:

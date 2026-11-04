@@ -43,6 +43,10 @@ var in_liquid := false
 var stuck_time := 0.0
 var light_timer := 0.0
 var light_value := Vector2(1, 0)
+var puppet := false          # kukła u klienta gry wieloosobowej: pozycja z serwera, bez AI i fizyki
+var net_pos := Vector3.ZERO
+var net_rot := Vector3.ZERO
+var hidden_tags := {}
 
 
 func setup(p_manager: Node, p_world: World, p_id: int, p_type: String, p_def: Dictionary) -> void:
@@ -139,6 +143,10 @@ func _build_model() -> void:
 func show_tag(tag: String, on: bool) -> void:
 	for mi in tagged.get(tag, []):
 		mi.visible = on
+	if on:
+		hidden_tags.erase(tag)
+	else:
+		hidden_tags[tag] = true
 
 
 func color_tag(tag: String, c: Color) -> void:
@@ -224,7 +232,7 @@ func _ground_y(x: int, z: int, from_y: int) -> int:
 func _think() -> void:
 	# podążanie za graczem z ulubionym jedzeniem w ręce
 	var food := str(ai.get("follow", ""))
-	var pl: Node3D = manager.player
+	var pl: Node3D = manager.nearest_player(global_position)
 	if food != "" and pl and state != "flee" and state != "script":
 		var held := str(pl.current_item().get("item", ""))
 		var d := pl.global_position.distance_to(global_position)
@@ -308,6 +316,13 @@ func _physics_process(delta: float) -> void:
 		if dying <= 0.0:
 			manager.remove(id)
 		return
+	if puppet:
+		var before := global_position
+		global_position = global_position.lerp(net_pos, minf(1.0, delta * 10.0))
+		rotation.y = lerp_angle(rotation.y, net_rot.y, minf(1.0, delta * 10.0))
+		var v := (global_position - before) / maxf(delta, 0.0001)
+		_animate(delta, Vector2(v.x, v.z).length())
+		return
 	if not world.is_loaded(Vector3i(global_position.floor())):
 		return  # chunk jeszcze niegotowy: stoimy w miejscu
 	_brain(delta)
@@ -381,8 +396,8 @@ func _animate(delta: float, hspeed: float) -> void:
 		var hp := 0.0
 		if state == "graze":
 			hp = -0.9 + sin(t * 9.0) * 0.12
-		elif manager.player and manager.player.global_position.distance_to(global_position) < 6.0:
-			var to: Vector3 = manager.player.global_position - global_position
+		elif _look_target() and _look_target().global_position.distance_to(global_position) < 6.0:
+			var to: Vector3 = _look_target().global_position - global_position
 			var local := to.rotated(Vector3.UP, -rotation.y)
 			head.rotation.y = lerp_angle(head.rotation.y, clampf(atan2(-local.x, -local.z), -0.8, 0.8), minf(1.0, delta * 4.0))
 		else:
@@ -417,6 +432,17 @@ func _animate(delta: float, hspeed: float) -> void:
 				var smp := CharacterModel._sample(Registry.arr(tracks[pn]), anim.time)
 				if not smp.is_empty():
 					(parts[pn] as Node3D).rotation = smp.rot * (PI / 180.0)
+
+
+var _look_cache: Node3D = null
+var _look_t := 0.0
+
+
+func _look_target() -> Node3D:
+	if Time.get_ticks_msec() / 1000.0 - _look_t > 0.5:
+		_look_t = Time.get_ticks_msec() / 1000.0
+		_look_cache = manager.nearest_player(global_position) if not puppet else manager.player
+	return _look_cache if is_instance_valid(_look_cache) else null
 
 
 # ---------- obrażenia ----------

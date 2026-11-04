@@ -24,6 +24,10 @@ var windows := {}  # id okna moda -> ModWindow
 var fog_base := 0.01
 var was_underwater := false
 
+# gra wieloosobowa
+var players := {}        # peer -> Player (lokalny) albo RemotePlayer
+var pending_names := {}  # serwer: peer -> nazwa podana przy dołączaniu
+var my_account := ""
 
 func _ready() -> void:
 	_setup_input()
@@ -79,14 +83,7 @@ func _ready() -> void:
 	player = Player.new()
 	player.world = world
 	add_child(player)
-	var ps: Dictionary = info.get("player", {})
-	if ps.has("pos"):
-		player.global_position = Vector3(ps.pos[0], ps.pos[1], ps.pos[2])
-		player.yaw = ps.get("yaw", player.yaw)
-		player.pitch = ps.get("pitch", player.pitch)
-		player.selected = int(ps.get("selected", 0))
-	else:
-		player.respawn()
+	player.respawn()
 	world.update_center(player.global_position)
 	entities = EntityManager.new()
 	entities.name = "Entities"
@@ -120,12 +117,31 @@ func _ready() -> void:
 	Settings.changed.connect(_apply_settings)
 	_apply_settings()
 
-	# faza 2 modów: skrypty, po zbudowaniu świata i gracza
+	# faza 2 modów: skrypty, po zbudowaniu świata i gracza (tylko na serwerze i w grze jednoosobowej)
 	Mods.ui_window_requested.connect(_open_mod_window)
 	Mods.ui_close_requested.connect(_close_mod_window)
-	Mods.start_scripts(self)
-	entities.load_from(GameState.current_dir)
-	player.set_health(float(ps.get("health", player.stat("max_health"))))
+	Net.main = self
+	var me := Net.my_id()
+	players[me] = player
+	var sess := Mods.add_session(me, Settings.player_name, player, true)
+	if Net.mode == "dedicated":
+		# serwer bez okna: niewidoczny „gracz” trzyma tylko okolicę punktu startu
+		sess.account = "#serwer"
+		player.visible = false
+		player.set_physics_process(false)
+		player.set_process_unhandled_input(false)
+	if Net.is_client():
+		player.frozen = true
+		player.waiting_login = true
+		if not Net.client_ready(reg.content_hash()):
+			Mods.stop()
+			GameState.back_to_menu()
+			return
+	else:
+		Mods.start_scripts(self)
+		entities.load_from(GameState.current_dir)
+		if Net.mode != "dedicated":
+			accept_player(me, Settings.player_name)
 	for e in spec.errors:
 		hud.notify("Generator świata: " + str(e))
 	for id in Mods.load_errors:
@@ -139,6 +155,368 @@ func _ready() -> void:
 		for a in OS.get_cmdline_user_args():
 			if a.begins_with("--shots="):
 				_autotest(a.trim_prefix("--shots="))
+
+
+# ---------- gracze: dołączanie, logowanie, zapis ----------
+
+func remote_count() -> int:
+	return players.size() - 1
+
+
+func is_logged(p: int) -> bool:
+	var s: Session = Mods.sessions.get(p)
+	return s != null and s.logged_in
+
+
+## Zapisany stan gracza (pozycja, zdrowie) według nazwy konta.
+func _saved_player(account: String) -> Dictionary:
+	var all: Dictionary = info.get("players", {}) if info.get("players") is Dictionary else {}
+	if all.has(account):
+		return all[account]
+	if info.get("player") is Dictionary and not (info.player as Dictionary).is_empty() and all.is_empty():
+		return info.player  # świat sprzed etapu 6: jeden gracz
+	return {}
+
+
+func _store_player(account: String, node: Node3D) -> void:
+	if account.begins_with("#"):
+		return
+	if not info.get("players") is Dictionary:
+		info["players"] = {}
+	var p := node.global_position
+	info.players[account] = {"pos": [p.x, p.y, p.z], "yaw": node.yaw, "pitch": node.pitch,
+		"selected": node.selected, "health": node.health}
+
+
+## Przyjęcie gracza na konto: od teraz działa w świecie jako `account` (pozycja, ekwipunek, dane modów
+## tego konta). Zwraca "" albo opis błędu. Wywołują to silnik (bez moda logowania) albo mod logowania.
+func accept_player(p: int, account: String) -> String:
+	var s: Session = Mods.sessions.get(p)
+	if s == null:
+		return "nie ma takiego gracza"
+	account = account.strip_edges().left(24)
+	if account.is_empty() or account.begins_with("#"):
+		return "niepoprawna nazwa konta"
+	for q in Mods.sessions:
+		if q != p and Mods.sessions[q].logged_in and Mods.sessions[q].account == account:
+			return "to konto jest już w grze"
+	s.account = account
+	s.logged_in = true
+	var node: Node3D = s.node
+	var saved := _saved_player(account)
+	var pos: Vector3 = node.spawn_point()
+	if saved.has("pos"):
+		pos = Vector3(saved.pos[0], saved.pos[1], saved.pos[2])
+	node.selected = int(saved.get("selected", 0))
+	if s.local:
+		my_account = account
+		player.global_position = pos
+		player.yaw = float(saved.get("yaw", player.yaw))
+		player.pitch = float(saved.get("pitch", player.pitch))
+		player.reset_fall()
+	else:
+		node.set_account(account)
+		node.global_position = pos
+		node.net_pos = pos
+	Mods.as_player(p, func(): Mods.emit_event("player.join", {"id": p, "name": account}))
+	var hp := float(saved.get("health", node.stat("max_health")))
+	if s.local:
+		player.set_health(hp)
+	else:
+		node.health = hp
+		Net.s_accepted.rpc_id(p, account, pos, hp)
+		Mods.dirty_containers[s.hotbar.container] = true
+		s.dirty["stats"] = true
+		s.dirty["camera"] = true
+		s.dirty["hud"] = true
+		s.dirty["hotbar"] = true
+		_announce("%s dołącza do gry" % account)
+	return ""
+
+
+func _announce(text: String) -> void:
+	for q in Mods.sessions:
+		var s: Session = Mods.sessions[q]
+		if not s.logged_in:
+			continue
+		if s.local:
+			hud.notify(text)
+		else:
+			Net.send_notify(q, text)
+
+
+## Serwer: klient wczytał świat. Tworzymy jego postać, wysyłamy stan i uruchamiamy logowanie.
+func add_remote_player(p: int, name: String) -> void:
+	var node := RemotePlayer.new()
+	node.peer = p
+	node.world = world
+	node.is_server_side = true
+	node.account = name
+	add_child(node)
+	node.global_position = player.spawn_point()
+	players[p] = node
+	var s := Mods.add_session(p, name, node, false)
+	node.session = s
+	Net.s_binds.rpc_id(p, Mods.binds)
+	for e in entities.entities.values():
+		Net.s_entity_spawn.rpc_id(p, entities.describe(e))
+	for q in Mods.sessions:
+		var o: Session = Mods.sessions[q]
+		if o.logged_in and q != p:
+			Net.s_look.rpc_id(p, q, o.model_colors, o.anim_overrides)
+	# logowanie: mod może zatrzymać gracza (ctx.wait = true) i przyjąć go później (engine.players.accept)
+	var ctx: Dictionary = Mods.as_player(p, func(): return Mods.before("player.login", {"id": p, "name": name}))
+	if ctx.get("cancel", false):
+		Net.kick(p, str(ctx.get("reason", "")))
+	elif not ctx.get("wait", false):
+		var err := accept_player(p, name)
+		if err != "":
+			Net.kick(p, err)
+
+
+func remove_remote_player(p: int) -> void:
+	var s: Session = Mods.sessions.get(p)
+	var node: Node3D = players.get(p)
+	if s and s.logged_in and node:
+		_store_player(s.account, node)
+		Mods.window_closed(p, "")
+		Mods.as_player(p, func(): Mods.emit_event("player.leave", {"id": p, "name": s.account}))
+		_announce("%s opuszcza grę" % s.account)
+	Mods.remove_session(p)
+	pending_names.erase(p)
+	if node:
+		node.queue_free()
+	players.erase(p)
+
+
+func world_info_for_client() -> Dictionary:
+	world.save_all()
+	var chunks := {}
+	if not GameState.current_dir.is_empty():
+		var dir := DirAccess.open(GameState.current_dir.path_join("chunks"))
+		if dir:
+			for f in dir.get_files():
+				var parts := f.get_basename().split("_")
+				if parts.size() == 3:
+					var c := Vector3i(int(parts[0]), int(parts[1]), int(parts[2]))
+					chunks[c] = FileAccess.get_file_as_bytes(GameState.current_dir.path_join("chunks").path_join(f))
+					Net.sent_chunks[c] = true
+	var settings := {}
+	var enabled := {}
+	for id in ModManager.manifests:
+		settings[id] = ModManager.snapshot(id)
+		enabled[id] = ModManager.is_enabled(id)
+	# ustawienia zapisane w świecie mają pierwszeństwo
+	for id in info.get("mods", {}):
+		for k in info.mods[id]:
+			if settings.has(id):
+				settings[id][k] = info.mods[id][k]
+	return {"name": info.get("name", "Serwer"), "seed": int(info.get("seed", 1337)), "mods": info.get("mods", {}),
+		"palette": Mods.registry.keys, "time": time_of_day, "content_hash": Mods.registry.content_hash(),
+		"versions": Net.mods_signature(), "chunks": chunks,
+		"profile": {"order": ModManager.effective_order(), "enabled": enabled, "settings": settings}}
+
+
+## Klient: serwer przyjął nas na konto.
+func on_accepted(account: String, pos: Vector3, health: float) -> void:
+	my_account = account
+	player.waiting_login = false
+	player.global_position = pos
+	player.velocity = Vector3.ZERO
+	player.reset_fall()
+	player.set_health(health)
+
+
+func remote_move(p: int, st: Dictionary) -> void:
+	var node: Node3D = players.get(p)
+	if node is RemotePlayer and is_logged(p):
+		node.apply_state(st)
+
+
+func remote_action(p: int, kind: String, args: Dictionary) -> void:
+	var node: Node3D = players.get(p)
+	if not node is RemotePlayer or not is_logged(p):
+		return
+	Mods.as_player(p, _remote_action.bind(p, node, kind, args))
+
+
+func _remote_action(p: int, node: RemotePlayer, kind: String, args: Dictionary) -> void:
+	var reach := float(node.stat("reach")) + 3.0
+	if true:
+		match kind:
+			"select":
+				node.selected = clampi(int(args.get("i", 0)), 0, 8)
+			"dig_start":
+				var pos := Vector3i(args.pos)
+				Net.s_dig_time.rpc_id(p, pos, Actions.dig_time(node, world, pos))
+			"dig":
+				var pos := Vector3i(args.pos)
+				if Vector3(pos).distance_to(node.global_position) <= reach + 1.0:
+					Actions.break_at(node, world, pos)
+			"use":
+				var t := RemotePlayer._target(args.get("target", {}))
+				if t.is_empty() or Vector3(t.pos).distance_to(node.global_position) <= reach + 1.0:
+					node.target = t
+					Actions.use(node, world, entities, t)
+			"attack", "kick", "interact":
+				var e: Node3D = entities.get_entity(int(args.get("id", -1)))
+				if e and e.global_position.distance_to(node.global_position) <= reach + 1.0:
+					if kind == "attack":
+						Actions.attack(node, e)
+					elif kind == "kick":
+						Actions.kick(node, e, Vector3(args.get("dir", Vector3.FORWARD)))
+					else:
+						Actions.interact(node, entities, e)
+			"land":
+				Mods.emit_event("player.land", {"fall": float(args.get("fall", 0.0)), "speed": float(args.get("speed", 0.0))})
+			"void":
+				node.die("void")
+
+
+## Klient: stan od serwera (statystyki, kamera, paski, pasek przedmiotów, przedmiot pod kursorem).
+func session_update(part: String, value: Variant) -> void:
+	match part:
+		"stats":
+			Mods.player_stats.clear()
+			Mods.player_stats.merge(value)
+		"camera":
+			Mods.camera_stats.clear()
+			Mods.camera_stats.merge(value)
+		"hud":
+			Mods.hud.clear()
+			Mods.hud.merge(value)
+			Mods.hud_changed.emit()
+		"hotbar":
+			Mods.hotbar.merge(value, true)
+			Mods.hotbar_changed.emit()
+		"held":
+			Mods.local_held.clear()
+			Mods.local_held.merge(value)
+		"push":
+			player.velocity += Vector3(value)
+
+
+## Serwer: zmiany sesji graczy zdalnych i kontenerów, które oglądają, do ich klientów.
+func flush_sessions() -> void:
+	for p in Mods.sessions:
+		var s: Session = Mods.sessions[p]
+		if s.local:
+			continue
+		for part in s.dirty:
+			match part:
+				"stats": Net.s_session.rpc_id(p, "stats", s.player_stats)
+				"camera": Net.s_session.rpc_id(p, "camera", s.camera_stats)
+				"hud": Net.s_session.rpc_id(p, "hud", s.hud)
+				"hotbar": Net.s_session.rpc_id(p, "hotbar", s.hotbar)
+				"held": Net.s_session.rpc_id(p, "held", s.held)
+		s.dirty.clear()
+		if Mods.dirty_containers.is_empty():
+			continue
+		var watched := [s.hotbar.container]
+		for w in s.windows.values():
+			for sec in w.get("sections", []):
+				if sec is Dictionary and sec.get("type") == "slots":
+					watched.append(str(sec.container))
+		for real in watched:
+			if Mods.dirty_containers.has(real) and Mods.containers.has(real):
+				Net.s_container.rpc_id(p, real, Mods.container_slots(real))
+	Mods.dirty_containers.clear()
+
+
+func may_access(p: int, real: String) -> bool:
+	var s: Session = Mods.sessions.get(p)
+	if s == null or not s.logged_in:
+		return false
+	if s.hotbar.container == real:
+		return true
+	for w in s.windows.values():
+		for sec in w.get("sections", []):
+			if sec is Dictionary and sec.get("type") == "slots" and str(sec.container) == real:
+				return true
+	return false
+
+
+func players_snapshot() -> Array:
+	var out := []
+	for p in players:
+		var s: Session = Mods.sessions.get(p)
+		if s == null or not s.logged_in:
+			continue
+		var n: Node3D = players[p]
+		out.append({"peer": p, "name": s.account, "pos": n.global_position, "vel": n.velocity,
+			"yaw": n.yaw, "pitch": n.pitch, "floor": n.is_on_floor() if n is Player else n.on_floor})
+	return out
+
+
+## Klient: pozycje innych graczy od serwera.
+func players_state(list: Array, time: float) -> void:
+	time_of_day = time
+	var seen := {}
+	var me := Net.my_id()
+	for st in list:
+		var p := int(st.peer)
+		if p == me:
+			continue
+		seen[p] = true
+		var node: RemotePlayer = players.get(p)
+		if node == null:
+			node = RemotePlayer.new()
+			node.peer = p
+			node.world = world
+			node.account = str(st.name)
+			add_child(node)
+			node.global_position = st.pos
+			players[p] = node
+		node.set_account(str(st.name))
+		node.apply_state(st)
+	for p in players.keys():
+		if p != me and not seen.has(p):
+			players[p].queue_free()
+			players.erase(p)
+
+
+func send_my_state() -> void:
+	if player.waiting_login:
+		return
+	Net.c_move.rpc_id(1, {"pos": player.global_position, "vel": player.velocity, "yaw": player.yaw,
+		"pitch": player.pitch, "floor": player.is_on_floor(), "target": Player._net_target(player.target),
+		"target_liq": Player._net_target(player.target_with_liquids()), "liquid": player.in_liquid,
+		"eyes": player.eyes_in_liquid, "cam": player.camera_mode()})
+
+
+func player_anim(p: int, name: String) -> void:
+	var node: Node3D = players.get(p)
+	if node and node.model:
+		node.model.play(name)
+
+
+func player_look(p: int, colors: Dictionary, overrides: Dictionary) -> void:
+	var node: Node3D = players.get(p)
+	if node == null:
+		return
+	if node == player:
+		Mods.model_colors.merge(colors, true)
+		Mods.anim_overrides.clear()
+		Mods.anim_overrides.merge(overrides)
+		player.model.apply_colors(colors)
+	else:
+		node.model.apply_colors(colors)
+		node.model.overrides = overrides
+
+
+## Podpisy nad głowami: widoczne, gdy patrzymy na gracza albo stoi bardzo blisko.
+func _update_name_labels(delta: float) -> void:
+	var cam := player.camera
+	var fwd := -cam.global_basis.z
+	for p in players:
+		var node: Node3D = players[p]
+		if not node is RemotePlayer:
+			continue
+		var head: Vector3 = node.global_position + Vector3(0, 1.4, 0)
+		var to := head - cam.global_position
+		var d := to.length()
+		var look := d < 32.0 and fwd.dot(to.normalized()) > cos(deg_to_rad(7.0 + 30.0 / maxf(d, 1.0)))
+		node.show_name(look or d < 3.0, delta)
 
 
 func _apply_settings() -> void:
@@ -158,18 +536,28 @@ func _apply_settings() -> void:
 
 func _process(delta: float) -> void:
 	world.update_center(player.global_position)
+	if Net.online() and Net.is_server():
+		var extra: Array[Vector3] = []
+		for p in players:
+			if players[p] is RemotePlayer and is_logged(p):
+				extra.append(players[p].global_position)
+		world.extra_centers = extra
+	if Net.online():
+		_update_name_labels(delta)
 	far.update_center(player.global_position)
 	if daynight:
 		time_of_day = fmod(time_of_day + delta * 24.0 / (day_minutes * 60.0), 24.0)
 		_update_sky()
+	elif Net.is_client():
+		_update_sky()
 	_update_underwater()
 	_update_hand_light()
 	tick_timer -= delta
-	if tick_timer <= 0.0:
+	if tick_timer <= 0.0 and not Net.is_client():
 		tick_timer = 0.1
 		Mods.emit_event("tick", {"dt": 0.1, "time": time_of_day})
 	autosave_timer -= delta
-	if autosave_timer <= 0.0 and not GameState.current_dir.is_empty():
+	if autosave_timer <= 0.0 and not GameState.current_dir.is_empty() and not Net.is_client():
 		autosave_timer = 60.0
 		save_game()
 
@@ -280,10 +668,12 @@ func open_pause() -> void:
 	pause_menu.resume.connect(close_pause)
 	pause_menu.save_and_exit.connect(func():
 		save_game()
+		Net.leave()
 		Mods.stop()
 		GameState.back_to_menu())
 	ui.add_child(pause_menu)
-	get_tree().paused = true
+	# w grze wieloosobowej świat toczy się dalej (inni gracze, serwer)
+	get_tree().paused = not Net.online()
 
 
 func close_pause() -> void:
@@ -294,14 +684,16 @@ func close_pause() -> void:
 
 
 func save_game() -> void:
-	if GameState.current_dir.is_empty():
+	if GameState.current_dir.is_empty() or Net.is_client():
 		return
 	world.save_all()
 	Mods.save_data(GameState.current_dir)
 	entities.save(GameState.current_dir)
-	var p := player.global_position
-	info["player"] = {"pos": [p.x, p.y, p.z], "yaw": player.yaw, "pitch": player.pitch, "selected": player.selected,
-		"health": player.health}
+	for q in Mods.sessions:
+		var s: Session = Mods.sessions[q]
+		if s.logged_in and players.has(q):
+			_store_player(s.account, players[q])
+	info.erase("player")
 	info["palette"] = Mods.registry.keys.duplicate()
 	info["time_of_day"] = time_of_day
 	info["played"] = int(Time.get_unix_time_from_system())

@@ -104,7 +104,7 @@ static func pattern(d: Dictionary) -> Image:
 					if (cx - 2) * (cx - 2) + (cy - 2) * (cy - 2) <= 1 + int(rng.randf() < 0.3):
 						c = spots.lerp(spots.lightened(0.3), rng.randf() * 0.5)
 			img.set_pixel(x, y, c)
-	if kind in ["gem", "ingot", "food", "plant", "torch"]:
+	if kind in ["gem", "ingot", "food", "plant", "torch", "stick", "pickaxe", "axe", "shovel", "sword", "hammer"]:
 		_shape(img, kind, a, b, rng)
 	return img
 
@@ -135,6 +135,41 @@ static func _shape(img: Image, kind: String, a: Color, b: Color, rng: RandomNumb
 				img.set_pixel(8, y, Color(0.35, 0.22, 0.1))
 			img.set_pixel(9, 2, Color(0.25, 0.55, 0.2))
 			img.set_pixel(10, 2, Color(0.25, 0.55, 0.2))
+		"stick", "pickaxe", "axe", "shovel", "sword", "hammer":
+			# narzędzia: trzonek po przekątnej i głowica w kolorze materiału (color)
+			var wood := Color(0.55, 0.38, 0.2)
+			var wood2 := Color(0.42, 0.28, 0.14)
+			var top := 2 if kind == "stick" else 5
+			if kind == "sword":
+				top = 12
+			for k in range(top, 15):
+				img.set_pixel(15 - k, k, wood if k % 2 == 0 else wood2)
+				img.set_pixel(clampi(16 - k, 0, 15), k, wood2)
+			match kind:
+				"pickaxe":
+					for x in range(3, 14):
+						var y := 3 + int(absf(x - 8.5) * 0.45)
+						img.set_pixel(x, y, a)
+						img.set_pixel(x, y + 1, b)
+				"axe":
+					for y in range(1, 8):
+						for x in range(8, 13 - absi(y - 4) / 2):
+							img.set_pixel(x, y, a if x < 11 else b)
+				"shovel":
+					for y in range(1, 6):
+						for x in range(10, 15):
+							if absf(x - 12) + absf(y - 3) <= 2.6:
+								img.set_pixel(x, y, a if y < 3 else b)
+				"sword":
+					for k in range(1, 12):
+						img.set_pixel(k + 3, 12 - k, a)
+						img.set_pixel(k + 4, 12 - k, b)
+					for k in range(-2, 3):
+						img.set_pixel(4 + k, 11 + k, Color(0.4, 0.3, 0.15))
+				"hammer":
+					for y in range(1, 6):
+						for x in range(8, 15):
+							img.set_pixel(x, y, a if y < 4 else b)
 		"torch":
 			# patyk (kolumny 7-8, wiersze 6-15) i płomień nad nim; ściany pochodni biorą ten wycinek
 			for y in range(6, 16):

@@ -11,6 +11,9 @@ var count := 1
 var vy := 2.5
 var age := 0.0
 var sprite: Sprite3D
+var puppet := false
+var net_pos := Vector3.ZERO
+var net_rot := Vector3.ZERO
 
 
 func _ready() -> void:
@@ -25,6 +28,10 @@ func _ready() -> void:
 
 func _physics_process(delta: float) -> void:
 	age += delta
+	if puppet:
+		global_position = global_position.lerp(net_pos, minf(1.0, delta * 10.0))
+		sprite.rotation.y += delta * 2.0
+		return
 	var below := Vector3i((global_position - Vector3(0, 0.15, 0)).floor())
 	var bb := world.get_block(below)
 	var on_ground := bb != Blocks.AIR and (Blocks.props(bb) & Blocks.SOLID) != 0
@@ -42,8 +49,9 @@ func _physics_process(delta: float) -> void:
 		var v := clampf(f.x + f.y, 0.0, 1.0)
 		sprite.modulate = Color(v, v * (0.9 if f.y > f.x else 1.0), v * (0.8 if f.y > f.x else 1.0))
 	sprite.position.y = 0.15 + sin(age * 2.5) * 0.06
-	if age > 0.6 and manager.player and manager.player.global_position.distance_to(global_position) < 1.6:
-		var ctx := Mods.before("item.pickup", {"item": item, "count": count})
+	var near: Node3D = manager.nearest_player(global_position)
+	if age > 0.6 and near and near.global_position.distance_to(global_position) < 1.6:
+		var ctx: Dictionary = Mods.as_player(EntityManager.peer_of(near), func(): return Mods.before("item.pickup", {"item": item, "count": count}))
 		var taken := int(ctx.get("taken", 0))
 		if taken > 0:
 			count -= taken

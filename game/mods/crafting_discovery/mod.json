@@ -1,0 +1,15 @@
+{
+	"id": "crafting_discovery",
+	"name": "Rzemiosło odkrywcze",
+	"version": "0.1.0",
+	"author": "Jakub Lewicki",
+	"description": "Inne zasady rzemiosła: przy warsztacie wrzucasz do czterech pól dowolne składniki (kolejność nie ma znaczenia) i wciskasz „Wykuj”. Przepisów nie widać, trzeba je odkryć. Warsztat podpowiada, gdy jesteś blisko. Wykuwanie trwa, ogień w pobliżu je przyspiesza, a pierwsze odkrycie daje premię. Odkryte przepisy trafiają do księgi gracza.",
+	"requires": ["modkit", "backpack", "tools"],
+	"enabled_by_default": false,
+	"content": ["content.lua"],
+	"scripts": ["main.lua"],
+	"settings": [
+		{"key": "speed", "label": "Szybkość wykuwania", "type": "float", "default": 1.0, "min": 0.25, "max": 4.0},
+		{"key": "hints", "label": "Podpowiedzi „Prawie!”", "type": "bool", "default": true}
+	]
+}

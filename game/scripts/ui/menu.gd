@@ -24,7 +24,18 @@ func _ready() -> void:
 	scroll.add_child(content)
 	get_viewport().size_changed.connect(_fit)
 	show_main()
-	for a in OS.get_cmdline_user_args():
+	if not Net.last_error.is_empty():
+		_error(Net.last_error)
+		Net.last_error = ""
+	var args := OS.get_cmdline_user_args()
+	for a in args:
+		if a.begins_with("--server="):
+			_dedicated(a.trim_prefix("--server="), args)
+			return
+		if a.begins_with("--join="):
+			_auto_join(a.trim_prefix("--join="), args)
+			return
+	for a in args:
 		if a.begins_with("--shots="):
 			_autotest(a.trim_prefix("--shots="))
 
@@ -53,7 +64,7 @@ func show_main() -> void:
 	var title := UI.label("VOXEL ENGINE", 46)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	content.add_child(title)
-	var sub := UI.label("nazwa robocza · etap 4", 16, UI.MUTED)
+	var sub := UI.label("nazwa robocza · etap 6", 16, UI.MUTED)
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	content.add_child(sub)
 	content.add_child(_gap(8))
@@ -61,6 +72,7 @@ func show_main() -> void:
 	var load_btn := UI.button("Wczytaj świat", show_load)
 	load_btn.disabled = GameState.list_worlds().is_empty()
 	content.add_child(load_btn)
+	content.add_child(UI.button("Gra wieloosobowa", show_multiplayer))
 	content.add_child(UI.button("Mody", show_mods))
 	content.add_child(UI.button("Opcje", show_options))
 	if not OS.has_feature("web"):
@@ -118,6 +130,109 @@ func show_load() -> void:
 		col.add_child(row)
 		content.add_child(card)
 	content.add_child(UI.button("Wróć", show_main))
+
+
+func _error(text: String) -> void:
+	var l := UI.wrap(text, 16, UI.DANGER)
+	content.add_child(l)
+	content.move_child(l, 0)
+	_fit.call_deferred()
+
+
+## Gra wieloosobowa: nazwa gracza, założenie serwera na swoim świecie albo dołączenie do serwera.
+func show_multiplayer() -> void:
+	_screen()
+	content.add_child(UI.label("Gra wieloosobowa", 30))
+	content.add_child(UI.label("Twoja nazwa (widoczna nad głową)", 16, UI.MUTED))
+	var name_edit := LineEdit.new()
+	name_edit.text = Settings.player_name
+	name_edit.max_length = 24
+	name_edit.custom_minimum_size = Vector2(0, 48)
+	name_edit.text_changed.connect(func(t):
+		Settings.player_name = t.strip_edges() if not t.strip_edges().is_empty() else "Gracz"
+		Settings.save_settings())
+	content.add_child(name_edit)
+	var status := UI.wrap("", 16, UI.LOCK)
+	content.add_child(status)
+	if not Net.status.is_connected(_on_net_status):
+		Net.status.connect(_on_net_status)
+	status.set_meta("net_status", true)
+
+	content.add_child(UI.label("Dołącz do serwera", 22))
+	var addr := LineEdit.new()
+	addr.text = Settings.last_address
+	addr.placeholder_text = "adres serwera, np. 192.168.1.10"
+	addr.custom_minimum_size = Vector2(0, 48)
+	content.add_child(addr)
+	var port := LineEdit.new()
+	port.text = str(Settings.last_port)
+	port.custom_minimum_size = Vector2(0, 48)
+	content.add_child(port)
+	content.add_child(UI.button("Dołącz", func():
+		Settings.last_address = addr.text.strip_edges()
+		Settings.last_port = int(port.text) if port.text.is_valid_int() else Net.DEFAULT_PORT
+		Settings.save_settings()
+		var err := Net.join(Settings.last_address, Settings.last_port)
+		if err != "":
+			status.text = err, true))
+
+	content.add_child(UI.label("Załóż serwer na swoim świecie", 22))
+	content.add_child(UI.wrap("Inni gracze dołączają podając twój adres w sieci i port. Muszą mieć te same mody (włączy się u nich ten sam zestaw i ustawienia)."))
+	var worlds := GameState.list_worlds()
+	if worlds.is_empty():
+		content.add_child(UI.wrap("Najpierw utwórz świat w „Nowy świat”."))
+	for w in worlds:
+		content.add_child(UI.button("Graj na serwerze: " + str(w.get("name", "Świat")), func():
+			var pnum := int(port.text) if port.text.is_valid_int() else Net.DEFAULT_PORT
+			var err := Net.host(pnum)
+			if err != "":
+				status.text = err
+				return
+			GameState.start(w.dir)))
+	content.add_child(UI.button("Wróć", show_main))
+
+
+func _on_net_status(text: String) -> void:
+	for c in content.get_children():
+		if c is Label and c.has_meta("net_status"):
+			c.text = text
+
+
+## Serwer bez okna: godot --headless --path game -- --server=nazwa_swiata [--port=7777] [--seed=123]
+func _dedicated(world_name: String, args: PackedStringArray) -> void:
+	var port := Net.DEFAULT_PORT
+	var seed_text := ""
+	for a in args:
+		if a.begins_with("--port="):
+			port = int(a.trim_prefix("--port="))
+		if a.begins_with("--seed="):
+			seed_text = a.trim_prefix("--seed=")
+	var dir := ""
+	for w in GameState.list_worlds():
+		if str(w.get("name", "")) == world_name or str(w.dir).get_file() == world_name:
+			dir = w.dir
+	if dir.is_empty():
+		dir = GameState.create_world(world_name, seed_text)
+	var err := Net.host(port, true)
+	if err != "":
+		printerr(err)
+		get_tree().quit(1)
+		return
+	print("SERWER świat=", dir, " port=", port)
+	GameState.start(dir)
+
+
+## Dołączenie z linii poleceń (testy): --join=adres:port
+func _auto_join(target: String, args: PackedStringArray) -> void:
+	for a in args:
+		if a.begins_with("--name="):
+			Settings.player_name = a.trim_prefix("--name=")
+		if a.begins_with("--shots="):
+			GameState.autotest_dir = a.trim_prefix("--shots=")
+	var parts := target.split(":")
+	var err := Net.join(parts[0], int(parts[1]) if parts.size() > 1 else Net.DEFAULT_PORT)
+	if err != "":
+		printerr(err)
 
 
 func show_mods() -> void:

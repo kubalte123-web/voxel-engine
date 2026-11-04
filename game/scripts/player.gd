@@ -25,6 +25,7 @@ var selected := 0
 var target: Dictionary = {}
 var frozen := true
 var ui_blocked := false  # otwarte okno moda: gracz nie reaguje na mysz
+var waiting_login := false  # gra wieloosobowa: czekamy na przyjęcie przez serwer (logowanie)
 var health := 20.0
 var in_liquid := false     # ciało w cieczy (pływanie)
 var eyes_in_liquid := false
@@ -184,6 +185,8 @@ func look(delta: Vector2) -> void:
 
 
 func select(i: int) -> void:
+	if Net.is_client() and i != selected:
+		Net.c_action.rpc_id(1, "select", {"i": i})
 	selected = i
 	selection_changed.emit(i)
 
@@ -264,7 +267,7 @@ func _physics_process(delta: float) -> void:
 	if selected >= hotbar_size():
 		select(0)
 	if frozen:
-		if world.is_ready_at(global_position):
+		if world.is_ready_at(global_position) and not waiting_login:
 			frozen = false
 		else:
 			return
@@ -321,7 +324,12 @@ func _physics_process(delta: float) -> void:
 			body.apply_central_impulse(push * 3.0 * delta * body.mass)
 
 	if global_position.y < -80.0:
-		die("void")
+		if Net.is_client():
+			Net.c_action.rpc_id(1, "void", {})
+			global_position.y = 200.0  # serwer zaraz przeniesie gracza w punkt odrodzenia
+			velocity = Vector3.ZERO
+		else:
+			die("void")
 
 	var hspeed := Vector2(velocity.x, velocity.z).length()
 	if hspeed > 0.3:
@@ -352,7 +360,10 @@ func _track_fall(speed: float) -> void:
 	elif not was_on_floor:
 		var fall := fall_top - global_position.y
 		if fall > 0.6:
-			Mods.emit_event("player.land", {"fall": fall, "speed": speed})
+			if Net.is_client():
+				Net.c_action.rpc_id(1, "land", {"fall": fall, "speed": speed})
+			else:
+				Mods.emit_event("player.land", {"fall": fall, "speed": speed})
 		fall_top = global_position.y
 	else:
 		fall_top = global_position.y
@@ -447,14 +458,14 @@ func entity_target() -> Dictionary:
 func start_digging() -> void:
 	var e := entity_target()
 	if not e.is_empty():
-		model.do_swing()
 		var node: Node3D = e.node
-		if node is Creature:
-			var it := str(current_item().get("item", ""))
-			var dmg := float(Blocks.reg.items.get(it, {}).get("data", {}).get("damage", 1.0)) if it != "" else 1.0
-			node.hit(dmg, global_position, "player")
+		if Net.is_client():
+			model.do_swing()
+			Net.c_action.rpc_id(1, "kick" if node is Prop else "attack", {"id": node.id, "dir": -camera.global_basis.z})
 		elif node is Prop:
-			node.kick(-camera.global_basis.z, 6.0)
+			Actions.kick(self, node, -camera.global_basis.z)
+		else:
+			Actions.attack(self, node)
 		return
 	digging = true
 	dig_pos = Vector3i(0, -99999, 0)
@@ -467,20 +478,15 @@ func stop_digging() -> void:
 	crack.visible = false
 
 
-## Czas kopania bloku: twardość z definicji bloku podzielona przez szybkość kopania gracza.
-## Hak „block.dig” może go zmienić (np. narzędzia) albo zabronić kopania (cancel).
+## Czas kopania bloku (twardość, szybkość kopania, hak „block.dig” np. dla narzędzi). W grze
+## wieloosobowej liczy go serwer: klient pyta i czeka na odpowiedź (-2 = czekamy).
 func _dig_time(pos: Vector3i) -> float:
-	var block := world.get_block(pos)
-	var hd := Blocks.reg.hardness[block] if block < Blocks.reg.hardness.size() else 1.0
-	if hd < 0.0:
-		return -1.0
-	var t := hd / maxf(0.01, float(stat("break_speed")))
-	if Mods.has_hook("before", "block.dig"):
-		var ctx := Mods.before("block.dig", {"pos": pos, "block": block, "time": t, "item": str(current_item().get("item", ""))})
-		if ctx.get("cancel", false):
-			return -1.0
-		t = float(ctx.get("time", t))
-	return t
+	if Net.is_client():
+		if Net.dig_times.has(pos):
+			return float(Net.dig_times[pos])
+		Net.c_action.rpc_id(1, "dig_start", {"pos": pos})
+		return -2.0
+	return Actions.dig_time(self, world, pos)
 
 
 func _update_digging(delta: float) -> void:
@@ -493,7 +499,10 @@ func _update_digging(delta: float) -> void:
 	if target.pos != dig_pos:
 		dig_pos = target.pos
 		dig_progress = 0.0
+		Net.dig_times.erase(dig_pos)
 		dig_time = _dig_time(dig_pos)
+	if dig_time == -2.0 and Net.dig_times.has(dig_pos):
+		dig_time = float(Net.dig_times[dig_pos])
 	if dig_time < 0.0 or dig_cooldown > 0.0:
 		crack.visible = false
 		return
@@ -514,80 +523,51 @@ func _update_digging(delta: float) -> void:
 	crack.material_override = crack_mats[clampi(int(dig_progress * 5.0), 0, 4)]
 
 
-## Kopanie przechodzi przez haki modów: „block.break” przed (można anulować, zmienić łup) i po.
+## Kopanie, stawianie i użycie: w grze wieloosobowej wysyłane do serwera, inaczej wykonywane od razu.
 func break_block() -> void:
 	if target.is_empty():
 		return
-	var block := world.get_block(target.pos)
-	var drops := []
-	for d in Blocks.reg.drops(block):
-		if not d.has("chance") or _rng.randf() < float(d.chance):
-			drops.append({"item": str(d.item), "count": int(d.get("count", 1))})
-	var ctx := Mods.before("block.break", {"pos": target.pos, "block": block, "drops": drops,
-		"item": str(current_item().get("item", ""))})
-	if ctx.get("cancel", false):
-		return
-	if world.set_block(target.pos, Blocks.AIR):
+	if Net.is_client():
 		model.do_swing()
-		Mods.after("block.break", ctx)
+		Net.c_action.rpc_id(1, "dig", {"pos": target.pos})
+		return
+	Actions.break_at(self, world, target.pos)
 
 
-## Prawy przycisk: przedmiot-blok stawia blok, inny przedmiot wywołuje hak „item.use”.
+## Prawy przycisk: stworzenie (interakcja), obiekt luźny (podniesienie), blok (block.use), przedmiot.
 func use_item() -> void:
 	var e := entity_target()
-	if not e.is_empty():
-		var node: Node3D = e.node
-		if node is Creature:
-			var ctx := Mods.before("entity.interact", {"id": node.id, "type": node.type,
-				"item": str(current_item().get("item", "")), "slot": selected + 1})
-			if not ctx.get("cancel", false):
-				Mods.after("entity.interact", ctx)
-			model.do_swing()
-			return
-		if node is Prop:
-			if entities.pickup_prop(node):
-				model.do_swing()
-			return
-	var it := current_item()
-	var key := str(it.get("item", ""))
-	if key != "" and Blocks.reg.item_block(key) <= 0:
-		var ctx := {"item": key, "slot": selected + 1}
-		if not target.is_empty():
-			ctx["pos"] = target.pos
-			ctx["normal"] = target.normal
-			ctx["block"] = world.get_block(target.pos)
-		ctx = Mods.before("item.use", ctx)
-		if ctx.get("cancel", false):
-			return
+	if Net.is_client():
 		model.do_swing()
-		Mods.after("item.use", ctx)
+		if not e.is_empty():
+			Net.c_action.rpc_id(1, "interact", {"id": e.node.id})
+		else:
+			Net.c_action.rpc_id(1, "use", {"target": _net_target(target)})
 		return
-	place_block()
+	if not e.is_empty():
+		Actions.interact(self, entities, e.node)
+		return
+	Actions.use(self, world, entities, target)
 
 
 func place_block() -> void:
-	if target.is_empty() or target.normal == Vector3i.ZERO:
+	if Net.is_client():
+		Net.c_action.rpc_id(1, "use", {"target": _net_target(target)})
 		return
-	var p: Vector3i = target.pos + target.normal
-	# nie stawiamy bloku tam, gdzie stoi gracz
-	var a_min := global_position - Vector3(0.3, 0, 0.3)
-	var a_max := global_position + Vector3(0.3, 1.8, 0.3)
-	if a_max.x > p.x and a_min.x < p.x + 1 and a_max.y > p.y and a_min.y < p.y + 1 and a_max.z > p.z and a_min.z < p.z + 1:
-		return
-	var block := current_block()
-	if block <= 0:
-		return
-	var ctx := Mods.before("block.place", {"pos": p, "block": block, "slot": selected + 1,
-		"item": str(current_item().get("item", ""))})
-	if ctx.get("cancel", false):
-		return
-	var placed := int(ctx.get("block", block))
-	# blok luźny nie trafia do siatki świata, tylko staje się obiektem fizycznym
-	if Blocks.reg.loose(placed) != null and entities:
-		if entities.spawn_prop(placed, Vector3(p) + Vector3(0.5, 0.5, 0.5), Vector3(0, yaw, 0)) >= 0:
-			model.do_swing()
-			Mods.after("block.place", ctx)
-		return
-	if world.set_block(p, placed):
-		model.do_swing()
-		Mods.after("block.place", ctx)
+	Actions.place(self, world, entities, target)
+
+
+static func _net_target(t: Dictionary) -> Dictionary:
+	if t.is_empty():
+		return {}
+	return {"pos": t.pos, "normal": t.normal}
+
+
+func teleport(p: Vector3) -> void:
+	global_position = p
+	velocity = Vector3.ZERO
+	reset_fall()
+
+
+func push(v: Vector3) -> void:
+	velocity += v

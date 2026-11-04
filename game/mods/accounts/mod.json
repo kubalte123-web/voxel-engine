@@ -1,0 +1,14 @@
+{
+	"id": "accounts",
+	"name": "Konta graczy",
+	"version": "0.1.0",
+	"author": "Jakub Lewicki",
+	"description": "Logowanie na serwer: po dołączeniu gracz wpisuje login i hasło swojego konta albo zakłada nowe. Konta (login i skrót hasła) są zapisane w świecie serwera, więc na to samo konto można wejść z dowolnego urządzenia i pod dowolną nazwą gracza: ekwipunek, pozycja i dane modów należą do konta. Działa tylko w grze wieloosobowej.",
+	"scripts": ["main.lua"],
+	"enabled_by_default": false,
+	"settings": [
+		{"key": "allow_register", "label": "Gracze mogą zakładać konta sami", "type": "bool", "default": true},
+		{"key": "host_login", "label": "Gospodarz serwera też się loguje", "type": "bool", "default": false},
+		{"key": "max_attempts", "label": "Błędne próby przed wyrzuceniem", "type": "int", "default": 5, "min": 1, "max": 20, "step": 1}
+	]
+}

@@ -17,6 +17,7 @@ var swing := 0.0  # 1.0 = początek machnięcia ręką (kopanie / stawianie)
 var t := 0.0
 var parts := {}       # nazwa części -> Node3D
 var mats := {}        # nazwa koloru -> materiał
+var overrides: Variant = null  # zamienniki stanów dla innych graczy (null = Mods.anim_overrides)
 var anim := {}        # odtwarzana animacja moda: {"name", "def", "time", "weight", "loop", "explicit"}
 
 const DEFAULT_COLORS := {
@@ -190,7 +191,8 @@ func play(name: String) -> void:
 func _mod_animation(delta: float, state: String) -> void:
 	# animacja jawnie włączona ma pierwszeństwo; inaczej zamiennik stanu ("idle", "walk", "jump")
 	if anim.is_empty() or not anim.explicit:
-		var want: String = Mods.anim_overrides.get(state, "")
+		var ov: Dictionary = overrides if overrides is Dictionary else Mods.anim_overrides
+		var want: String = ov.get(state, "")
 		if want != "" and (anim.is_empty() or anim.name != want or anim.get("stopping", false)):
 			play(want)
 			anim.explicit = false

@@ -2,11 +2,13 @@
 local kit = engine.require("modkit")
 local backpack = engine.require("backpack")
 
-if engine.settings.get("starter") and not engine.storage.get("started", false) then
-	backpack.give("shears", 1)
-	backpack.give("wheat", 8)
-	engine.storage.set("started", true)
-end
+engine.on("player.join", function()
+	if engine.settings.get("starter") and not engine.player.storage.get("started", false) then
+		backpack.give("shears", 1)
+		backpack.give("wheat", 8)
+		engine.player.storage.set("started", true)
+	end
+end)
 
 local function adult(id) return not engine.entities.data(id).baby end
 

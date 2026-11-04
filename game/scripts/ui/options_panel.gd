@@ -10,6 +10,15 @@ func _ready() -> void:
 	add_child(UI.label("Opcje", 30))
 	var s := Settings
 	var web := OS.has_feature("web")
+	add_child(UI.label("Nazwa gracza", 16, UI.MUTED))
+	var name_edit := LineEdit.new()
+	name_edit.text = s.player_name
+	name_edit.max_length = 24
+	name_edit.custom_minimum_size = Vector2(0, 46)
+	name_edit.text_changed.connect(func(t):
+		s.player_name = t.strip_edges() if not t.strip_edges().is_empty() else "Gracz"
+		s.save_settings())
+	add_child(name_edit)
 	add_child(UI.slider_row("Zasięg widzenia", 2, s.max_render_distance(), 1, s.render_distance,
 		func(v): return "%d chunków" % int(v), func(v): s.render_distance = int(v); s.save_settings()))
 	add_child(UI.slider_row("Daleki widok", 0, 4, 1, s.far_view,

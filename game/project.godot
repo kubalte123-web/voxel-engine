@@ -12,6 +12,7 @@ Settings="*res://scripts/autoload/settings.gd"
 ModManager="*res://scripts/autoload/mod_manager.gd"
 GameState="*res://scripts/autoload/game_state.gd"
 Mods="*res://scripts/autoload/mod_runtime.gd"
+Net="*res://scripts/autoload/net.gd"
 
 [display]
 

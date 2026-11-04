@@ -18,6 +18,9 @@ var shape_kind := "box"
 var sleeping_far := false
 var mesh_node: MeshInstance3D
 var light_timer := 0.0
+var puppet := false
+var net_pos := Vector3.ZERO
+var net_rot := Vector3.ZERO
 
 
 func setup(p_manager: Node, p_world: World, p_id: int, p_block: int) -> void:
@@ -95,6 +98,12 @@ func _update_light(delta: float) -> void:
 
 func _physics_process(delta: float) -> void:
 	_update_light(delta)
+	if puppet:
+		freeze = true
+		global_position = global_position.lerp(net_pos, minf(1.0, delta * 10.0))
+		rotation = Vector3(lerp_angle(rotation.x, net_rot.x, minf(1.0, delta * 10.0)),
+			lerp_angle(rotation.y, net_rot.y, minf(1.0, delta * 10.0)), lerp_angle(rotation.z, net_rot.z, minf(1.0, delta * 10.0)))
+		return
 	var cell := Vector3i(global_position.floor())
 	# chunk pod spodem niegotowy albo usunięty: zamrażamy, żeby nie spaść przez świat
 	var ready := world.is_loaded(cell) and world.is_loaded(cell + Vector3i(0, -1, 0))

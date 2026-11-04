@@ -35,6 +35,8 @@ func activate_around(p: Vector3i) -> void:
 
 
 func _process(delta: float) -> void:
+	if world.remote:
+		return  # u klienta ciecze symuluje serwer
 	timer += delta
 	if timer < TICK:
 		return

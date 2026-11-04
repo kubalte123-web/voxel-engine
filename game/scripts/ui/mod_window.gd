@@ -4,13 +4,16 @@ extends Control
 ##   {type = "character", lines = {...}}       podgląd postaci i tekst obok
 ##   {type = "slots", container = "id", columns = 9, title = "..."}  siatka miejsc na przedmioty
 ##   {type = "text", text = "..."}
-##   {type = "button", id = "...", text = "...", on_press = function}
+##   {type = "button", id = "...", text = "...", on_press = function(fields)}
+##   {type = "input", id = "login", label = "Login", secret = true, text = ""}  pole tekstowe
+##   {type = "progress", value = 0.5, label = "..."}  pasek postępu
 ## Przenoszenie przedmiotów: kliknięcie bierze cały stos, prawy przycisk połowę lub jedną sztukę.
+## Logika kliknięć działa na serwerze (Mods.window_click), więc tak samo w grze wieloosobowej.
 
 signal closed(id: String)
 
 var spec: Dictionary
-var held := {}             # przedmiot trzymany pod kursorem
+var inputs := {}           # id pola -> LineEdit
 var held_icon: Control
 var slot_views := []       # [kontener, indeks, Button]
 var content: VBoxContainer
@@ -54,13 +57,19 @@ func _ready() -> void:
 
 func build(new_spec: Dictionary) -> void:
 	spec = new_spec
+	var keep := {}
+	for k in inputs:
+		if is_instance_valid(inputs[k]):
+			keep[k] = inputs[k].text
 	UI.clear(content)
 	slot_views.clear()
+	inputs.clear()
 	var head := HBoxContainer.new()
 	var title := UI.label(str(spec.get("title", "")), 26)
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(title)
-	head.add_child(UI.button("Zamknij", close))
+	if bool(spec.get("closable", true)):
+		head.add_child(UI.button("Zamknij", close))
 	content.add_child(head)
 	var narrow := UI.narrow(get_viewport_rect().size)
 	for s in spec.get("sections", []):
@@ -75,7 +84,27 @@ func build(new_spec: Dictionary) -> void:
 				content.add_child(UI.wrap(str(s.get("text", "")), 17, UI.TEXT))
 			"button":
 				var action := str(s.get("action", ""))
-				content.add_child(UI.button(str(s.get("text", "")), func(): Mods.window_action(action)))
+				content.add_child(UI.button(str(s.get("text", "")), func(): _press(action)))
+			"input":
+				if s.has("label"):
+					content.add_child(UI.label(str(s.label), 16, UI.MUTED))
+				var le := LineEdit.new()
+				le.custom_minimum_size = Vector2(0, 46)
+				le.secret = bool(s.get("secret", false))
+				le.placeholder_text = str(s.get("placeholder", ""))
+				var fid := str(s.get("id", "pole"))
+				le.text = str(keep.get(fid, s.get("text", "")))
+				content.add_child(le)
+				inputs[fid] = le
+			"progress":
+				if s.has("label"):
+					content.add_child(UI.label(str(s.label), 16, UI.MUTED))
+				var pb := ProgressBar.new()
+				pb.custom_minimum_size = Vector2(0, 22)
+				pb.max_value = 1.0
+				pb.value = float(s.get("value", 0.0))
+				pb.show_percentage = false
+				content.add_child(pb)
 	_update_slots()
 
 
@@ -150,34 +179,25 @@ func _slots(s: Dictionary, narrow: bool) -> Control:
 	return box
 
 
-func _click(cid: String, i: int, right: bool) -> void:
-	var cur := Mods.slot(cid, i)
-	if held.is_empty():
-		if cur.is_empty():
-			return
-		if right and int(cur.count) > 1:
-			var half := int(cur.count) / 2
-			held = {"item": cur.item, "count": half}
-			Mods.set_slot(cid, i, {"item": cur.item, "count": int(cur.count) - half})
-		else:
-			held = cur.duplicate()
-			Mods.set_slot(cid, i, {})
+func _fields() -> Dictionary:
+	var f := {}
+	for k in inputs:
+		f[k] = inputs[k].text
+	return f
+
+
+func _press(action: String) -> void:
+	if Net.is_client():
+		Net.c_button.rpc_id(1, action, _fields())
 	else:
-		var max_stack := Mods.max_stack(str(held.item))
-		if cur.is_empty():
-			var n := mini(max_stack, 1 if right else int(held.count))
-			Mods.set_slot(cid, i, {"item": held.item, "count": n})
-			held.count = int(held.count) - n
-		elif str(cur.item) == str(held.item):
-			var room := max_stack - int(cur.count)
-			var n := mini(room, 1 if right else int(held.count))
-			Mods.set_slot(cid, i, {"item": cur.item, "count": int(cur.count) + n})
-			held.count = int(held.count) - n
-		elif not right:
-			Mods.set_slot(cid, i, held.duplicate())
-			held = cur.duplicate()
-		if int(held.get("count", 0)) <= 0:
-			held = {}
+		Mods.window_action(action, _fields())
+
+
+func _click(cid: String, i: int, right: bool) -> void:
+	if Net.is_client():
+		Net.c_click.rpc_id(1, cid, i, right)
+	else:
+		Mods.window_click(Mods.local_peer, cid, i, right)
 	_update_slots()
 
 
@@ -192,6 +212,7 @@ func _update_slots() -> void:
 			b.icon = Mods.registry.icon(str(sl.item))
 			b.text = str(sl.count) if int(sl.count) > 1 else ""
 			b.tooltip_text = Mods.registry.item_name(str(sl.item))
+	var held: Dictionary = Mods.local_held
 	held_icon.visible = not held.is_empty()
 	if not held.is_empty():
 		held_icon.texture = Mods.registry.icon(str(held.item))
@@ -212,28 +233,17 @@ func _process(delta: float) -> void:
 
 
 func close() -> void:
-	_return_held()
-	closed.emit(str(spec.get("id", "")))
+	var id := str(spec.get("id", ""))
+	if Net.is_client():
+		Net.c_closed.rpc_id(1, id)
+		Mods.open_windows.erase(id)
+	else:
+		Mods.window_closed(Mods.local_peer, id)
+	closed.emit(id)
 	queue_free()
 
 
-## Przedmiot trzymany pod kursorem wraca do pierwszego wolnego miejsca w otwartych kontenerach.
-func _return_held() -> void:
-	if held.is_empty():
-		return
-	for v in slot_views:
-		var sl := Mods.slot(v[0], v[1])
-		if sl.is_empty():
-			Mods.set_slot(v[0], v[1], held)
-			held = {}
-			return
-		if str(sl.item) == str(held.item) and int(sl.count) + int(held.count) <= Mods.max_stack(str(held.item)):
-			Mods.set_slot(v[0], v[1], {"item": sl.item, "count": int(sl.count) + int(held.count)})
-			held = {}
-			return
-
-
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("ui_cancel"):
+	if event.is_action_pressed("ui_cancel") and bool(spec.get("closable", true)):
 		get_viewport().set_input_as_handled()
 		close()

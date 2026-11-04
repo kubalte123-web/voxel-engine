@@ -1,0 +1,10 @@
+{
+	"id": "tools",
+	"name": "Narzędzia",
+	"version": "0.1.0",
+	"author": "Jakub Lewicki",
+	"description": "Patyki, kilofy, siekiery, łopaty i miecze z drewna, kamienia i żelaza. Narzędzie pasujące do bloku kopie szybciej (kilof: kamień i rudy, siekiera: drewno, łopata: ziemia i piasek), a miecz zadaje więcej obrażeń. Przepisy dają mody rzemiosła.",
+	"content": ["content.lua"],
+	"scripts": ["main.lua"],
+	"library": true
+}

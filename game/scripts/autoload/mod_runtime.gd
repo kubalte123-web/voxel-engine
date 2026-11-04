@@ -148,7 +148,15 @@ func stop() -> void:
 	model_colors.clear()
 	hud.clear()
 	_hooks.clear()
-	hotbar = {"container": "", "first": 0, "count": 0}
+	hotbar.container = ""
+	hotbar.first = 0
+	hotbar.count = 0
+	local_held.clear()
+	sessions.clear()
+	per_player.clear()
+	pstorage.clear()
+	dirty_containers.clear()
+	ctx = 1
 	_errors_shown = 0
 
 
@@ -254,13 +262,16 @@ func _call(kind: String, name: String, ctx: Dictionary) -> Dictionary:
 
 
 func press_bind(id: String) -> void:
+	if Net.is_client():
+		Net.c_bind.rpc_id(1, id)
+		return
 	if _api.has("input"):
 		_api.input.invoke(id)
 
 
-func window_action(action: String) -> void:
+func window_action(action: String, fields: Dictionary = {}) -> void:
 	if _api.has("window_action"):
-		_api.window_action.invoke(action)
+		_api.window_action.invoke(action, fields)
 
 
 func report_error(mod_id: String, msg: String) -> void:
@@ -305,6 +316,7 @@ func set_slot(id: String, i: int, v: Dictionary) -> void:
 		s[i] = {}
 	else:
 		s[i] = {"item": item, "count": int(v.count)}
+	dirty_containers[id] = true
 	if id == hotbar.container:
 		hotbar_changed.emit()
 
@@ -332,6 +344,7 @@ func _load_data(world_dir: String) -> void:
 	if typeof(d) != TYPE_DICTIONARY:
 		return
 	storage = d.get("storage", {})
+	pstorage = d.get("players", {}) if d.get("players") is Dictionary else {}
 	for id in d.get("containers", {}):
 		var slots: Array = []
 		for sl in d.containers[id]:
@@ -364,7 +377,182 @@ func save_data(world_dir: String) -> void:
 			cont[id] = containers[id].slots
 	var f := FileAccess.open(world_dir.path_join("mods_data.json"), FileAccess.WRITE)
 	if f:
-		f.store_string(JSON.stringify({"storage": storage, "containers": cont}))
+		f.store_string(JSON.stringify({"storage": storage, "containers": cont, "players": pstorage}))
+
+
+# ---------- gracze (sesje) ----------
+# ctx = gracz, w którego imieniu działa kod moda (kopanie, kliknięcie, klawisz, zdarzenie gracza).
+# Funkcje engine.player.*, kontenery „na gracza”, okna i paski dotyczą zawsze gracza z ctx.
+
+var sessions := {}        # peer -> Session
+var ctx := 1
+var local_peer := 1
+var per_player := {}      # logiczne id kontenerów prowadzonych osobno dla każdego gracza
+var pstorage := {}        # konto -> {mod -> {klucz -> wartość}}
+var dirty_containers := {}
+
+
+func S() -> Session:
+	var s: Session = sessions.get(ctx)
+	if s == null:
+		s = sessions.get(local_peer)
+	return s
+
+
+func add_session(peer: int, name: String, node: Node3D, local: bool) -> Session:
+	var s := Session.new()
+	s.peer = peer
+	s.name = name
+	s.account = name
+	s.node = node
+	s.local = local
+	if local:
+		# gracz lokalny: te same słowniki, które czyta interfejs
+		s.player_stats = player_stats
+		s.camera_stats = camera_stats
+		s.anim_overrides = anim_overrides
+		s.model_colors = model_colors
+		s.hud = hud
+		s.hotbar = hotbar
+		s.windows = open_windows
+		s.held = local_held
+		local_peer = peer
+	sessions[peer] = s
+	return s
+
+
+func remove_session(peer: int) -> void:
+	sessions.erase(peer)
+
+
+## Wykonuje fn w imieniu gracza peer (np. akcja gracza zdalnego na serwerze).
+func as_player(peer: int, fn: Callable) -> Variant:
+	var prev := ctx
+	ctx = peer
+	var r: Variant = fn.call()
+	ctx = prev
+	return r
+
+
+func _pl() -> Node3D:
+	var s := S()
+	return s.node if s else null
+
+
+## Rzeczywisty klucz kontenera: kontenery „na gracza” mają osobną kopię dla każdego konta.
+func cid(id: String) -> String:
+	if per_player.has(id):
+		return id + "#" + S().account
+	return id
+
+
+static func logical_cid(real: String) -> String:
+	var i := real.find("#")
+	return real if i < 0 else real.substr(0, i)
+
+
+func session_of_account(account: String) -> Session:
+	for p in sessions:
+		if sessions[p].account == account and sessions[p].logged_in:
+			return sessions[p]
+	return null
+
+
+# ---------- okna: kliknięcia w miejsca na przedmioty (logika po stronie serwera) ----------
+
+var local_held := {}
+
+
+func held_of(peer: int) -> Dictionary:
+	var s: Session = sessions.get(peer)
+	return s.held if s else local_held
+
+
+## Kliknięcie w miejsce kontenera: bierze stos (prawy: połowę), odkłada, łączy, zamienia.
+## Hak „slot.click” (before) może przejąć kliknięcie, np. pole wyniku rzemiosła.
+func window_click(peer: int, real: String, i: int, right: bool) -> void:
+	var s: Session = sessions.get(peer)
+	if s == null or not containers.has(real):
+		return
+	var prev := ctx
+	ctx = peer
+	var held: Dictionary = s.held
+	var ctxd := before("slot.click", {"container": logical_cid(real), "index": i + 1, "right": right,
+		"held": held.duplicate()})
+	if not ctxd.get("cancel", false):
+		var cur := slot(real, i)
+		if held.is_empty():
+			if not cur.is_empty():
+				if right and int(cur.count) > 1:
+					var half := int(cur.count) / 2
+					_set_held(s, {"item": cur.item, "count": half})
+					set_slot(real, i, {"item": cur.item, "count": int(cur.count) - half})
+				else:
+					_set_held(s, cur.duplicate())
+					set_slot(real, i, {})
+		else:
+			var ms := max_stack(str(held.item))
+			if cur.is_empty():
+				var n := mini(ms, 1 if right else int(held.count))
+				set_slot(real, i, {"item": held.item, "count": n})
+				_set_held(s, {"item": held.item, "count": int(held.count) - n})
+			elif str(cur.item) == str(held.item):
+				var n := mini(ms - int(cur.count), 1 if right else int(held.count))
+				set_slot(real, i, {"item": cur.item, "count": int(cur.count) + n})
+				_set_held(s, {"item": held.item, "count": int(held.count) - n})
+			elif not right:
+				set_slot(real, i, held.duplicate())
+				_set_held(s, cur.duplicate())
+		after("slot.click", ctxd)
+	ctx = prev
+
+
+func _set_held(s: Session, v: Dictionary) -> void:
+	s.held.clear()
+	if not v.is_empty() and int(v.get("count", 0)) > 0:
+		s.held.merge(v)
+	s.mark("held")
+
+
+## Okno zamknięte: trzymany przedmiot wraca do kontenerów okna, a gdy brak miejsca, upada na ziemię.
+func window_closed(peer: int, id: String) -> void:
+	var s: Session = sessions.get(peer)
+	if s == null:
+		return
+	var spec: Dictionary = s.windows.get(id, {})
+	s.windows.erase(id)
+	var prev := ctx
+	ctx = peer
+	if id != "":
+		emit_event("ui.closed", {"id": id})
+	if s.held.is_empty():
+		ctx = prev
+		return
+	var conts := []
+	for sec in spec.get("sections", []):
+		if sec is Dictionary and sec.get("type") == "slots":
+			conts.append(str(sec.container))
+	if s.hotbar.container != "":
+		conts.append(s.hotbar.container)
+	var left := int(s.held.count)
+	for c in conts:
+		for i in container_slots(c).size():
+			if left <= 0:
+				break
+			var sl := slot(c, i)
+			var ms := max_stack(str(s.held.item))
+			if sl.is_empty():
+				var n := mini(ms, left)
+				set_slot(c, i, {"item": s.held.item, "count": n})
+				left -= n
+			elif str(sl.item) == str(s.held.item) and int(sl.count) < ms:
+				var n := mini(ms - int(sl.count), left)
+				set_slot(c, i, {"item": sl.item, "count": int(sl.count) + n})
+				left -= n
+	if left > 0 and main and s.node:
+		main.entities.drop_item(str(s.held.item), left, s.node.global_position + Vector3(0, 1, 0))
+	_set_held(s, {})
+	ctx = prev
 
 
 # ---------- funkcje gospodarza dostępne dla prelude.lua ----------
@@ -375,11 +563,14 @@ func _host_table() -> Dictionary:
 		"get_block", "set_block", "biome", "biome_key", "height", "time_of_day", "set_time",
 		"player_position", "player_teleport", "player_velocity", "player_push", "player_set", "player_get",
 		"player_health", "player_set_health", "player_damage", "player_animate", "player_colors",
-		"player_target", "player_in_liquid", "player_eyes_in_liquid", "selected_item", "anim_override", "camera_set", "camera_get",
-		"container_create", "container_size", "slot_get", "slot_set", "hotbar_bind", "hotbar_selected",
-		"ui_window", "ui_close", "ui_is_open", "notify", "hud_bar", "hud_text", "hud_remove",
-		"input_bind", "randf", "randi", "entity_spawn", "entity_remove", "entity_exists", "entity_get",
-		"entity_list", "entity_set", "entity_damage", "entity_tag", "entity_data", "item_drop"]
+		"player_target", "player_in_liquid", "player_eyes_in_liquid", "selected_item", "anim_override",
+		"camera_set", "camera_get", "container_create", "container_size", "slot_get", "slot_set",
+		"hotbar_bind", "hotbar_selected", "ui_window", "ui_close", "ui_is_open", "notify", "hud_bar",
+		"hud_text", "hud_remove", "ui_held", "ui_set_held", "input_bind", "randf", "randi",
+		"entity_spawn", "entity_remove", "entity_exists", "entity_get", "entity_list", "entity_set",
+		"entity_damage", "entity_tag", "entity_data", "item_drop",
+		"player_id", "player_name", "player_is_host", "players_list", "set_ctx", "get_ctx",
+		"pstorage_get", "pstorage_set", "players_accept", "players_kick", "is_multiplayer", "hash"]
 	var t := {}
 	for n in names:
 		t[n] = Callable(self, "_h_" + n)
@@ -388,6 +579,8 @@ func _host_table() -> Dictionary:
 
 func _h_log(mod_id, msg) -> void: _log(str(mod_id), str(msg))
 func _h_report_error(mod_id, msg) -> void: report_error(str(mod_id), str(msg))
+
+
 func _h_mod_disabled(mod_id, msg) -> void:
 	load_errors[str(mod_id)] = "wyłączony: " + str(msg)
 	_errors_shown = 0
@@ -414,6 +607,19 @@ func _h_storage_set(mod_id, key, v) -> void:
 	if not storage.has(str(mod_id)):
 		storage[str(mod_id)] = {}
 	storage[str(mod_id)][str(key)] = v
+
+
+func _h_pstorage_get(mod_id, key) -> Variant:
+	return pstorage.get(S().account, {}).get(str(mod_id), {}).get(str(key))
+
+
+func _h_pstorage_set(mod_id, key, v) -> void:
+	var acc := S().account
+	if not pstorage.has(acc):
+		pstorage[acc] = {}
+	if not pstorage[acc].has(str(mod_id)):
+		pstorage[acc][str(mod_id)] = {}
+	pstorage[acc][str(mod_id)][str(key)] = v
 
 
 func _h_block_id(key) -> int: return registry.id_of(str(key)) if registry else -1
@@ -463,93 +669,159 @@ func _h_set_time(h) -> void:
 		main.time_of_day = fposmod(float(h), 24.0)
 
 
-func _h_player_position() -> Vector3: return main.player.global_position if main else Vector3.ZERO
+func _h_player_id() -> int: return S().peer
+func _h_player_name() -> String: return S().account
+func _h_player_is_host() -> bool: return S().local
+func _h_is_multiplayer() -> bool: return Net.mode != "single"
+func _h_set_ctx(peer) -> void: ctx = int(peer)
+func _h_get_ctx() -> int: return ctx
+func _h_hash(text) -> String: return str(text).sha256_text()
+
+
+func _h_players_list() -> Array:
+	var out := []
+	for p in sessions:
+		var s: Session = sessions[p]
+		if s.logged_in:
+			out.append({"id": p, "name": s.account})
+	return out
+
+
+func _h_players_accept(peer, account) -> String:
+	if main == null:
+		return "brak świata"
+	return main.accept_player(int(peer), str(account))
+
+
+func _h_players_kick(peer, reason) -> void:
+	Net.kick(int(peer), str(reason))
+
+
+func _h_player_position() -> Vector3:
+	var p := _pl()
+	return p.global_position if p else Vector3.ZERO
 
 
 func _h_player_teleport(pos) -> void:
-	if main:
-		main.player.global_position = Vector3(pos)
-		main.player.velocity = Vector3.ZERO
-		main.player.reset_fall()
+	var p := _pl()
+	if p:
+		p.teleport(Vector3(pos))
 
 
-func _h_player_velocity() -> Vector3: return main.player.velocity if main else Vector3.ZERO
+func _h_player_velocity() -> Vector3:
+	var p := _pl()
+	return p.velocity if p else Vector3.ZERO
 
 
 func _h_player_push(v) -> void:
-	if main:
-		main.player.velocity += Vector3(v)
+	var p := _pl()
+	if p:
+		p.push(Vector3(v))
 
 
-func _h_player_set(stat, v) -> void: player_stats[str(stat)] = v
-func _h_player_get(stat) -> Variant: return main.player.stat(str(stat)) if main else null
-func _h_player_health() -> float: return main.player.health if main else 0.0
+func _h_player_set(stat, v) -> void:
+	S().player_stats[str(stat)] = v
+	S().mark("stats")
+
+
+func _h_player_get(stat) -> Variant:
+	var p := _pl()
+	return p.stat(str(stat)) if p else null
+
+
+func _h_player_health() -> float:
+	var p := _pl()
+	return p.health if p else 0.0
 
 
 func _h_player_set_health(v) -> void:
-	if main:
-		main.player.set_health(float(v))
+	var p := _pl()
+	if p:
+		p.set_health(float(v))
 
 
 func _h_player_damage(amount, cause) -> void:
-	if main:
-		main.player.damage(float(amount), str(cause))
+	var p := _pl()
+	if p:
+		p.damage(float(amount), str(cause))
 
 
 func _h_player_animate(name) -> void:
-	if main:
-		main.player.model.play(str(name))
+	var p := _pl()
+	if p:
+		p.model.play(str(name))
+		Net.broadcast_anim(S().peer, str(name))
 
 
 func _h_player_colors(t) -> void:
 	if t is Dictionary:
+		var s := S()
 		for k in t:
 			var c: Variant = t[k]
-			model_colors[str(k)] = c if c is Color else Color.from_string(str(c), Color.WHITE)
-		if main:
-			main.player.model.apply_colors(model_colors)
+			s.model_colors[str(k)] = c if c is Color else Color.from_string(str(c), Color.WHITE)
+		if s.node:
+			s.node.model.apply_colors(s.model_colors)
+		Net.broadcast_look(s)
 
 
-func _h_player_in_liquid() -> bool: return main.player.in_liquid if main else false
-func _h_player_eyes_in_liquid() -> bool: return main.player.eyes_in_liquid if main else false
+func _h_player_in_liquid() -> bool:
+	var p := _pl()
+	return p.in_liquid if p else false
+
+
+func _h_player_eyes_in_liquid() -> bool:
+	var p := _pl()
+	return p.eyes_in_liquid if p else false
 
 
 func _h_player_target(with_liquids) -> Dictionary:
-	if main == null:
+	var p := _pl()
+	if p == null:
 		return {}
-	var t: Dictionary = main.player.target_with_liquids() if bool(with_liquids) else main.player.target
+	var t: Dictionary = p.target_with_liquids() if bool(with_liquids) else p.target
 	if t.is_empty():
 		return {}
 	return {"pos": t.pos, "normal": t.normal, "block": main.world.get_block(t.pos)}
 
 
 func _h_selected_item() -> Dictionary:
-	if main == null:
-		return {}
-	return main.player.current_item()
+	var p := _pl()
+	return p.current_item() if p else {}
 
 
 func _h_anim_override(state, name) -> void:
+	var s := S()
 	if str(name) == "":
-		anim_overrides.erase(str(state))
+		s.anim_overrides.erase(str(state))
 	else:
-		anim_overrides[str(state)] = str(name)
+		s.anim_overrides[str(state)] = str(name)
+	Net.broadcast_look(s)
 
 
-func _h_camera_set(key, v) -> void: camera_stats[str(key)] = v
+func _h_camera_set(key, v) -> void:
+	S().camera_stats[str(key)] = v
+	S().mark("camera")
 
 
 func _h_camera_get(key) -> Variant:
-	if camera_stats.has(str(key)):
-		return camera_stats[str(key)]
-	if main and str(key) == "mode":
-		return main.player.camera_mode()
+	var s := S()
+	if s.camera_stats.has(str(key)):
+		return s.camera_stats[str(key)]
+	if s.node and str(key) == "mode":
+		return s.node.camera_mode()
 	return null
 
 
-func _h_container_create(mod_id, id, size, persist) -> void:
+func _h_container_create(mod_id, id, size, persist, for_player) -> void:
+	var logical := str(id)
+	if bool(for_player):
+		per_player[logical] = true
+	var key := cid(logical)
 	var n := int(size)
-	var key := str(id)
+	if bool(for_player) and not containers.has(key) and containers.has(logical) and S().local:
+		# świat sprzed gry wieloosobowej: wspólny kontener staje się kontenerem gracza-gospodarza
+		containers[key] = containers[logical]
+		containers.erase(logical)
 	if not containers.has(key):
 		containers[key] = {"owner": str(mod_id), "persist": bool(persist), "slots": []}
 	var c: Dictionary = containers[key]
@@ -560,52 +832,99 @@ func _h_container_create(mod_id, id, size, persist) -> void:
 		slots.append({})
 	if slots.size() > n:
 		slots.resize(n)
+	dirty_containers[key] = true
 
 
-func _h_container_size(id) -> int: return container_slots(str(id)).size()
-func _h_slot_get(id, i) -> Dictionary: return slot(str(id), int(i))
-func _h_slot_set(id, i, v) -> void: set_slot(str(id), int(i), v if v is Dictionary else {})
+func _h_container_size(id) -> int: return container_slots(cid(str(id))).size()
+func _h_slot_get(id, i) -> Dictionary: return slot(cid(str(id)), int(i))
+func _h_slot_set(id, i, v) -> void: set_slot(cid(str(id)), int(i), v if v is Dictionary else {})
 
 
 func _h_hotbar_bind(container, first, count) -> void:
-	hotbar = {"container": str(container), "first": int(first), "count": int(count)}
-	hotbar_changed.emit()
+	var s := S()
+	s.hotbar.container = cid(str(container)) if str(container) != "" else ""
+	s.hotbar.first = int(first)
+	s.hotbar.count = int(count)
+	s.mark("hotbar")
+	if s.local:
+		hotbar_changed.emit()
 
 
-func _h_hotbar_selected() -> int: return main.player.selected if main else 0
+func _h_hotbar_selected() -> int:
+	var p := _pl()
+	return p.selected if p else 0
 
 
 func _h_ui_window(mod_id, spec) -> void:
 	var d: Dictionary = spec if spec is Dictionary else {}
 	d["mod"] = str(mod_id)
-	open_windows[str(d.get("id", mod_id))] = d
-	ui_window_requested.emit(d)
+	for sec in d.get("sections", []):
+		if sec is Dictionary and sec.get("type") == "slots":
+			sec["container"] = cid(str(sec.get("container", "")))
+	var s := S()
+	s.windows[str(d.get("id", mod_id))] = d
+	if s.local:
+		ui_window_requested.emit(d)
+	else:
+		Net.send_window(s.peer, d)
 
 
-func _h_ui_close(id) -> void: ui_close_requested.emit(str(id))
-func _h_ui_is_open(id) -> bool: return open_windows.has(str(id))
-func _h_notify(text) -> void: notified.emit(str(text))
+func _h_ui_close(id) -> void:
+	var s := S()
+	if s.local:
+		ui_close_requested.emit(str(id))
+	else:
+		window_closed(s.peer, str(id))
+		Net.send_close(s.peer, str(id))
+
+
+func _h_ui_is_open(id) -> bool: return S().windows.has(str(id))
+
+
+func _h_notify(text) -> void:
+	var s := S()
+	if s.local:
+		notified.emit(str(text))
+	else:
+		Net.send_notify(s.peer, str(text))
+
+
+func _h_ui_held() -> Dictionary: return S().held
+
+
+func _h_ui_set_held(v) -> void:
+	_set_held(S(), v if v is Dictionary else {})
 
 
 func _h_hud_bar(mod_id, spec) -> void:
 	var d: Dictionary = spec if spec is Dictionary else {}
 	d["type"] = "bar"
 	d["mod"] = str(mod_id)
-	hud[str(d.get("id", mod_id))] = d
-	hud_changed.emit()
+	var s := S()
+	s.hud[str(d.get("id", mod_id))] = d
+	s.mark("hud")
+	if s.local:
+		hud_changed.emit()
 
 
 func _h_hud_text(mod_id, spec) -> void:
 	var d: Dictionary = spec if spec is Dictionary else {}
 	d["type"] = "text"
 	d["mod"] = str(mod_id)
-	hud[str(d.get("id", mod_id))] = d
-	hud_changed.emit()
+	var s := S()
+	s.hud[str(d.get("id", mod_id))] = d
+	s.mark("hud")
+	if s.local:
+		hud_changed.emit()
 
 
 func _h_hud_remove(id) -> void:
-	hud.erase(str(id))
-	hud_changed.emit()
+	var s := S()
+	if s.hud.has(str(id)):
+		s.hud.erase(str(id))
+		s.mark("hud")
+		if s.local:
+			hud_changed.emit()
 
 
 func _h_input_bind(mod_id, id, key, label) -> void:
@@ -659,7 +978,8 @@ func _h_entity_get(id, key) -> Variant:
 func _h_entity_list(type, radius) -> Array:
 	if main == null:
 		return []
-	return main.entities.list(str(type), main.player.global_position, float(radius))
+	var p := _pl()
+	return main.entities.list(str(type), p.global_position if p else Vector3.ZERO, float(radius))
 
 
 func _h_entity_set(id, key, v) -> void:
@@ -675,9 +995,11 @@ func _h_entity_set(id, key, v) -> void:
 		"scale":
 			if e is Creature:
 				e.set_scale_factor(float(v))
+				Net.entity_look(e)
 		"animate":
 			if e is Creature:
 				e.play(str(v))
+				Net.entity_anim(e.id, str(v))
 
 
 func _h_entity_damage(id, amount, cause) -> void:
@@ -692,6 +1014,7 @@ func _h_entity_tag(id, tag, on, color) -> void:
 		e.show_tag(str(tag), bool(on))
 		if color != null:
 			e.color_tag(str(tag), color if color is Color else Color.from_string(str(color), Color.WHITE))
+		Net.entity_look(e)
 
 
 func _h_entity_data(id, key, v) -> void:

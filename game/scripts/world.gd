@@ -43,6 +43,8 @@ var results: Array = []
 var mutex := Mutex.new()
 
 var center := Vector3i(999999, 0, 0)
+var extra_centers: Array[Vector3] = []  # serwer: pozycje graczy zdalnych (wokół nich też trzymamy chunki)
+var remote := false                     # klient gry wieloosobowej: stan świata przychodzi z serwera
 var offsets: Array[Vector3i] = []
 var mesh_ms_total := 0.0
 var mesh_count := 0
@@ -73,6 +75,7 @@ func _ready() -> void:
 	material = ShaderMaterial.new()
 	material.shader = load("res://scripts/shaders/terrain.gdshader")
 	material.set_shader_parameter("atlas", atlas)
+	remote = Net.is_client()
 	if ClassDB.class_exists("VoxelMesher"):
 		native = ClassDB.instantiate("VoxelMesher")
 		native.call("configure", terrain.native_noises(), terrain.spec, tiles, props, reg.liquid, Registry.ATLAS_COLS, reg.atlas_rows)
@@ -185,14 +188,19 @@ func _schedule_missing() -> void:
 	var budget := max_queued - queued.size()
 	if budget <= 0:
 		return
+	var cs: Array[Vector3i] = [center]
+	for e in extra_centers:
+		var ec := chunk_of(Vector3i(e.floor()))
+		cs.append(Vector3i(ec.x, 0, ec.z))
 	for o in offsets:
-		var c := Vector3i(center.x + o.x, o.y, center.z + o.z)
-		if built.has(c) or queued.has(c):
-			continue
-		_schedule(c)
-		budget -= 1
-		if budget <= 0:
-			return
+		for cc in cs:
+			var c := Vector3i(cc.x + o.x, o.y, cc.z + o.z)
+			if built.has(c) or queued.has(c):
+				continue
+			_schedule(c)
+			budget -= 1
+			if budget <= 0:
+				return
 
 
 func _schedule(c: Vector3i) -> void:
@@ -208,10 +216,20 @@ func _schedule(c: Vector3i) -> void:
 		sync_queue.append(c)
 
 
+func _far_from_all(c: Vector3i, limit: int) -> bool:
+	if absi(c.x - center.x) <= limit and absi(c.z - center.z) <= limit:
+		return false
+	for e in extra_centers:
+		var ec := chunk_of(Vector3i(e.floor()))
+		if absi(c.x - ec.x) <= limit and absi(c.z - ec.z) <= limit:
+			return false
+	return true
+
+
 func _unload_far() -> void:
 	var limit := radius + 2
 	for c in built.keys():
-		if absi(c.x - center.x) > limit or absi(c.z - center.z) > limit:
+		if _far_from_all(c, limit):
 			if queued.has(c):
 				continue
 			built.erase(c)
@@ -369,7 +387,7 @@ func _apply(c: Vector3i, arrays: Array, blocks: PackedByteArray, ms: float) -> v
 	mesh_count += 1
 	if not data.has(c):
 		data[c] = blocks
-	if absi(c.x - center.x) > radius + 1 or absi(c.z - center.z) > radius + 1:
+	if _far_from_all(c, radius + 1):
 		if not edited.has(c):
 			data.erase(c)
 		return
@@ -459,9 +477,12 @@ func set_block_quiet(p: Vector3i, id: int) -> bool:
 	d[l.x + S * (l.y + S * l.z)] = id
 	data[c] = d
 	mutex.unlock()
+	var first := not edited.has(c)
 	edited[c] = true
 	unsaved[c] = true
 	pending[c] = true
+	if not remote:
+		Net.block_changed(p, id, c, first)
 	if l.x == 0: pending[c + Vector3i(-1, 0, 0)] = true
 	if l.x == S - 1: pending[c + Vector3i(1, 0, 0)] = true
 	if l.y == 0: pending[c + Vector3i(0, -1, 0)] = true
@@ -491,11 +512,50 @@ func set_block(p: Vector3i, id: int) -> bool:
 		if Blocks.props(get_block(above)) & Blocks.CROSS:
 			set_block(above, Blocks.AIR)
 	_update_light_after_edit(p, id)
+	if remote:
+		return true
 	# ciecze w pobliżu ruszają, bloki z grawitacją spadają
 	liquids.activate_around(p)
 	check_fall(p + Vector3i(0, 1, 0))
 	check_fall(p)
 	return true
+
+
+# ---------- gra wieloosobowa: świat u klienta ----------
+
+## Dane chunka do wysłania klientom (w pamięci albo z dysku).
+func chunk_data(c: Vector3i) -> Variant:
+	if data.has(c):
+		return data[c]
+	if not save_dir.is_empty() and FileAccess.file_exists(_chunk_path(c)):
+		return FileAccess.get_file_as_bytes(_chunk_path(c)).decompress(S * S * S, FileAccess.COMPRESSION_ZSTD)
+	return null
+
+
+## Klient: zmiana bloku od serwera.
+func apply_remote(p: Vector3i, id: int) -> void:
+	var c := chunk_of(p)
+	var l := p - c * S
+	if Net.remote_chunks.has(c):
+		var rc: PackedByteArray = Net.remote_chunks[c]
+		rc[l.x + S * (l.y + S * l.z)] = id
+		Net.remote_chunks[c] = rc
+	if data.has(c) and built.has(c):
+		set_block_quiet(p, id)
+		_update_light_after_edit(p, id)
+
+
+## Klient: cały chunk od serwera (zmieniony po raz pierwszy).
+func apply_remote_chunk(c: Vector3i, d: PackedByteArray) -> void:
+	if not data.has(c):
+		return
+	mutex.lock()
+	data[c] = d.duplicate()
+	mutex.unlock()
+	edited[c] = true
+	_remesh(c)
+	for n in GDMesher.NORMALS:
+		_remesh(c + n)
 
 
 ## Po zmianie bloku: mapa wysokości nieba i przeliczenie światła w chunkach w zasięgu światła.
@@ -596,6 +656,12 @@ func _chunk_path(c: Vector3i) -> String:
 
 
 func _load_chunk(c: Vector3i) -> void:
+	if remote and Net.remote_chunks.has(c):
+		mutex.lock()
+		data[c] = (Net.remote_chunks[c] as PackedByteArray).duplicate()
+		mutex.unlock()
+		edited[c] = true
+		return
 	if save_dir.is_empty():
 		return
 	var path := _chunk_path(c)
