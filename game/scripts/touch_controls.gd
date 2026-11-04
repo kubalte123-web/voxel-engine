@@ -4,6 +4,7 @@ extends Control
 ## Każdy palec jest obsługiwany osobno, więc można iść, rozglądać się i skakać jednocześnie.
 
 var player: Player
+var main: Node
 
 const JOY_R := 80.0
 const SENS := 0.005
@@ -31,12 +32,15 @@ func _layout() -> void:
 		"jump": [Vector2(r, b - 120), 58.0, "Skok"],
 		"break": [Vector2(r - 140, b - 80), 48.0, "Kop"],
 		"place": [Vector2(r - 20, b - 260), 48.0, "Postaw"],
-		"next": [Vector2(size.x / 2.0 + 210, b - 44), 30.0, ">"],
+		"next": [Vector2(r - 180, b - 200), 32.0, "Blok"],
 		"view": [Vector2(size.x - 60, 60), 32.0, "Widok"],
+		"menu": [Vector2(size.x - 140, 60), 32.0, "Menu"],
 	}
 
 
 func _input(event: InputEvent) -> void:
+	if get_tree().paused:
+		return
 	if event is InputEventScreenTouch:
 		_layout()
 		if event.pressed:
@@ -77,7 +81,7 @@ func _input(event: InputEvent) -> void:
 			var step: Vector2 = event.position - prev
 			# pozycja nagle przeskoczyła (np. przeglądarka zamieniła palce): ignorujemy ten ruch
 			if step.length() <= MAX_STEP:
-				player.look(step * SENS)
+				player.look(step * SENS * Settings.touch_sensitivity)
 		last_pos[event.index] = event.position
 		get_viewport().set_input_as_handled()
 
@@ -100,6 +104,8 @@ func _press(name: String, down: bool) -> void:
 			if down: player.select((player.selected + 1) % Blocks.PLACEABLE.size())
 		"view":
 			if down: player.toggle_view()
+		"menu":
+			if down and main: main.open_pause()
 
 
 func _process(_delta: float) -> void:

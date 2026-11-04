@@ -4,6 +4,7 @@ extends Control
 
 var player: Player
 var world: World
+var main: Node
 var info: Label
 var slots: Array[Panel] = []
 var touch_mode := false
@@ -26,7 +27,7 @@ func _ready() -> void:
 
 	if not touch_mode:
 		help = Label.new()
-		help.text = "WASD ruch · Spacja skok · LPM kop · PPM postaw · 1-5 / kółko blok · V widok · Esc kursor"
+		help.text = "WASD ruch · Spacja skok · LPM kop · PPM postaw · 1-8 / kółko blok · V widok · Esc pauza"
 		help.add_theme_font_size_override("font_size", 14)
 		help.add_theme_color_override("font_color", Color(1, 1, 1, 0.9))
 		help.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.8))
@@ -39,6 +40,8 @@ func _ready() -> void:
 	bar.add_theme_constant_override("separation", 6)
 	var n := Blocks.PLACEABLE.size()
 	bar.size = Vector2(n * 58 - 6, 52)
+	if touch_mode:
+		bar.scale = Vector2(0.8, 0.8)
 	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(bar)
 	for i in n:
@@ -75,10 +78,15 @@ func _process(delta: float) -> void:
 	if _timer <= 0.0:
 		_timer = 0.25
 		var p := player.global_position
-		info.text = "%d FPS\n%s\nx %.0f  y %.0f  z %.0f\nblok: %s" % [
-			Engine.get_frames_per_second(), world.stats(), p.x, p.y, p.z,
-			Blocks.NAMES[Blocks.PLACEABLE[player.selected]]]
-	bar.position = Vector2((size.x - bar.size.x) / 2.0, size.y - bar.size.y - (150.0 if touch_mode else 18.0))
+		var biome: String = Terrain.BIOME_NAMES[world.terrain.column(floori(p.x), floori(p.z)).y]
+		var clock: String = main.time_text() if main else ""
+		if Settings.show_debug:
+			info.text = "%d FPS\n%s\nx %.0f  y %.0f  z %.0f · %s · %s\nblok: %s" % [
+				Engine.get_frames_per_second(), world.stats(), p.x, p.y, p.z, biome, clock,
+				Blocks.NAMES[Blocks.PLACEABLE[player.selected]]]
+		else:
+			info.text = "%s · %s" % [biome, clock]
+	bar.position = Vector2((size.x - bar.size.x * bar.scale.x) / 2.0, size.y - bar.size.y * bar.scale.y - (12.0 if touch_mode else 18.0))
 	if help:
 		help.position = Vector2((size.x - help.size.x) / 2.0, 10)
 	queue_redraw()

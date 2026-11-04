@@ -83,6 +83,8 @@ static func _wire_cube() -> ArrayMesh:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if get_tree().paused:
+		return
 	if event is InputEventMouseButton and event.pressed:
 		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -97,8 +99,6 @@ func _unhandled_input(event: InputEvent) -> void:
 			select((selected + 1) % Blocks.PLACEABLE.size())
 	elif event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		look(event.relative * mouse_sensitivity)
-	elif event.is_action_pressed("ui_cancel"):
-		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	elif event.is_action_pressed("toggle_view"):
 		toggle_view()
 	else:
@@ -176,7 +176,7 @@ func _update_target() -> void:
 	var origin := camera.global_position
 	var dir := -camera.global_basis.z
 	var head := global_position + Vector3(0, 1.55, 0)
-	var r := world.raycast(origin, dir, spring.spring_length + REACH + 1.0)
+	var r: Dictionary = world.raycast(origin, dir, spring.spring_length + REACH + 1.0)
 	if r.get("hit", false) and (Vector3(r.pos) + Vector3(0.5, 0.5, 0.5)).distance_to(head) <= REACH + 0.5:
 		target = r
 		highlight.visible = true

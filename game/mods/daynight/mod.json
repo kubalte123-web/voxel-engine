@@ -1,0 +1,12 @@
+{
+	"id": "daynight",
+	"name": "Dzień i noc",
+	"version": "0.1.0",
+	"author": "Jakub Lewicki",
+	"description": "Słońce wędruje po niebie, a niebo zmienia kolory od świtu do nocy.",
+	"settings": [
+		{"key": "day_minutes", "label": "Długość doby (minuty)", "type": "int", "default": 20, "min": 2, "max": 60, "step": 1},
+		{"key": "start_hour", "label": "Godzina startu nowego świata", "type": "int", "default": 8, "min": 0, "max": 23, "step": 1},
+		{"key": "dark_nights", "label": "Ciemne noce", "type": "bool", "default": false}
+	]
+}

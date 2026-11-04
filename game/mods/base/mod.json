@@ -1,0 +1,15 @@
+{
+	"id": "base",
+	"name": "Świat podstawowy",
+	"version": "0.2.0",
+	"author": "Jakub Lewicki",
+	"description": "Bloki, teren i biomy: łąki z kwiatami, las, pustynia i ośnieżone góry. Ustawienia generowania zapisują się w świecie przy jego tworzeniu.",
+	"required": true,
+	"settings": [
+		{"key": "hill_height", "label": "Wysokość wzgórz", "type": "float", "default": 1.0, "min": 0.3, "max": 2.5, "step": 0.1, "world": true},
+		{"key": "biome_size", "label": "Wielkość biomów", "type": "float", "default": 1.0, "min": 0.5, "max": 3.0, "step": 0.1, "world": true},
+		{"key": "trees", "label": "Drzewa i kaktusy", "type": "bool", "default": true, "world": true},
+		{"key": "tree_density", "label": "Gęstość drzew", "type": "float", "default": 1.0, "min": 0.2, "max": 3.0, "step": 0.1, "world": true},
+		{"key": "plants", "label": "Trawa i kwiaty", "type": "bool", "default": true, "world": true}
+	]
+}

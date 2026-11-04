@@ -3,8 +3,14 @@ config_version=5
 [application]
 
 config/name="Voxel Engine"
-run/main_scene="res://main.tscn"
+run/main_scene="res://menu.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
+
+[autoload]
+
+Settings="*res://scripts/autoload/settings.gd"
+ModManager="*res://scripts/autoload/mod_manager.gd"
+GameState="*res://scripts/autoload/game_state.gd"
 
 [display]
 
