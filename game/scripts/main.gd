@@ -17,6 +17,8 @@ var daynight := false
 var day_minutes := 20.0
 var dark_nights := false
 var autosave_timer := 60.0
+var tick_timer := 0.0
+var windows := {}  # id okna moda -> ModWindow
 
 
 func _ready() -> void:
@@ -91,6 +93,15 @@ func _ready() -> void:
 	Settings.changed.connect(_apply_settings)
 	_apply_settings()
 
+	# mody w Lua: wczytywane po zbudowaniu świata i gracza
+	Mods.ui_window_requested.connect(_open_mod_window)
+	Mods.ui_close_requested.connect(_close_mod_window)
+	Mods.start(self, GameState.current_dir)
+	for id in Mods.load_errors:
+		hud.notify("Mod „%s” nie wczytał się: %s" % [ModManager.manifests.get(id, {}).get("name", id), str(Mods.load_errors[id]).left(120)])
+	if touch:
+		touch.refresh_binds()
+
 	if not GameState.autotest_dir.is_empty():
 		_autotest(GameState.autotest_dir)
 	else:
@@ -114,6 +125,11 @@ func _process(delta: float) -> void:
 	if daynight:
 		time_of_day = fmod(time_of_day + delta * 24.0 / (day_minutes * 60.0), 24.0)
 		_update_sky()
+	player.camera.fov = Settings.fov + float(Mods.camera_stats.get("fov_offset", 0.0))
+	tick_timer -= delta
+	if tick_timer <= 0.0:
+		tick_timer = 0.1
+		Mods.emit_event("tick", {"dt": 0.1, "time": time_of_day})
 	autosave_timer -= delta
 	if autosave_timer <= 0.0 and not GameState.current_dir.is_empty():
 		autosave_timer = 60.0
@@ -121,9 +137,44 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event.is_action_pressed("ui_cancel") and pause_menu == null:
+	if event.is_action_pressed("ui_cancel") and pause_menu == null and windows.is_empty():
 		get_viewport().set_input_as_handled()
 		open_pause()
+	elif event is InputEventKey and event.pressed and not event.echo:
+		var key := OS.get_keycode_string(event.physical_keycode).to_upper()
+		for b in Mods.binds:
+			if b.key == key:
+				get_viewport().set_input_as_handled()
+				Mods.press_bind(b.id)
+				return
+
+
+# ---------- okna modów ----------
+
+func _open_mod_window(spec: Dictionary) -> void:
+	var id := str(spec.get("id", ""))
+	if windows.has(id):
+		windows[id].build(spec)
+		return
+	var w := ModWindow.new()
+	w.spec = spec
+	w.atlas = world.atlas
+	w.closed.connect(_on_window_closed)
+	ui.add_child(w)
+	windows[id] = w
+	player.ui_blocked = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func _close_mod_window(id: String) -> void:
+	if windows.has(id):
+		windows[id].close()
+
+
+func _on_window_closed(id: String) -> void:
+	windows.erase(id)
+	Mods.open_windows.erase(id)
+	player.ui_blocked = not windows.is_empty()
 
 
 ## Słońce, kolory nieba, światło otoczenia i mgła w zależności od godziny.
@@ -162,6 +213,7 @@ func open_pause() -> void:
 	pause_menu.resume.connect(close_pause)
 	pause_menu.save_and_exit.connect(func():
 		save_game()
+		Mods.stop()
 		GameState.back_to_menu())
 	ui.add_child(pause_menu)
 	get_tree().paused = true
@@ -178,6 +230,7 @@ func save_game() -> void:
 	if GameState.current_dir.is_empty():
 		return
 	world.save_all()
+	Mods.save_data(GameState.current_dir)
 	var p := player.global_position
 	info["player"] = {"pos": [p.x, p.y, p.z], "yaw": player.yaw, "pitch": player.pitch, "selected": player.selected}
 	info["time_of_day"] = time_of_day
@@ -230,6 +283,14 @@ func _wait_loaded() -> void:
 	print("LOADED ms=", Time.get_ticks_msec() - t0, " ", world.stats())
 
 
+func _inv_total() -> int:
+	var n := 0
+	for c in ["hotbar", "backpack"]:
+		for sl in Mods.container_slots(c):
+			n += int(sl.get("count", 0))
+	return n
+
+
 func _find_biome(biome: int) -> Vector2i:
 	for r in range(0, 4000, 48):
 		for k in 16:
@@ -249,17 +310,33 @@ func _autotest(dir: String) -> void:
 	await _wait(1.0)
 	await _shot(dir, "g1_start")
 
-	# kopanie i stawianie, a potem sprawdzenie zapisu
+	print("MODS loaded=", Mods.loaded, " errors=", Mods.load_errors, " binds=", Mods.binds.size())
+	# kopanie i stawianie przez haki modów (plecak liczy i zużywa bloki)
 	player.pitch = -0.75
 	await _wait(0.3)
 	var target: Dictionary = player.target.duplicate()
+	var before_inv := _inv_total()
 	player.break_block()
 	await _wait(0.4)
 	var dug: Vector3i = target.get("pos", Vector3i.ZERO)
-	print("BREAK pos=", dug, " now=", world.get_block(dug))
-	player.select(3)
+	print("BREAK pos=", dug, " now=", world.get_block(dug), " plecak przed=", before_inv, " po=", _inv_total())
+	player.select(0)
+	var planks_before := Mods.hotbar_count(0)
 	player.place_block()
 	await _wait(0.4)
+	print("PLACE block=", world.get_block(dug), " deski przed=", planks_before, " po=", Mods.hotbar_count(0))
+	var stone_try := Mods.before("block.break", {"pos": dug, "block": Blocks.STONE})
+	print("DESTRUCTIBLE kamień anulowany=", stone_try.get("cancel", false))
+	Mods.press_bind("backpack:toggle")
+	await _wait(0.8)
+	await _shot(dir, "g5_backpack")
+	if windows.has("character"):
+		windows["character"]._click("hotbar", 0, false)
+		windows["character"]._click("backpack", 4, false)
+		await _wait(0.4)
+		await _shot(dir, "g6_backpack_moved")
+		windows["character"].close()
+	await _wait(0.3)
 	var n := world.save_all()
 	var check := World.new()
 	check.save_dir = GameState.current_dir
@@ -282,12 +359,12 @@ func _autotest(dir: String) -> void:
 		world.update_center(player.global_position)
 		await _wait_loaded()
 		await _wait(0.8)
-		player.spring.spring_length = 9.0
+		Mods.camera_stats["distance"] = 9.0
 		player.pitch = -0.3
 		player.yaw = 0.8
 		await _wait(0.6)
 		await _shot(dir, "g2_biome_%d" % b)
-		player.spring.spring_length = Player.ARM
+		Mods.camera_stats.erase("distance")
 		print("BIOME ", Terrain.BIOME_NAMES[b], " at ", at)
 
 	# zmierzch (dzień i noc)

@@ -20,6 +20,7 @@ var touch_jump := false
 var selected := 0
 var target: Dictionary = {}
 var frozen := true
+var ui_blocked := false  # otwarte okno moda: gracz nie reaguje na mysz
 
 const SPEED := 4.6
 const JUMP := 7.6
@@ -88,6 +89,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	# zdarzenia myszy udawane z dotyku obsługuje sterowanie dotykowe, nie gracz
 	if (event is InputEventMouse) and event.device == InputEvent.DEVICE_ID_EMULATION:
 		return
+	if ui_blocked:
+		return
 	if event is InputEventMouseButton and event.pressed:
 		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -97,15 +100,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		elif event.button_index == MOUSE_BUTTON_RIGHT:
 			place_block()
 		elif event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			select((selected + Blocks.PLACEABLE.size() - 1) % Blocks.PLACEABLE.size())
+			select((selected + hotbar_size() - 1) % hotbar_size())
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			select((selected + 1) % Blocks.PLACEABLE.size())
+			select((selected + 1) % hotbar_size())
 	elif event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		look(event.relative * mouse_sensitivity)
 	elif event.is_action_pressed("toggle_view"):
 		toggle_view()
 	else:
-		for i in Blocks.PLACEABLE.size():
+		for i in mini(hotbar_size(), 9):
 			if event.is_action_pressed("slot_%d" % (i + 1)):
 				select(i)
 
@@ -122,19 +125,40 @@ func select(i: int) -> void:
 
 func toggle_view() -> void:
 	first_person = not first_person
-	spring.spring_length = 0.0 if first_person else ARM
 	model.visible = not first_person
+
+
+## Statystyki gracza: wartość domyślna albo nadpisana przez mod (engine.player.set).
+func stat(name: String) -> Variant:
+	var defaults := {"speed": SPEED, "jump": JUMP, "gravity": GRAVITY, "reach": REACH, "auto_jump": true}
+	return Mods.player_stats.get(name, defaults.get(name))
+
+
+func hotbar_size() -> int:
+	return Mods.hotbar.count if Mods.hotbar.container != "" else Blocks.PLACEABLE.size()
+
+
+## Blok wybrany na pasku: z kontenera moda albo z listy trybu kreatywnego.
+func current_block() -> int:
+	var b := Mods.hotbar_block(selected)
+	if b < 0:
+		return Blocks.PLACEABLE[selected % Blocks.PLACEABLE.size()]
+	return b
 
 
 func _physics_process(delta: float) -> void:
 	pivot.rotation = Vector3(pitch, yaw, 0)
+	var arm: float = 0.0 if first_person else float(Mods.camera_stats.get("distance", ARM))
+	spring.spring_length = lerpf(spring.spring_length, arm, minf(1.0, delta * 10.0))
+	if selected >= hotbar_size():
+		select(0)
 	if frozen:
 		if world.is_ready_at(global_position):
 			frozen = false
 		else:
 			return
 
-	var input := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
+	var input := Vector2.ZERO if ui_blocked else Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	if touch_move.length() > 0.05:
 		input = touch_move
 	var forward := Vector3(-sin(yaw), 0, -cos(yaw))
@@ -143,17 +167,18 @@ func _physics_process(delta: float) -> void:
 	if dir.length() > 1.0:
 		dir = dir.normalized()
 
-	velocity.x = lerpf(velocity.x, dir.x * SPEED, minf(1.0, delta * 12.0))
-	velocity.z = lerpf(velocity.z, dir.z * SPEED, minf(1.0, delta * 12.0))
+	var speed := float(stat("speed"))
+	velocity.x = lerpf(velocity.x, dir.x * speed, minf(1.0, delta * 12.0))
+	velocity.z = lerpf(velocity.z, dir.z * speed, minf(1.0, delta * 12.0))
 	if is_on_floor():
-		var want_jump := Input.is_action_pressed("jump") or touch_jump
+		var want_jump := (Input.is_action_pressed("jump") and not ui_blocked) or touch_jump
 		# automatyczny skok na stopień o wysokości jednego bloku
-		if dir.length() > 0.3 and is_on_wall():
+		if dir.length() > 0.3 and is_on_wall() and bool(stat("auto_jump")):
 			want_jump = true
 		if want_jump:
-			velocity.y = JUMP
+			velocity.y = float(stat("jump"))
 	else:
-		velocity.y -= GRAVITY * delta
+		velocity.y -= float(stat("gravity")) * delta
 	move_and_slide()
 
 	if global_position.y < -80.0:
@@ -179,8 +204,9 @@ func _update_target() -> void:
 	var origin := camera.global_position
 	var dir := -camera.global_basis.z
 	var head := global_position + Vector3(0, 1.55, 0)
-	var r: Dictionary = world.raycast(origin, dir, spring.spring_length + REACH + 1.0)
-	if r.get("hit", false) and (Vector3(r.pos) + Vector3(0.5, 0.5, 0.5)).distance_to(head) <= REACH + 0.5:
+	var reach := float(stat("reach"))
+	var r: Dictionary = world.raycast(origin, dir, spring.spring_length + reach + 1.0)
+	if r.get("hit", false) and (Vector3(r.pos) + Vector3(0.5, 0.5, 0.5)).distance_to(head) <= reach + 0.5:
 		target = r
 		highlight.visible = true
 		highlight.global_position = Vector3(r.pos)
@@ -189,11 +215,16 @@ func _update_target() -> void:
 		highlight.visible = false
 
 
+## Kopanie przechodzi przez haki modów: „block.break” przed (można anulować) i po.
 func break_block() -> void:
 	if target.is_empty():
 		return
+	var ctx := Mods.before("block.break", {"pos": target.pos, "block": world.get_block(target.pos)})
+	if ctx.get("cancel", false):
+		return
 	if world.set_block(target.pos, Blocks.AIR):
 		model.do_swing()
+		Mods.after("block.break", ctx)
 
 
 func place_block() -> void:
@@ -205,5 +236,12 @@ func place_block() -> void:
 	var a_max := global_position + Vector3(0.3, 1.8, 0.3)
 	if a_max.x > p.x and a_min.x < p.x + 1 and a_max.y > p.y and a_min.y < p.y + 1 and a_max.z > p.z and a_min.z < p.z + 1:
 		return
-	if world.set_block(p, Blocks.PLACEABLE[selected]):
+	var block := current_block()
+	if block <= 0:
+		return
+	var ctx := Mods.before("block.place", {"pos": p, "block": block, "slot": selected + 1})
+	if ctx.get("cancel", false):
+		return
+	if world.set_block(p, int(ctx.get("block", block))):
 		model.do_swing()
+		Mods.after("block.place", ctx)

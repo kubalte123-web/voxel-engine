@@ -18,6 +18,9 @@ const COUNT := 13
 
 const NAMES := ["Powietrze", "Trawa", "Ziemia", "Kamień", "Deski", "Piasek", "Pień", "Liście",
 	"Śnieg", "Kaktus", "Wysoka trawa", "Mak", "Mlecz"]
+# Stałe identyfikatory tekstowe (używane przez mody i ustawienia)
+const KEYS := ["air", "grass", "dirt", "stone", "planks", "sand", "log", "leaves",
+	"snow", "cactus", "tall_grass", "flower_red", "flower_yellow"]
 const PLACEABLE := [GRASS, DIRT, STONE, PLANKS, SAND, LOG, LEAVES, SNOW]
 
 # Właściwości (bity): 1 = nieprzezroczysty, 2 = roślina (dwie skrzyżowane ściany), 4 = kolizja

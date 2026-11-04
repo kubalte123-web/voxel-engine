@@ -56,11 +56,43 @@ static func make_theme() -> Theme:
 	t.set_stylebox("slider", "HSlider", _box(Color(0.06, 0.08, 0.11), 4, Color(0, 0, 0, 0), 3))
 	t.set_stylebox("grabber_area", "HSlider", _box(ACCENT, 4, Color(0, 0, 0, 0), 3))
 	t.set_stylebox("grabber_area_highlight", "HSlider", _box(ACCENT_HOVER, 4, Color(0, 0, 0, 0), 3))
+	t.set_icon("unchecked", "CheckBox", _check_icon(false, false))
+	t.set_icon("checked", "CheckBox", _check_icon(true, false))
+	t.set_icon("unchecked_disabled", "CheckBox", _check_icon(false, true))
+	t.set_icon("checked_disabled", "CheckBox", _check_icon(true, true))
 	for state in ["normal", "hover", "pressed", "disabled", "focus", "hover_pressed"]:
 		var e := StyleBoxEmpty.new()
 		e.set_content_margin_all(6)
 		t.set_stylebox(state, "CheckBox", e)
 	return t
+
+
+## Ikona pola wyboru rysowana w kodzie (domyślna jest prawie niewidoczna na ciemnym tle).
+static func _check_icon(on: bool, disabled: bool) -> ImageTexture:
+	var n := 22
+	var img := Image.create(n, n, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	var edge := Color(0.75, 0.8, 0.85) if not disabled else Color(0.4, 0.45, 0.5)
+	var fill := ACCENT if not disabled else Color(0.3, 0.38, 0.32)
+	for y in n:
+		for x in n:
+			var border := x < 2 or y < 2 or x >= n - 2 or y >= n - 2
+			if on:
+				img.set_pixel(x, y, fill.lightened(0.15) if border else fill)
+			elif border:
+				img.set_pixel(x, y, edge)
+	if on:
+		for k in range(0, 5):
+			_dot(img, 5 + k, 11 + k)
+		for k in range(0, 9):
+			_dot(img, 9 + k, 15 - k)
+	return ImageTexture.create_from_image(img)
+
+
+static func _dot(img: Image, x: int, y: int) -> void:
+	for dy in 2:
+		for dx in 2:
+			img.set_pixel(clampi(x + dx, 0, 21), clampi(y + dy, 0, 21), Color(1, 1, 1))
 
 
 static func button(text: String, cb: Callable, primary: bool = false) -> Button:

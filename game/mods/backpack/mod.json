@@ -1,0 +1,15 @@
+{
+	"id": "backpack",
+	"name": "Plecak i postać",
+	"version": "0.1.0",
+	"author": "Jakub Lewicki",
+	"description": "Wykopane bloki trafiają do plecaka, a stawianie zużywa bloki z paska. Okno postaci (klawisz E albo przycisk „Plecak” na telefonie) pokazuje postać, wyposażenie, plecak i pasek.",
+	"requires": ["modkit"],
+	"scripts": ["main.lua"],
+	"settings": [
+		{"key": "rows", "label": "Rzędy w plecaku", "type": "int", "default": 3, "min": 1, "max": 6, "step": 1},
+		{"key": "creative", "label": "Tryb kreatywny (nieskończone bloki)", "type": "bool", "default": false},
+		{"key": "starter", "label": "Bloki na start w nowym świecie", "type": "bool", "default": true},
+		{"key": "grass_drops_dirt", "label": "Trawa po wykopaniu daje ziemię", "type": "bool", "default": true}
+	]
+}

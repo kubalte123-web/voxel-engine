@@ -15,6 +15,7 @@ var joy_finger := -1
 var look_finger := -1
 var buttons := {}        # nazwa -> [środek, promień, etykieta]
 var button_fingers := {} # palec -> nazwa
+var mod_buttons := {}    # nazwa przycisku -> id skrótu moda
 var last_pos := {}       # palec -> ostatnia pozycja (liczymy ruch sami, bez skoków)
 const MAX_STEP := 70.0   # większy skok między zdarzeniami to błąd przeglądarki, pomijamy go
 
@@ -36,10 +37,14 @@ func _layout() -> void:
 		"view": [Vector2(size.x - 60, 60), 32.0, "Widok"],
 		"menu": [Vector2(size.x - 140, 60), 32.0, "Menu"],
 	}
+	var i := 0
+	for name in mod_buttons:
+		buttons[name] = [Vector2(size.x - 220 - i * 80, 60), 32.0, mod_buttons[name][1]]
+		i += 1
 
 
 func _input(event: InputEvent) -> void:
-	if get_tree().paused:
+	if get_tree().paused or (main and not main.windows.is_empty()):
 		return
 	if event is InputEventScreenTouch:
 		_layout()
@@ -106,6 +111,9 @@ func _press(name: String, down: bool) -> void:
 			if down: player.toggle_view()
 		"menu":
 			if down and main: main.open_pause()
+		_:
+			if down and mod_buttons.has(name):
+				Mods.press_bind(mod_buttons[name][0])
 
 
 func _process(_delta: float) -> void:
@@ -114,6 +122,8 @@ func _process(_delta: float) -> void:
 
 
 func _draw() -> void:
+	if main and not main.windows.is_empty():
+		return
 	_layout()
 	var font := get_theme_default_font()
 	draw_circle(joy_center, JOY_R, Color(1, 1, 1, 0.12))
@@ -127,3 +137,10 @@ func _draw() -> void:
 		var fs := 18 if bt[1] > 40.0 else 15
 		var w := font.get_string_size(bt[2], HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 		draw_string(font, bt[0] + Vector2(-w / 2.0, fs * 0.35), bt[2], HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(1, 1, 1))
+
+
+## Przyciski dotykowe dla skrótów dodanych przez mody (engine.input.bind).
+func refresh_binds() -> void:
+	mod_buttons.clear()
+	for b in Mods.binds:
+		mod_buttons["mod_" + b.id] = [b.id, b.label.left(8)]

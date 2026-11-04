@@ -1,0 +1,26 @@
+# Voxel Engine (nazwa robocza)
+
+> Darmowa gra voxelowa w Godot 4.6, w której rozgrywkę tworzą mody w Lua 5.4. Ten plik jest punktem startowym
+> dla asystentów AI, które mają napisać mod.
+
+Mod to folder z `mod.json` i skryptami Lua. Skrypty działają w piaskownicy: bez plików, sieci i systemu,
+tylko z obiektem `engine`. Zachowanie silnika zmienia się hakami `engine.hooks.before/after` (jak prefix i
+postfix w Harmony), a mody mogą udostępniać sobie biblioteki przez `engine.export` i `engine.require`.
+
+## Dokumentacja
+
+- [Tworzenie modów](docs/MODDING.md): format mod.json, rodzaje ustawień, haki, zdarzenia, pełne API `engine`
+- [Prelude API](game/scripts/mods/prelude.lua): implementacja obiektu `engine` po stronie Lua
+
+## Przykładowe mody
+
+- [Zestaw modera](game/mods/modkit/main.lua): biblioteka z łatkami, ekwipunkiem i licznikami czasu
+- [Plecak i postać](game/mods/backpack/main.lua): kontenery, pasek z kontenera, okno postaci, klawisz E
+- [Zniszczalność bloków](game/mods/destructible/main.lua): hak `block.break` i ustawienie `block_toggles`
+
+## Zasady dla generowanego moda
+
+- Tablice w Lua liczone od 1, miejsca w kontenerach też od 1.
+- Puste miejsce w kontenerze to `{}` (bez pola `block`).
+- Pozycje bloków to `Vector3i(x, y, z)`, bloki to liczby; klucze tekstowe przez `engine.blocks.id("stone")`.
+- Klucze bloków: air, grass, dirt, stone, planks, sand, log, leaves, snow, cactus, tall_grass, flower_red, flower_yellow.

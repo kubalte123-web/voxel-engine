@@ -1,0 +1,13 @@
+{
+	"id": "destructible",
+	"name": "Zniszczalność bloków",
+	"version": "0.1.0",
+	"author": "Jakub Lewicki",
+	"description": "Wybierz, które bloki da się wykopać. Lista w ustawieniach powstaje z wszystkich bloków w grze, także dodanych przez inne mody.",
+	"scripts": ["main.lua"],
+	"enabled_by_default": false,
+	"settings": [
+		{"key": "breakable", "label": "Bloki, które można wykopać", "type": "block_toggles", "default": true},
+		{"key": "message", "label": "Pokazuj komunikat przy próbie", "type": "bool", "default": true}
+	]
+}

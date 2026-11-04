@@ -1,0 +1,16 @@
+[configuration]
+entry_symbol = "luagdextension_entrypoint"
+compatibility_minimum = "4.5"
+reloadable = true
+
+[libraries]
+windows.debug.x86_64 = "build/libluagdextension.windows.template_debug.x86_64.dll"
+windows.release.x86_64 = "build/libluagdextension.windows.template_release.x86_64.dll"
+linux.debug.x86_64 = "build/libluagdextension.linux.template_debug.x86_64.so"
+linux.release.x86_64 = "build/libluagdextension.linux.template_release.x86_64.so"
+web.debug.wasm32 = "build/libluagdextension.web.template_debug.wasm32.nothreads.wasm"
+web.release.wasm32 = "build/libluagdextension.web.template_release.wasm32.nothreads.wasm"
+
+[icons]
+LuaScript = "LuaScript_icon.svg"
+

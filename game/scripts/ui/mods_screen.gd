@@ -106,6 +106,18 @@ func _details() -> void:
 	details.add_child(UI.label("%s  %s" % [m.get("name", selected), m.get("version", "")], 24))
 	details.add_child(UI.label("Autor: %s" % m.get("author", "nieznany"), 16, UI.MUTED))
 	details.add_child(UI.wrap(m.get("description", ""), 17, UI.TEXT))
+	var reqs: Array = m.get("requires", [])
+	if not reqs.is_empty():
+		var names := []
+		for r in reqs:
+			names.append(ModManager.manifests.get(r, {}).get("name", r + " (brak)"))
+		var ok := true
+		for r in reqs:
+			if not ModManager.is_enabled(r):
+				ok = false
+		details.add_child(UI.wrap("Wymaga: " + ", ".join(names), 16, UI.MUTED if ok else UI.DANGER))
+		if not ok:
+			details.add_child(UI.wrap("Włącz wymagane mody, inaczej ten mod się nie wczyta.", 15, UI.DANGER))
 	var defs: Array = ModManager.setting_defs(selected)
 	if defs.is_empty():
 		details.add_child(UI.wrap("Ten mod nie ma ustawień."))
@@ -126,6 +138,8 @@ func _setting(id: String, d: Dictionary) -> Control:
 		text = "[serwer] " + text
 	var v: Variant = ModManager.get_value(id, key)
 	match d.get("type", "float"):
+		"block_toggles":
+			return _block_toggles(id, key, text, v, d, locked)
 		"bool":
 			return UI.check_row(text, bool(v), func(on): ModManager.set_value(id, key, on), locked)
 		"int":
@@ -134,3 +148,24 @@ func _setting(id: String, d: Dictionary) -> Control:
 		_:
 			return UI.slider_row(text, d.get("min", 0.0), d.get("max", 1.0), d.get("step", 0.1), float(v),
 				func(x): return "%.1f" % x, func(x): ModManager.set_value(id, key, x), locked)
+
+
+## Ustawienie z przełącznikiem dla każdego bloku w grze (lista budowana z rejestru bloków).
+func _block_toggles(id: String, key: String, text: String, v: Variant, d: Dictionary, locked: bool) -> Control:
+	var box := VBoxContainer.new()
+	box.add_theme_constant_override("separation", 4)
+	box.add_child(UI.label(text, 17))
+	var values: Dictionary = v if v is Dictionary else {}
+	var def := bool(d.get("default", true))
+	var grid := GridContainer.new()
+	grid.columns = 1 if UI.narrow(get_viewport_rect().size) else 2
+	for b in range(1, Blocks.COUNT):
+		var bkey: String = Blocks.KEYS[b]
+		var on := bool(values.get(bkey, def))
+		grid.add_child(UI.check_row(Blocks.NAMES[b], on, func(state):
+			var cur: Variant = ModManager.get_value(id, key)
+			var dict: Dictionary = (cur as Dictionary).duplicate() if cur is Dictionary else {}
+			dict[bkey] = state
+			ModManager.set_value(id, key, dict), locked))
+	box.add_child(grid)
+	return box

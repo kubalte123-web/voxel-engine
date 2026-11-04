@@ -200,6 +200,16 @@ func _autotest(dir: String) -> void:
 	show_mods()
 	await _shot(dir, "m4_mods_server")
 	ModManager.apply_server_profile({})
+	ModManager.set_enabled("destructible", true)
+	ModManager.set_value("destructible", "breakable", {"stone": false, "snow": false})
+	show_mods()
+	var ms: ModsScreen = content.get_child(0)
+	ms.selected = "destructible"
+	ms._refresh()
+	await _shot(dir, "m4b_mods_blocks")
+	ms.selected = "backpack"
+	ms._refresh()
+	await _shot(dir, "m4c_mods_backpack")
 	show_options()
 	await _shot(dir, "m5_options")
 	var d := GameState.create_world("Test", "42")

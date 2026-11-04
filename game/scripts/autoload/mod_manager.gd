@@ -47,7 +47,11 @@ func load_user() -> void:
 		if manifests.has(id):
 			order.append(id)
 	var rest := manifests.keys()
-	rest.sort()
+	# nowe mody: najpierw wymagane i biblioteki, potem reszta alfabetycznie
+	rest.sort_custom(func(a, b):
+		var ra := _rank(a)
+		var rb := _rank(b)
+		return ra < rb if ra != rb else a < b)
 	for id in rest:
 		if not order.has(id):
 			order.append(id)
@@ -55,6 +59,15 @@ func load_user() -> void:
 		enabled[id] = cfg.get_value("enabled", id, manifests[id].get("enabled_by_default", true))
 		var v: Dictionary = cfg.get_value("settings", id, {})
 		values[id] = v
+
+
+func _rank(id: String) -> int:
+	var m: Dictionary = manifests[id]
+	if m.get("required", false):
+		return 0
+	if m.get("library", false):
+		return 1
+	return 2
 
 
 func save_user(notify: bool = true) -> void:

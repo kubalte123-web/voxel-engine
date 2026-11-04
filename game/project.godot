@@ -11,6 +11,7 @@ config/features=PackedStringArray("4.6", "GL Compatibility")
 Settings="*res://scripts/autoload/settings.gd"
 ModManager="*res://scripts/autoload/mod_manager.gd"
 GameState="*res://scripts/autoload/game_state.gd"
+Mods="*res://scripts/autoload/mod_runtime.gd"
 
 [display]
 

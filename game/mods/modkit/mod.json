@@ -1,0 +1,10 @@
+{
+	"id": "modkit",
+	"name": "Zestaw modera",
+	"version": "0.1.0",
+	"author": "Jakub Lewicki",
+	"description": "Biblioteka dla innych modów: łatki na haki silnika, ekwipunek (dodawanie, zabieranie, liczenie przedmiotów), liczniki czasu i narzędzia do tabel. Inne mody wpisują ją w \"requires\" i pobierają przez engine.require(\"modkit\").",
+	"library": true,
+	"scripts": ["main.lua"],
+	"settings": []
+}
