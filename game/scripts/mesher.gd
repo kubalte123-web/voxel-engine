@@ -27,7 +27,7 @@ const FACE_SHADE := [0.86, 0.86, 1.0, 0.62, 0.92, 0.92]
 const PLANT_SHADE := 0.9
 
 
-static func build(padded: PackedByteArray, tiles: PackedInt32Array, tile_count: int, props: PackedInt32Array) -> Array:
+static func build(padded: PackedByteArray, tiles: PackedInt32Array, cols_n: int, rows_n: int, props: PackedInt32Array) -> Array:
 	var verts := PackedVector3Array()
 	var norms := PackedVector3Array()
 	var uvs := PackedVector2Array()
@@ -45,7 +45,8 @@ static func build(padded: PackedByteArray, tiles: PackedInt32Array, tile_count: 
 	for i in padded.size():
 		op[i] = props[padded[i]] & Blocks.OPAQUE
 
-	var inv := 1.0 / float(tile_count)
+	var iu := 1.0 / float(cols_n)
+	var iv := 1.0 / float(rows_n)
 	var eps := 0.002
 	for z in range(1, S + 1):
 		for y in range(1, S + 1):
@@ -55,15 +56,20 @@ static func build(padded: PackedByteArray, tiles: PackedInt32Array, tile_count: 
 					continue
 				var pr := props[b]
 				if pr & Blocks.CROSS:
-					_cross(x, y, z, tiles[b * 6], inv, eps, verts, norms, uvs, cols, idx)
+					_cross(x, y, z, tiles[b * 6], cols_n, iu, iv, eps, verts, norms, uvs, cols, idx)
 					continue
 				var solid := pr & Blocks.SOLID
+				var see_through := (pr & Blocks.OPAQUE) == 0
 				for f in 6:
 					var n: Vector3i = NORMALS[f]
 					var fx := x + n.x
 					var fy := y + n.y
 					var fz := z + n.z
-					if op[fx + P * (fy + P * fz)] != 0:
+					var ni := fx + P * (fy + P * fz)
+					if op[ni] != 0:
+						continue
+					# przezroczyste bloki tego samego rodzaju (szkło) nie mają ścian między sobą
+					if see_through and padded[ni] == b:
 						continue
 					var t := tiles[b * 6 + f]
 					var corners: Array = CORNERS[f]
@@ -95,7 +101,7 @@ static func build(padded: PackedByteArray, tiles: PackedInt32Array, tile_count: 
 						verts.append(Vector3(x - 1 + c.x, y - 1 + c.y, z - 1 + c.z))
 						norms.append(Vector3(n))
 						var uv: Vector2 = uvset[k]
-						uvs.append(Vector2((t + clampf(uv.x, eps, 1.0 - eps)) * inv, clampf(uv.y, eps, 1.0 - eps)))
+						uvs.append(Vector2((t % cols_n + clampf(uv.x, eps, 1.0 - eps)) * iu, (t / cols_n + clampf(uv.y, eps, 1.0 - eps)) * iv))
 						var shade: float = AO_LEVELS[level] * FACE_SHADE[f]
 						cols.append(Color(shade, shade, shade))
 					# kolejność zgodna z ruchem wskazówek zegara (przód ściany w Godocie);
@@ -113,7 +119,7 @@ static func build(padded: PackedByteArray, tiles: PackedInt32Array, tile_count: 
 
 
 ## Roślina: dwie skrzyżowane ściany, każda widoczna z obu stron. Bez kolizji.
-static func _cross(x: int, y: int, z: int, t: int, inv: float, eps: float,
+static func _cross(x: int, y: int, z: int, t: int, cols_n: int, iu: float, iv: float, eps: float,
 		verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array,
 		cols: PackedColorArray, idx: PackedInt32Array) -> void:
 	for plane in CROSS_CORNERS:
@@ -123,7 +129,7 @@ static func _cross(x: int, y: int, z: int, t: int, inv: float, eps: float,
 			verts.append(Vector3(x - 1, y - 1, z - 1) + c)
 			norms.append(Vector3.UP)
 			var uv: Vector2 = SIDE_UV[k]
-			uvs.append(Vector2((t + clampf(uv.x, eps, 1.0 - eps)) * inv, clampf(uv.y, eps, 1.0 - eps)))
+			uvs.append(Vector2((t % cols_n + clampf(uv.x, eps, 1.0 - eps)) * iu, (t / cols_n + clampf(uv.y, eps, 1.0 - eps)) * iv))
 			cols.append(Color(PLANT_SHADE, PLANT_SHADE, PLANT_SHADE))
 		idx.append_array([base, base + 2, base + 1, base, base + 3, base + 2,
 			base, base + 1, base + 2, base, base + 2, base + 3])

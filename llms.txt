@@ -1,26 +1,36 @@
 # Voxel Engine (nazwa robocza)
 
-> Darmowa gra voxelowa w Godot 4.6, w której rozgrywkę tworzą mody w Lua 5.4. Ten plik jest punktem startowym
-> dla asystentów AI, które mają napisać mod.
+> Darmowa gra voxelowa w Godot 4.6, w której całą treść i rozgrywkę tworzą mody w Lua 5.4. Silnik zna tylko
+> powietrze; bloki, przedmioty, biomy, zasady, kamera i animacje pochodzą z modów. Ten plik jest punktem
+> startowym dla asystentów AI, które mają napisać mod.
 
-Mod to folder z `mod.json` i skryptami Lua. Skrypty działają w piaskownicy: bez plików, sieci i systemu,
-tylko z obiektem `engine`. Zachowanie silnika zmienia się hakami `engine.hooks.before/after` (jak prefix i
-postfix w Harmony), a mody mogą udostępniać sobie biblioteki przez `engine.export` i `engine.require`.
+Mod to folder z `mod.json` i skryptami Lua w dwóch fazach: `content` (rejestracja bloków, przedmiotów,
+biomów, rud, struktur i animacji, także zmiany cudzych definicji) oraz `scripts` (haki, zdarzenia, okna,
+klawisze). Skrypty działają w piaskownicy: bez plików, sieci i systemu, tylko z obiektem `engine`.
+Zachowanie silnika zmienia się hakami `engine.hooks.before/after` (jak prefix i postfix w Harmony),
+a mody mogą udostępniać sobie biblioteki przez `engine.export` i `engine.require`.
 
 ## Dokumentacja
 
-- [Tworzenie modów](docs/MODDING.md): format mod.json, rodzaje ustawień, haki, zdarzenia, pełne API `engine`
+- [Tworzenie modów](docs/MODDING.md): mod.json, fazy, bloki, przedmioty, świat, haki, zdarzenia, pełne API `engine`
 - [Prelude API](game/scripts/mods/prelude.lua): implementacja obiektu `engine` po stronie Lua
 
 ## Przykładowe mody
 
+- [Świat podstawowy](game/mods/base/content.lua): bloki z PNG, biomy, drzewa, rośliny
+- [Rudy i ruiny](game/mods/ores/content.lua): tekstury ze wzorów, przedmioty, rudy, struktury z warstw, zmiana bloku innego moda
+- [Przetrwanie](game/mods/survival/main.lua): zdrowie i głód na ekranie, obrażenia od upadku, jedzenie przez hak item.use
+- [Gesty, kamera i wygląd](game/mods/emotes/content.lua): animacje klatkowe, tryby kamery, kolory postaci ([skrypty](game/mods/emotes/main.lua))
 - [Zestaw modera](game/mods/modkit/main.lua): biblioteka z łatkami, ekwipunkiem i licznikami czasu
-- [Plecak i postać](game/mods/backpack/main.lua): kontenery, pasek z kontenera, okno postaci, klawisz E
+- [Plecak i postać](game/mods/backpack/main.lua): kontenery, pasek z kontenera, okno postaci, łup z bloków
 - [Zniszczalność bloków](game/mods/destructible/main.lua): hak `block.break` i ustawienie `block_toggles`
 
 ## Zasady dla generowanego moda
 
+- `register` tylko w plikach z pola `content`; logika w świecie w plikach z pola `scripts`.
 - Tablice w Lua liczone od 1, miejsca w kontenerach też od 1.
-- Puste miejsce w kontenerze to `{}` (bez pola `block`).
-- Pozycje bloków to `Vector3i(x, y, z)`, bloki to liczby; klucze tekstowe przez `engine.blocks.id("stone")`.
-- Klucze bloków: air, grass, dirt, stone, planks, sand, log, leaves, snow, cactus, tall_grass, flower_red, flower_yellow.
+- Przedmioty to klucze tekstowe; miejsce w kontenerze to `{item = "stone", count = 5}` albo `{}`.
+- Pozycje bloków to `Vector3i(x, y, z)`; bloki w świecie to liczby, zamiana przez `engine.blocks.id("stone")` i `engine.blocks.key(id)`.
+- Tekstury: PNG 16x16 w folderze moda albo wzór `{pattern = "ore", color = "#rrggbb", spots = "#rrggbb"}`.
+- Klucze bloków moda base: grass, dirt, stone, planks, sand, log, leaves, snow, cactus, tall_grass, flower_red, flower_yellow, glass, bricks.
+- Klucze biomów moda base: meadow, forest, desert, snowy.

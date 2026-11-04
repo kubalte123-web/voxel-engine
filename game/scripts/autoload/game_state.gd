@@ -67,7 +67,7 @@ func create_world(name: String, seed_text: String) -> String:
 			mods[id] = ModManager.snapshot(id)
 	var info := {
 		"name": name, "seed": seed_from_text(seed_text), "created": now, "played": now,
-		"version": 2, "mods": mods, "time_of_day": -1.0, "player": {},
+		"version": 3, "mods": mods, "time_of_day": -1.0, "player": {},
 	}
 	write_info(dir, info)
 	return dir

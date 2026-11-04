@@ -1,24 +1,30 @@
 class_name Terrain
-## Generator świata: biomy (łąki, las, pustynia, ośnieżone góry), drzewa, kaktusy, trawa i kwiaty.
+## Generator świata opisany danymi z modów (WorldgenSpec): biomy dobierane z klimatu (temperatura,
+## wilgotność), wysokość mieszana płynnie między biomami, warstwy, rudy, drzewa, struktury i rośliny.
 ## Wszystkie funkcje są tylko do odczytu, więc można je wywoływać z wątków roboczych.
-## UWAGA: ta sama logika jest w native/src/voxel_mesher.cpp (prepare). Zmiany trzeba robić w obu miejscach;
+## UWAGA: ta sama logika jest w native/src/voxel_mesher.cpp. Zmiany trzeba robić w obu miejscach;
 ## test tests/bench.gd sprawdza, czy oba dają identyczny świat.
 
 const S := 32
 const P := S + 2
-
-const MEADOW := 0
-const FOREST := 1
-const DESERT := 2
-const SNOWY := 3
-const BIOME_NAMES := ["Łąki", "Las", "Pustynia", "Ośnieżone góry"]
+const BS := WorldgenSpec.BS
+const FS := WorldgenSpec.FS
+const ORE_S := WorldgenSpec.ORE_S
 
 var seed_value := 1337
-var hill := 1.0
-var biome_size := 1.0
-var trees := true
-var density := 1.0
-var plants := true
+var spec := {}
+var B := PackedFloat64Array()   # biomy
+var F := PackedFloat64Array()   # elementy (drzewa, struktury)
+var PL := PackedFloat64Array()  # rośliny
+var T := PackedInt32Array()     # bloki struktur
+var O := PackedFloat64Array()   # rudy
+var nb := 0
+var beach := 7
+var window := 2
+var max_sum := 0.0
+var n_ores := 0
+var biome_names: Array[String] = []
+var biome_keys: Array[String] = []
 
 var hills := FastNoiseLite.new()
 var detail := FastNoiseLite.new()
@@ -27,17 +33,29 @@ var humidity := FastNoiseLite.new()
 var mountain := FastNoiseLite.new()
 
 
-func _init(seed_in: int = 1337, opts: Dictionary = {}) -> void:
+func _init(seed_in: int = 1337, compiled: Dictionary = {}) -> void:
 	seed_value = seed_in
-	hill = float(opts.get("hill_height", 1.0))
-	biome_size = float(opts.get("biome_size", 1.0))
-	trees = bool(opts.get("trees", true))
-	density = float(opts.get("tree_density", 1.0))
-	plants = bool(opts.get("plants", true))
+	spec = compiled
+	if spec.is_empty():
+		spec = WorldgenSpec.compile({}, Blocks.reg, seed_in)
+	B = spec.biomes
+	F = spec.features
+	PL = spec.plants
+	T = spec.templates
+	O = spec.ores
+	var prm: PackedFloat64Array = spec.params
+	beach = int(prm[1])
+	window = int(prm[2])
+	nb = int(prm[3])
+	max_sum = prm[4]
+	n_ores = int(prm[5])
+	biome_names = spec.names
+	biome_keys = spec.keys
+	var bs := float(spec.get("biome_scale", 1.0))
 	_noise(hills, seed_value, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 0.008, 3)
 	_noise(detail, seed_value + 7, FastNoiseLite.TYPE_SIMPLEX, 0.04, 1)
-	_noise(temperature, seed_value + 101, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 0.0022 / biome_size, 2)
-	_noise(humidity, seed_value + 202, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 0.0028 / biome_size, 2)
+	_noise(temperature, seed_value + 101, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 0.0022 / bs, 2)
+	_noise(humidity, seed_value + 202, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 0.0028 / bs, 2)
 	_noise(mountain, seed_value + 303, FastNoiseLite.TYPE_SIMPLEX_SMOOTH, 0.012, 3)
 
 
@@ -50,16 +68,12 @@ static func _noise(n: FastNoiseLite, s: int, type: int, freq: float, octaves: in
 
 ## Najwyższy pionowy chunk, który może zawierać bloki (z zapasem na drzewa).
 func max_chunk_y() -> int:
-	return int(floor((13.5 + 39.0 * hill + 10.0) / S))
+	return int(floor((float(spec.get("max_height", 60.0)) + 14.0) / S))
 
 
-## Szumy i parametry przekazywane do rdzenia w C++.
+## Dane dla rdzenia w C++ (VoxelMesher.configure).
 func native_noises() -> Array:
 	return [hills, detail, temperature, humidity, mountain]
-
-
-func native_params() -> PackedFloat64Array:
-	return PackedFloat64Array([seed_value, hill, 1.0 if trees else 0.0, density, 1.0 if plants else 0.0])
 
 
 static func sm(a: float, b: float, x: float) -> float:
@@ -74,80 +88,106 @@ static func hash01(x: int, z: int, s: int, salt: int) -> float:
 	return float(h) / 4294967296.0
 
 
-static func biome_of(temp: float, humid: float) -> int:
-	if temp > 0.3:
-		return DESERT
-	if temp < -0.3:
-		return SNOWY
-	if humid > 0.1:
-		return FOREST
-	return MEADOW
+static func hash3(x: int, y: int, z: int, s: int, salt: int) -> float:
+	return hash01(x, z, s, salt + y * 31)
 
 
-## Wysokość i biom kolumny: [h, biom].
+## Wysokość i biom kolumny: Vector2i(h, indeks biomu).
+## Biom to najbliższy punkt klimatu; parametry wysokości są średnią ważoną 1/d^4 wszystkich biomów,
+## dzięki czemu granice biomów są płynne.
 func column(x: int, z: int) -> Vector2i:
 	var temp := temperature.get_noise_2d(x, z)
 	var humid := humidity.get_noise_2d(x, z)
-	var desert_f := sm(0.15, 0.45, temp)
-	var cold_f := sm(-0.15, -0.45, temp)
-	var amp := 9.0 * hill * (1.0 - 0.6 * desert_f)
-	var h := 12.0 + hills.get_noise_2d(x, z) * amp + detail.get_noise_2d(x, z) * 1.5 \
-		+ cold_f * (mountain.get_noise_2d(x, z) * 0.5 + 0.5) * 30.0 * hill
-	return Vector2i(int(round(h)), biome_of(temp, humid))
+	var best := 0
+	var bestd := 1e30
+	var wsum := 0.0
+	var base := 0.0
+	var amp := 0.0
+	var rough := 0.0
+	var mount := 0.0
+	for i in nb:
+		var o := i * BS
+		var dt := temp - B[o]
+		var dh := humid - B[o + 1]
+		var d := dt * dt + dh * dh
+		if d < bestd:
+			bestd = d
+			best = i
+		var w := 1.0 / (d * d + 0.000001)
+		wsum += w
+		base += w * B[o + 2]
+		amp += w * B[o + 3]
+		rough += w * B[o + 4]
+		mount += w * B[o + 5]
+	base /= wsum
+	amp /= wsum
+	rough /= wsum
+	mount /= wsum
+	var h := base + hills.get_noise_2d(x, z) * amp + detail.get_noise_2d(x, z) * rough \
+		+ mount * (mountain.get_noise_2d(x, z) * 0.5 + 0.5)
+	return Vector2i(int(round(h)), best)
 
 
 func height(x: int, z: int) -> int:
 	return column(x, z).x
 
 
-static func block_for(wy: int, h: int, biome: int) -> int:
+func biome_name(i: int) -> String:
+	return biome_names[i] if i >= 0 and i < biome_names.size() else ""
+
+
+func block_for(wy: int, h: int, biome: int) -> int:
 	if wy > h:
 		return Blocks.AIR
-	if biome == DESERT:
-		return Blocks.SAND if wy > h - 4 else Blocks.STONE
-	if biome == SNOWY:
-		if h >= 34:
-			return Blocks.SNOW if wy == h else Blocks.STONE
-		if wy == h:
-			return Blocks.SNOW
-		return Blocks.DIRT if wy > h - 4 else Blocks.STONE
-	if h <= 7:
-		return Blocks.SAND if wy > h - 4 else Blocks.STONE
+	var o := biome * BS
+	var top := int(B[o + 6])
+	var filler := int(B[o + 7])
+	if h >= B[o + 12]:
+		top = int(B[o + 13])
+		filler = int(B[o + 14])
+	elif h <= beach and B[o + 10] >= 0.0:
+		top = int(B[o + 10])
+		filler = int(B[o + 11])
 	if wy == h:
-		return Blocks.GRASS
-	return Blocks.DIRT if wy > h - 4 else Blocks.STONE
+		return top
+	if wy >= h - int(B[o + 8]):
+		return filler
+	return int(B[o + 9])
 
 
-## Rodzaj drzewa w kolumnie: 0 brak, 1 dąb, 2 świerk, 3 kaktus.
-func tree_at(x: int, z: int, h: int, biome: int) -> int:
-	if not trees or h <= 7:
-		return 0
+## Element (drzewo, struktura) w kolumnie: indeks w F albo -1.
+func feature_at(x: int, z: int, h: int, biome: int) -> int:
 	var r := hash01(x, z, seed_value, 1)
-	if r >= 0.03 * density:
-		return 0
-	match biome:
-		FOREST:
-			return 1
-		MEADOW:
-			return 1 if r < 0.004 * density else 0
-		SNOWY:
-			return 2 if (r < 0.012 * density and h < 34) else 0
-		DESERT:
-			return 3 if r < 0.006 * density else 0
-	return 0
+	if r >= max_sum:
+		return -1
+	var o := biome * BS
+	var start := int(B[o + 15])
+	var n := int(B[o + 16])
+	var acc := 0.0
+	for k in n:
+		var f := (start + k) * FS
+		acc += F[f]
+		if r < acc:
+			if h >= F[f + 9] and h <= F[f + 10]:
+				return start + k
+			return -1
+	return -1
 
 
 func plant_at(x: int, z: int, h: int, biome: int) -> int:
-	if not plants or h <= 7 or (biome != MEADOW and biome != FOREST):
+	if h <= beach:
+		return 0
+	var o := biome * BS
+	var start := int(B[o + 17])
+	var n := int(B[o + 18])
+	if n == 0:
 		return 0
 	var r := hash01(x, z, seed_value, 2)
-	if biome == MEADOW:
-		if r < 0.10: return Blocks.TALL_GRASS
-		if r < 0.125: return Blocks.FLOWER_RED
-		if r < 0.15: return Blocks.FLOWER_YELLOW
-	else:
-		if r < 0.18: return Blocks.TALL_GRASS
-		if r < 0.19: return Blocks.FLOWER_RED
+	var acc := 0.0
+	for k in n:
+		acc += PL[(start + k) * 2]
+		if r < acc:
+			return int(PL[(start + k) * 2 + 1])
 	return 0
 
 
@@ -170,61 +210,115 @@ func fill_padded(cpos: Vector3i) -> PackedByteArray:
 					out[x + P * (y + P * z)] = block_for(by + y, h, c.y)
 			# roślina na wierzchu
 			var py := h + 1 - by
-			if py >= 0 and py < P and tree_at(bx + x, bz + z, h, c.y) == 0:
+			if py >= 0 and py < P and feature_at(bx + x, bz + z, h, c.y) < 0:
 				var pl := plant_at(bx + x, bz + z, h, c.y)
 				if pl != 0:
 					out[x + P * (py + P * z)] = pl
-	# drzewa z okna o 2 kolumny szerszego, żeby korony sąsiadów sięgały do chunka
+	_ores(out, bx, by, bz)
+	# drzewa i struktury z okna szerszego o promień największego elementu
 	var found := []
-	for wz in range(bz - 2, bz + P + 2):
-		for wx in range(bx - 2, bx + P + 2):
-			if hash01(wx, wz, seed_value, 1) >= 0.03 * density or not trees:
-				continue
-			var c: Vector2i = cols.get(Vector2i(wx, wz), Vector2i(-99999, 0))
-			if c.x == -99999:
-				c = column(wx, wz)
-			var kind := tree_at(wx, wz, c.x, c.y)
-			if kind != 0:
-				found.append([wx, wz, c.x, kind, hash01(wx, wz, seed_value, 3)])
-	# najpierw pnie, potem liście (tylko w powietrze), więc wynik nie zależy od kolejności
+	if max_sum > 0.0:
+		for wz in range(bz - window, bz + P + window):
+			for wx in range(bx - window, bx + P + window):
+				if hash01(wx, wz, seed_value, 1) >= max_sum:
+					continue
+				var c: Vector2i = cols.get(Vector2i(wx, wz), Vector2i(-99999, 0))
+				if c.x == -99999:
+					c = column(wx, wz)
+				var f := feature_at(wx, wz, c.x, c.y)
+				if f >= 0:
+					found.append([wx, wz, c.x, f, hash01(wx, wz, seed_value, 3)])
+	# najpierw pnie i bloki stałe, potem liście (tylko w powietrze): wynik nie zależy od kolejności
 	for t in found:
-		var th := _trunk_height(t[3], t[4])
-		var blk := Blocks.CACTUS if t[3] == 3 else Blocks.LOG
-		for k in range(1, th + 1):
-			_put(out, t[0] - bx, t[2] + k - by, t[1] - bz, blk, false)
+		_stamp(out, t, bx, by, bz, false)
 	for t in found:
-		if t[3] == 3:
-			continue
-		var th := _trunk_height(t[3], t[4])
-		var tp: int = t[2] + th
-		if t[3] == 1:
-			for dy in range(-2, 2):
-				var r := 2 if dy <= -1 else 1
-				for dz in range(-r, r + 1):
-					for dx in range(-r, r + 1):
-						if r == 2 and absi(dx) == 2 and absi(dz) == 2:
-							continue
-						if dy == 1 and absi(dx) + absi(dz) > 1:
-							continue
-						_put(out, t[0] + dx - bx, tp + dy - by, t[1] + dz - bz, Blocks.LEAVES, true)
-		else:
-			for y in range(tp + 1, t[2] + 2, -1):
-				var d := tp + 1 - y
-				var r := 0 if d == 0 else (1 if d % 2 == 1 else 2)
-				for dz in range(-r, r + 1):
-					for dx in range(-r, r + 1):
-						if r == 2 and absi(dx) == 2 and absi(dz) == 2:
-							continue
-						_put(out, t[0] + dx - bx, y - by, t[1] + dz - bz, Blocks.LEAVES, true)
+		_stamp(out, t, bx, by, bz, true)
 	return out
 
 
-static func _trunk_height(kind: int, hv: float) -> int:
-	if kind == 1:
-		return 4 + int(hv * 3.0)
-	if kind == 2:
-		return 6 + int(hv * 3.0)
-	return 2 + int(hv * 2.0)
+func _trunk(f: int, hv: float) -> int:
+	var hmin := int(F[f + 4])
+	var hmax := int(F[f + 5])
+	return hmin + int(hv * float(hmax - hmin + 1))
+
+
+func _stamp(out: PackedByteArray, t: Array, bx: int, by: int, bz: int, soft: bool) -> void:
+	var f: int = t[3] * FS
+	var kind := int(F[f + 1])
+	var x0: int = t[0]
+	var z0: int = t[1]
+	var h: int = t[2]
+	if kind == 3:
+		var s := int(F[f + 7])
+		var n := int(F[f + 8])
+		for k in n:
+			var e := (s + k) * 5
+			if (T[e + 4] == 1) != soft:
+				continue
+			_put(out, x0 + T[e] - bx, h + 1 + T[e + 1] - by, z0 + T[e + 2] - bz, T[e + 3], soft)
+		return
+	var th := _trunk(f, t[4])
+	if not soft:
+		var trunk := int(F[f + 2])
+		for k in range(1, th + 1):
+			_put(out, x0 - bx, h + k - by, z0 - bz, trunk, false)
+		return
+	var leaves := int(F[f + 3])
+	var rad := int(F[f + 6])
+	var tp := h + th
+	if kind == 0:
+		for dy in range(-2, 2):
+			var r := rad if dy <= -1 else rad - 1
+			for dz in range(-r, r + 1):
+				for dx in range(-r, r + 1):
+					if r >= 2 and absi(dx) == r and absi(dz) == r:
+						continue
+					if dy == 1 and absi(dx) + absi(dz) > 1:
+						continue
+					_put(out, x0 + dx - bx, tp + dy - by, z0 + dz - bz, leaves, true)
+	elif kind == 1:
+		for y in range(tp + 1, h + 2, -1):
+			var d := tp + 1 - y
+			var r := 0 if d == 0 else (1 if d % 2 == 1 else rad)
+			for dz in range(-r, r + 1):
+				for dx in range(-r, r + 1):
+					if r >= 2 and absi(dx) == r and absi(dz) == r:
+						continue
+					_put(out, x0 + dx - bx, y - by, z0 + dz - bz, leaves, true)
+
+
+## Rudy: w każdej komórce 16^3 może powstać jedna żyła (kula o promieniu 1..rozmiar).
+func _ores(out: PackedByteArray, bx: int, by: int, bz: int) -> void:
+	for i in n_ores:
+		var o := i * ORE_S
+		var blk := int(O[o])
+		var rep := int(O[o + 1])
+		var size := int(O[o + 5])
+		var salt := 1000 + i * 7
+		for cz in range(floori((bz - size) / 16.0), floori((bz + P - 1 + size) / 16.0) + 1):
+			for cy in range(floori((by - size) / 16.0), floori((by + P - 1 + size) / 16.0) + 1):
+				for cx in range(floori((bx - size) / 16.0), floori((bx + P - 1 + size) / 16.0) + 1):
+					if hash3(cx, cy, cz, seed_value, salt) >= O[o + 4]:
+						continue
+					var ox := cx * 16 + int(hash3(cx, cy, cz, seed_value, salt + 1) * 16.0)
+					var oy := cy * 16 + int(hash3(cx, cy, cz, seed_value, salt + 2) * 16.0)
+					var oz := cz * 16 + int(hash3(cx, cy, cz, seed_value, salt + 3) * 16.0)
+					if oy < O[o + 2] or oy > O[o + 3]:
+						continue
+					var r := 1 + int(hash3(cx, cy, cz, seed_value, salt + 4) * float(size))
+					for dz in range(-r, r + 1):
+						for dy in range(-r, r + 1):
+							for dx in range(-r, r + 1):
+								if dx * dx + dy * dy + dz * dz > r * r:
+									continue
+								var lx := ox + dx - bx
+								var ly := oy + dy - by
+								var lz := oz + dz - bz
+								if lx < 0 or ly < 0 or lz < 0 or lx >= P or ly >= P or lz >= P:
+									continue
+								var idx := lx + P * (ly + P * lz)
+								if out[idx] == rep:
+									out[idx] = blk
 
 
 static func _put(out: PackedByteArray, x: int, y: int, z: int, b: int, only_air: bool) -> void:

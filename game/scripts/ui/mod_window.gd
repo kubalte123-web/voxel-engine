@@ -10,7 +10,6 @@ extends Control
 signal closed(id: String)
 
 var spec: Dictionary
-var atlas: Texture2D
 var held := {}             # przedmiot trzymany pod kursorem
 var held_icon: Control
 var slot_views := []       # [kontener, indeks, Button]
@@ -153,26 +152,26 @@ func _slots(s: Dictionary, narrow: bool) -> Control:
 
 func _click(cid: String, i: int, right: bool) -> void:
 	var cur := Mods.slot(cid, i)
-	var max_stack := Mods.MAX_STACK
 	if held.is_empty():
 		if cur.is_empty():
 			return
 		if right and int(cur.count) > 1:
 			var half := int(cur.count) / 2
-			held = {"block": cur.block, "count": half}
-			Mods.set_slot(cid, i, {"block": cur.block, "count": int(cur.count) - half})
+			held = {"item": cur.item, "count": half}
+			Mods.set_slot(cid, i, {"item": cur.item, "count": int(cur.count) - half})
 		else:
 			held = cur.duplicate()
 			Mods.set_slot(cid, i, {})
 	else:
+		var max_stack := Mods.max_stack(str(held.item))
 		if cur.is_empty():
-			var n := 1 if right else int(held.count)
-			Mods.set_slot(cid, i, {"block": held.block, "count": n})
+			var n := mini(max_stack, 1 if right else int(held.count))
+			Mods.set_slot(cid, i, {"item": held.item, "count": n})
 			held.count = int(held.count) - n
-		elif int(cur.block) == int(held.block):
+		elif str(cur.item) == str(held.item):
 			var room := max_stack - int(cur.count)
 			var n := mini(room, 1 if right else int(held.count))
-			Mods.set_slot(cid, i, {"block": cur.block, "count": int(cur.count) + n})
+			Mods.set_slot(cid, i, {"item": cur.item, "count": int(cur.count) + n})
 			held.count = int(held.count) - n
 		elif not right:
 			Mods.set_slot(cid, i, held.duplicate())
@@ -190,12 +189,12 @@ func _update_slots() -> void:
 			b.icon = null
 			b.text = ""
 		else:
-			b.icon = Blocks.icon(atlas, int(sl.block))
+			b.icon = Mods.registry.icon(str(sl.item))
 			b.text = str(sl.count) if int(sl.count) > 1 else ""
-			b.tooltip_text = Blocks.NAMES[int(sl.block)]
+			b.tooltip_text = Mods.registry.item_name(str(sl.item))
 	held_icon.visible = not held.is_empty()
 	if not held.is_empty():
-		held_icon.texture = Blocks.icon(atlas, int(held.block))
+		held_icon.texture = Mods.registry.icon(str(held.item))
 
 
 func _process(delta: float) -> void:
@@ -228,8 +227,8 @@ func _return_held() -> void:
 			Mods.set_slot(v[0], v[1], held)
 			held = {}
 			return
-		if int(sl.block) == int(held.block) and int(sl.count) + int(held.count) <= Mods.MAX_STACK:
-			Mods.set_slot(v[0], v[1], {"block": sl.block, "count": int(sl.count) + int(held.count)})
+		if str(sl.item) == str(held.item) and int(sl.count) + int(held.count) <= Mods.max_stack(str(held.item)):
+			Mods.set_slot(v[0], v[1], {"item": sl.item, "count": int(sl.count) + int(held.count)})
 			held = {}
 			return
 

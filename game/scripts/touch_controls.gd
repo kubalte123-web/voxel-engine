@@ -104,9 +104,9 @@ func _press(name: String, down: bool) -> void:
 		"break":
 			if down: player.break_block()
 		"place":
-			if down: player.place_block()
+			if down: player.use_item()
 		"next":
-			if down: player.select((player.selected + 1) % Blocks.PLACEABLE.size())
+			if down: player.select((player.selected + 1) % player.hotbar_size())
 		"view":
 			if down: player.toggle_view()
 		"menu":

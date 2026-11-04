@@ -1,0 +1,13 @@
+{
+	"id": "emotes",
+	"name": "Gesty, kamera i wygląd",
+	"version": "0.1.0",
+	"author": "Jakub Lewicki",
+	"description": "Machanie (G) i taniec (H) jako animacje klatkowe, tryby kamery pod klawiszem C (zza pleców, zza ramienia, z góry, z oczu) i kolor stroju postaci. Przykład animacji, kamery i wyglądu z moda.",
+	"content": ["content.lua"],
+	"scripts": ["main.lua"],
+	"settings": [
+		{"key": "outfit", "label": "Kolor stroju", "type": "choice", "options": ["Zielony", "Czerwony", "Niebieski", "Fioletowy"], "default": "Zielony"},
+		{"key": "lively_idle", "label": "Żywsza postać w miejscu (rozglądanie się)", "type": "bool", "default": true}
+	]
+}

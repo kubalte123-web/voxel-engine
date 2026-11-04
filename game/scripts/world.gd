@@ -7,9 +7,10 @@ const S := 32
 const P := S + 2
 
 var terrain: Terrain
-var tiles := Blocks.tile_table()
-var props := Blocks.prop_table()
-var atlas: ImageTexture
+var reg: Registry
+var tiles: PackedInt32Array
+var props: PackedInt32Array
+var atlas: Texture2D
 var material: StandardMaterial3D
 var save_dir := ""  # pusty = świat tymczasowy, bez zapisu
 
@@ -39,16 +40,21 @@ var mesh_ms_total := 0.0
 var mesh_count := 0
 
 
-func setup(seed_value: int, opts: Dictionary, dir: String) -> void:
-	terrain = Terrain.new(seed_value, opts)
+func setup(t: Terrain, dir: String, registry: Registry) -> void:
+	terrain = t
 	save_dir = dir
+	reg = registry
 	y_max = terrain.max_chunk_y()
 
 
 func _ready() -> void:
+	if reg == null:
+		reg = Blocks.reg
 	if terrain == null:
 		terrain = Terrain.new()
-	atlas = Blocks.make_atlas()
+	tiles = reg.tiles
+	props = reg.props
+	atlas = reg.atlas
 	material = StandardMaterial3D.new()
 	material.albedo_texture = atlas
 	material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
@@ -60,6 +66,7 @@ func _ready() -> void:
 	material.alpha_scissor_threshold = 0.5
 	if ClassDB.class_exists("VoxelMesher"):
 		native = ClassDB.instantiate("VoxelMesher")
+		native.call("configure", terrain.native_noises(), terrain.spec, tiles, props, Registry.ATLAS_COLS, reg.atlas_rows)
 		mesher_name = "C++"
 	if OS.has_feature("web"):
 		threaded = false
@@ -167,11 +174,10 @@ func _job(c: Vector3i) -> void:
 	var blocks: PackedByteArray
 	var arrays: Array
 	if native != null:
-		var prep: Array = native.call("prepare", c, terrain.native_noises(), terrain.native_params(),
-			own if own != null else PackedByteArray(), neigh)
+		var prep: Array = native.call("prepare", c, own if own != null else PackedByteArray(), neigh)
 		padded = prep[0]
 		blocks = prep[1]
-		arrays = native.call("build", padded, tiles, Blocks.TILES, props)
+		arrays = native.call("build", padded)
 	else:
 		padded = terrain.fill_padded(c)
 		if own == null:
@@ -182,7 +188,7 @@ func _job(c: Vector3i) -> void:
 		for i in 6:
 			if neigh[i] != null:
 				_copy_border(padded, neigh[i], i)
-		arrays = GDMesher.build(padded, tiles, Blocks.TILES, props)
+		arrays = GDMesher.build(padded, tiles, Registry.ATLAS_COLS, reg.atlas_rows, props)
 	var ms := (Time.get_ticks_usec() - t0) / 1000.0
 	mutex.lock()
 	results.append([c, arrays, blocks, ms])
@@ -266,7 +272,7 @@ func get_block(p: Vector3i) -> int:
 	var d: Variant = data.get(c)
 	if d == null:
 		var col := terrain.column(p.x, p.z)
-		return Terrain.block_for(p.y, col.x, col.y)
+		return terrain.block_for(p.y, col.x, col.y)
 	var l := p - c * S
 	return d[l.x + S * (l.y + S * l.z)]
 
@@ -293,7 +299,7 @@ func set_block(p: Vector3i, id: int) -> bool:
 	# roślina bez podłoża znika razem z blokiem pod nią
 	if id == Blocks.AIR:
 		var above := p + Vector3i(0, 1, 0)
-		if props[get_block(above)] & Blocks.CROSS:
+		if Blocks.props(get_block(above)) & Blocks.CROSS:
 			set_block(above, Blocks.AIR)
 	return true
 
@@ -370,6 +376,29 @@ func _save_chunk(c: Vector3i) -> void:
 	if f:
 		var d: PackedByteArray = data[c]
 		f.store_buffer(d.compress(FileAccess.COMPRESSION_ZSTD))
+
+
+## Przelicza id bloków we wszystkich zapisanych chunkach (gdy zmieniła się lista bloków z modów).
+func migrate_palette(lut: PackedByteArray) -> int:
+	if lut.is_empty() or save_dir.is_empty():
+		return 0
+	var dir := DirAccess.open(save_dir.path_join("chunks"))
+	if dir == null:
+		return 0
+	var n := 0
+	for fname in dir.get_files():
+		var path := save_dir.path_join("chunks").path_join(fname)
+		var raw := FileAccess.get_file_as_bytes(path)
+		var d := raw.decompress(S * S * S, FileAccess.COMPRESSION_ZSTD)
+		if d.size() != S * S * S:
+			continue
+		for i in d.size():
+			d[i] = lut[d[i]]
+		var f := FileAccess.open(path, FileAccess.WRITE)
+		if f:
+			f.store_buffer(d.compress(FileAccess.COMPRESSION_ZSTD))
+			n += 1
+	return n
 
 
 func save_all() -> int:

@@ -1,0 +1,13 @@
+{
+	"id": "ores",
+	"name": "Rudy i ruiny",
+	"version": "0.1.0",
+	"author": "Jakub Lewicki",
+	"description": "Węgiel, żelazo i rubiny pod ziemią, bruk z kamienia, ruiny na łąkach i studnie na pustyni. Przykład rejestrowania bloków, przedmiotów, rud i struktur oraz zmieniania bloków innego moda.",
+	"content": ["content.lua"],
+	"settings": [
+		{"key": "ore_amount", "label": "Ilość rud", "type": "float", "default": 1.0, "min": 0.2, "max": 3.0, "step": 0.1, "world": true},
+		{"key": "ruins", "label": "Ruiny i studnie", "type": "bool", "default": true, "world": true},
+		{"key": "cobblestone", "label": "Kamień po wykopaniu daje bruk", "type": "bool", "default": true}
+	]
+}

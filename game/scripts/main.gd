@@ -49,9 +49,24 @@ func _ready() -> void:
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
 	add_child(sun)
 
+	# faza 1 modów: rejestr bloków, przedmiotów i opisu świata
+	var reg := Mods.start_content(GameState.current_dir)
+	var seed_value := int(info.get("seed", 1337))
+	var spec := WorldgenSpec.compile(reg.worldgen, reg, seed_value)
 	world = World.new()
-	var base_opts: Dictionary = info.get("mods", {}).get("base", ModManager.snapshot("base"))
-	world.setup(int(info.get("seed", 1337)), base_opts, GameState.current_dir)
+	world.setup(Terrain.new(seed_value, spec), GameState.current_dir, reg)
+	# id bloków mogą się zmienić, gdy gracz włączy lub wyłączy mody: przeliczamy zapisane chunki
+	var old_palette: Array = info.get("palette", [])
+	if old_palette.is_empty() and int(info.get("version", 3)) < 3:
+		old_palette = Blocks.LEGACY_KEYS
+	if not old_palette.is_empty():
+		var moved := world.migrate_palette(reg.remap_from(old_palette))
+		if moved > 0:
+			print("PALETA przeliczone chunki: ", moved)
+	info["palette"] = reg.keys.duplicate()
+	info["version"] = 3
+	if not GameState.current_dir.is_empty():
+		GameState.write_info(GameState.current_dir, info)
 	add_child(world)
 
 	player = Player.new()
@@ -93,10 +108,13 @@ func _ready() -> void:
 	Settings.changed.connect(_apply_settings)
 	_apply_settings()
 
-	# mody w Lua: wczytywane po zbudowaniu świata i gracza
+	# faza 2 modów: skrypty, po zbudowaniu świata i gracza
 	Mods.ui_window_requested.connect(_open_mod_window)
 	Mods.ui_close_requested.connect(_close_mod_window)
-	Mods.start(self, GameState.current_dir)
+	Mods.start_scripts(self)
+	player.set_health(float(ps.get("health", player.stat("max_health"))))
+	for e in spec.errors:
+		hud.notify("Generator świata: " + str(e))
 	for id in Mods.load_errors:
 		hud.notify("Mod „%s” nie wczytał się: %s" % [ModManager.manifests.get(id, {}).get("name", id), str(Mods.load_errors[id]).left(120)])
 	if touch:
@@ -125,7 +143,6 @@ func _process(delta: float) -> void:
 	if daynight:
 		time_of_day = fmod(time_of_day + delta * 24.0 / (day_minutes * 60.0), 24.0)
 		_update_sky()
-	player.camera.fov = Settings.fov + float(Mods.camera_stats.get("fov_offset", 0.0))
 	tick_timer -= delta
 	if tick_timer <= 0.0:
 		tick_timer = 0.1
@@ -158,7 +175,6 @@ func _open_mod_window(spec: Dictionary) -> void:
 		return
 	var w := ModWindow.new()
 	w.spec = spec
-	w.atlas = world.atlas
 	w.closed.connect(_on_window_closed)
 	ui.add_child(w)
 	windows[id] = w
@@ -232,7 +248,9 @@ func save_game() -> void:
 	world.save_all()
 	Mods.save_data(GameState.current_dir)
 	var p := player.global_position
-	info["player"] = {"pos": [p.x, p.y, p.z], "yaw": player.yaw, "pitch": player.pitch, "selected": player.selected}
+	info["player"] = {"pos": [p.x, p.y, p.z], "yaw": player.yaw, "pitch": player.pitch, "selected": player.selected,
+		"health": player.health}
+	info["palette"] = Mods.registry.keys.duplicate()
 	info["time_of_day"] = time_of_day
 	info["played"] = int(Time.get_unix_time_from_system())
 	GameState.current = info
@@ -292,15 +310,42 @@ func _inv_total() -> int:
 
 
 func _find_biome(biome: int) -> Vector2i:
+	var t := world.terrain
 	for r in range(0, 4000, 48):
 		for k in 16:
 			var a := k * TAU / 16.0
 			var x := int(cos(a) * r)
 			var z := int(sin(a) * r)
-			var c := world.terrain.column(x, z)
-			if c.y == biome and c.x > 8 and world.terrain.column(x + 24, z).y == biome and world.terrain.column(x, z + 24).y == biome:
+			var c := t.column(x, z)
+			if c.y == biome and c.x > 8 and t.column(x + 24, z).y == biome and t.column(x, z + 24).y == biome:
 				return Vector2i(x, z)
 	return Vector2i(999999, 0)
+
+
+## Szuka kolumny ze strukturą (element rodzaju 3) w pobliżu startu.
+func _find_structure() -> Vector3i:
+	var t := world.terrain
+	for r in range(0, 1500, 4):
+		for k in 32:
+			var a := k * TAU / 32.0
+			var x := int(cos(a) * r)
+			var z := int(sin(a) * r)
+			if Terrain.hash01(x, z, t.seed_value, 1) >= t.max_sum:
+				continue
+			var c := t.column(x, z)
+			var f := t.feature_at(x, z, c.x, c.y)
+			if f >= 0 and int(t.F[f * Terrain.FS + 1]) == 3:
+				return Vector3i(x, c.x, z)
+	return Vector3i(999999, 0, 0)
+
+
+func _goto(x: float, y: float, z: float) -> void:
+	player.global_position = Vector3(x, y, z)
+	player.velocity = Vector3.ZERO
+	player.frozen = true
+	player.reset_fall()
+	world.update_center(player.global_position)
+	await _wait_loaded()
 
 
 func _autotest(dir: String) -> void:
@@ -311,7 +356,8 @@ func _autotest(dir: String) -> void:
 	await _shot(dir, "g1_start")
 
 	print("MODS loaded=", Mods.loaded, " errors=", Mods.load_errors, " binds=", Mods.binds.size())
-	# kopanie i stawianie przez haki modów (plecak liczy i zużywa bloki)
+	print("REJESTR bloki=", Mods.registry.count(), " przedmioty=", Mods.registry.items.size(), " biomy=", world.terrain.biome_names)
+	# kopanie i stawianie przez haki modów (plecak dostaje łup bloku, stawianie zużywa przedmiot)
 	player.pitch = -0.75
 	await _wait(0.3)
 	var target: Dictionary = player.target.duplicate()
@@ -321,12 +367,20 @@ func _autotest(dir: String) -> void:
 	var dug: Vector3i = target.get("pos", Vector3i.ZERO)
 	print("BREAK pos=", dug, " now=", world.get_block(dug), " plecak przed=", before_inv, " po=", _inv_total())
 	player.select(0)
-	var planks_before := Mods.hotbar_count(0)
-	player.place_block()
+	var planks_before := int(Mods.hotbar_item(0).get("count", 0))
+	var place_at: Vector3i = player.target.pos + player.target.normal if not player.target.is_empty() else Vector3i.ZERO
+	player.use_item()
 	await _wait(0.4)
-	print("PLACE block=", world.get_block(dug), " deski przed=", planks_before, " po=", Mods.hotbar_count(0))
-	var stone_try := Mods.before("block.break", {"pos": dug, "block": Blocks.STONE})
+	print("PLACE at=", place_at, " block=", Blocks.key(world.get_block(place_at)), " deski przed=", planks_before, " po=", int(Mods.hotbar_item(0).get("count", 0)))
+	var stone_try := Mods.before("block.break", {"pos": dug, "block": Blocks.id("stone"), "drops": []})
 	print("DESTRUCTIBLE kamień anulowany=", stone_try.get("cancel", false))
+	# przetrwanie: upadek zadaje obrażenia, jedzenie przy pełnym żołądku jest anulowane
+	var hp := player.health
+	Mods.emit_event("player.land", {"fall": 6.0, "speed": 12.0})
+	print("FALL zdrowie przed=", hp, " po=", player.health)
+	Mods.set_slot("hotbar", 2, {"item": "apple", "count": 3})
+	var eat := Mods.before("item.use", {"item": "apple", "slot": 3})
+	print("ITEM.USE jabłko anulowane (pełny żołądek)=", eat.get("cancel", false))
 	Mods.press_bind("backpack:toggle")
 	await _wait(0.8)
 	await _shot(dir, "g5_backpack")
@@ -343,21 +397,65 @@ func _autotest(dir: String) -> void:
 	check._load_chunk(World.chunk_of(dug))
 	var d: Variant = check.data.get(World.chunk_of(dug))
 	var l := dug - World.chunk_of(dug) * World.S
-	print("SAVE chunks=", n, " reloaded_block=", d[l.x + 32 * (l.y + 32 * l.z)] if d != null else "brak")
+	print("SAVE chunks=", n, " reloaded_block=", Blocks.key(d[l.x + 32 * (l.y + 32 * l.z)]) if d != null else "brak")
 	check.free()
 
+	# wystawa nowych bloków przed graczem, gest i tryby kamery
+	var p0 := Vector3i(player.global_position.floor())
+	var show := ["glass", "bricks", "cobblestone", "coal_ore", "iron_ore", "ruby_ore"]
+	var fwd := Vector3i(roundi(-sin(player.yaw) * 3), 0, roundi(-cos(player.yaw) * 3))
+	var side := Vector3i(roundi(cos(player.yaw)), 0, roundi(-sin(player.yaw)))
+	for i in show.size():
+		var id := Blocks.id(show[i])
+		if id > 0:
+			world.set_block(p0 + fwd + side * (i - 2) + Vector3i(0, 1, 0), id)
+			world.set_block(p0 + fwd + side * (i - 2) + Vector3i(0, 2, 0), id)
+	var cc := World.chunk_of(p0 + fwd + Vector3i(0, 1, 0))
+	var vc_before: int = (world.nodes[cc].mesh as ArrayMesh).surface_get_array_len(0) if world.nodes.has(cc) else -1
+	await _wait(1.0)
+	var vc_after: int = (world.nodes[cc].mesh as ArrayMesh).surface_get_array_len(0) if world.nodes.has(cc) else -1
+	print("REMESH chunk ", cc, " wierzchołki przed=", vc_before, " po=", vc_after, " blok=", Blocks.key(world.get_block(p0 + fwd + Vector3i(0, 1, 0))))
+	player.pitch = -0.2
+	Mods.press_bind("emotes:wave")
+	await _wait(0.5)
+	await _shot(dir, "g7_blocks_wave")
+	for m in ["shoulder", "top"]:
+		Mods.press_bind("emotes:camera")
+		await _wait(0.8)
+		await _shot(dir, "g8_camera_" + m)
+	Mods.camera_stats.erase("mode")
+
+	# rudy w załadowanych chunkach
+	var ore_counts := {}
+	for k in ["coal_ore", "iron_ore", "ruby_ore"]:
+		var id := Blocks.id(k)
+		for c in world.data:
+			ore_counts[k] = ore_counts.get(k, 0) + (world.data[c] as PackedByteArray).count(id)
+	print("ORES ", ore_counts)
+
+	# struktura (ruiny albo studnia)
+	var st := _find_structure()
+	if st.x != 999999:
+		await _goto(st.x + 6.5, st.y + 4.0, st.z + 6.5)
+		await _wait(0.8)
+		Mods.camera_stats["distance"] = 8.0
+		player.yaw = 0.8
+		player.pitch = -0.6
+		await _wait(0.6)
+		await _shot(dir, "g9_structure")
+		Mods.camera_stats.erase("distance")
+		print("STRUCTURE at ", st, " biom ", world.terrain.biome_name(world.terrain.column(st.x, st.z).y))
+	else:
+		print("STRUCTURE nie znaleziono")
+
 	# wycieczka po biomach
-	for b in [Terrain.MEADOW, Terrain.FOREST, Terrain.DESERT, Terrain.SNOWY]:
+	for b in world.terrain.nb:
 		var at := _find_biome(b)
 		if at.x == 999999:
-			print("BIOME ", Terrain.BIOME_NAMES[b], " nie znaleziono")
+			print("BIOME ", world.terrain.biome_name(b), " nie znaleziono")
 			continue
 		var h := world.terrain.height(at.x, at.y)
-		player.global_position = Vector3(at.x + 0.5, h + 2.0, at.y + 0.5)
-		player.velocity = Vector3.ZERO
-		player.frozen = true
-		world.update_center(player.global_position)
-		await _wait_loaded()
+		await _goto(at.x + 0.5, h + 2.0, at.y + 0.5)
 		await _wait(0.8)
 		Mods.camera_stats["distance"] = 9.0
 		player.pitch = -0.3
@@ -365,7 +463,7 @@ func _autotest(dir: String) -> void:
 		await _wait(0.6)
 		await _shot(dir, "g2_biome_%d" % b)
 		Mods.camera_stats.erase("distance")
-		print("BIOME ", Terrain.BIOME_NAMES[b], " at ", at)
+		print("BIOME ", world.terrain.biome_name(b), " at ", at)
 
 	# zmierzch (dzień i noc)
 	if daynight:

@@ -53,7 +53,7 @@ func show_main() -> void:
 	var title := UI.label("VOXEL ENGINE", 46)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	content.add_child(title)
-	var sub := UI.label("nazwa robocza · etap 2", 16, UI.MUTED)
+	var sub := UI.label("nazwa robocza · etap 4", 16, UI.MUTED)
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	content.add_child(sub)
 	content.add_child(_gap(8))
@@ -210,6 +210,9 @@ func _autotest(dir: String) -> void:
 	ms.selected = "backpack"
 	ms._refresh()
 	await _shot(dir, "m4c_mods_backpack")
+	ms.selected = "emotes"
+	ms._refresh()
+	await _shot(dir, "m4d_mods_emotes")
 	show_options()
 	await _shot(dir, "m5_options")
 	var d := GameState.create_world("Test", "42")

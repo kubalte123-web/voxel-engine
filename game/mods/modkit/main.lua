@@ -1,7 +1,7 @@
 -- Zestaw modera: wspólne funkcje dla innych modów.
 -- Użycie w innym modzie:  local kit = engine.require("modkit")
 
-local kit = { version = "0.1.0" }
+local kit = { version = "0.2.0" }
 
 ---------------------------------------------------------------------------
 -- Łatki: kilka haków naraz, jak w Harmony (prefix = before, postfix = after)
@@ -17,28 +17,29 @@ end
 ---------------------------------------------------------------------------
 kit.inventory = {}
 
-local function max_stack() return engine.items.max_stack() end
+-- Przedmioty to klucze tekstowe ("stone", "apple"); miejsce w kontenerze to {item, count} albo {}.
 
 -- Dodaje przedmioty do kontenera: najpierw dokłada do istniejących stosów, potem w puste miejsca.
 -- Zwraca liczbę sztuk, które się nie zmieściły.
-function kit.inventory.add(container, block, count)
+function kit.inventory.add(container, item, count)
 	local size = engine.items.size(container)
+	local stack = engine.items.max_stack(item)
 	local left = count
 	for i = 1, size do
 		if left <= 0 then break end
 		local s = engine.items.get(container, i)
-		if s.block == block and s.count < max_stack() then
-			local n = math.min(left, max_stack() - s.count)
-			engine.items.set(container, i, { block = block, count = s.count + n })
+		if s.item == item and s.count < stack then
+			local n = math.min(left, stack - s.count)
+			engine.items.set(container, i, { item = item, count = s.count + n })
 			left = left - n
 		end
 	end
 	for i = 1, size do
 		if left <= 0 then break end
 		local s = engine.items.get(container, i)
-		if s.block == nil then
-			local n = math.min(left, max_stack())
-			engine.items.set(container, i, { block = block, count = n })
+		if s.item == nil then
+			local n = math.min(left, stack)
+			engine.items.set(container, i, { item = item, count = n })
 			left = left - n
 		end
 	end
@@ -46,11 +47,11 @@ function kit.inventory.add(container, block, count)
 end
 
 -- To samo dla kilku kontenerów po kolei, np. {"hotbar", "backpack"}.
-function kit.inventory.add_many(containers, block, count)
+function kit.inventory.add_many(containers, item, count)
 	local left = count
 	for _, c in ipairs(containers) do
 		if left <= 0 then break end
-		left = kit.inventory.add(c, block, left)
+		left = kit.inventory.add(c, item, left)
 	end
 	return left
 end
@@ -58,21 +59,37 @@ end
 -- Zabiera n sztuk z konkretnego miejsca. Zwraca, ile udało się zabrać.
 function kit.inventory.take(container, index, n)
 	local s = engine.items.get(container, index)
-	if s.block == nil then return 0 end
+	if s.item == nil then return 0 end
 	local taken = math.min(n, s.count)
 	if s.count - taken <= 0 then
 		engine.items.set(container, index, {})
 	else
-		engine.items.set(container, index, { block = s.block, count = s.count - taken })
+		engine.items.set(container, index, { item = s.item, count = s.count - taken })
 	end
 	return taken
 end
 
-function kit.inventory.count(container, block)
+-- Zabiera n sztuk przedmiotu z dowolnych miejsc kontenerów. Zwraca, ile zabrano.
+function kit.inventory.remove(containers, item, n)
+	if type(containers) == "string" then containers = { containers } end
+	local taken = 0
+	for _, c in ipairs(containers) do
+		for i = 1, engine.items.size(c) do
+			if taken >= n then return taken end
+			if engine.items.get(c, i).item == item then taken = taken + kit.inventory.take(c, i, n - taken) end
+		end
+	end
+	return taken
+end
+
+function kit.inventory.count(containers, item)
+	if type(containers) == "string" then containers = { containers } end
 	local total = 0
-	for i = 1, engine.items.size(container) do
-		local s = engine.items.get(container, i)
-		if s.block == block then total = total + s.count end
+	for _, c in ipairs(containers) do
+		for i = 1, engine.items.size(c) do
+			local s = engine.items.get(c, i)
+			if s.item == item then total = total + s.count end
+		end
 	end
 	return total
 end

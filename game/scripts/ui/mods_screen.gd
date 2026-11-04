@@ -142,12 +142,35 @@ func _setting(id: String, d: Dictionary) -> Control:
 			return _block_toggles(id, key, text, v, d, locked)
 		"bool":
 			return UI.check_row(text, bool(v), func(on): ModManager.set_value(id, key, on), locked)
+		"choice":
+			return _choice(id, key, text, v, d, locked)
 		"int":
 			return UI.slider_row(text, d.get("min", 0), d.get("max", 100), d.get("step", 1), int(v),
 				func(x): return str(int(x)), func(x): ModManager.set_value(id, key, int(x)), locked)
 		_:
 			return UI.slider_row(text, d.get("min", 0.0), d.get("max", 1.0), d.get("step", 0.1), float(v),
 				func(x): return "%.1f" % x, func(x): ModManager.set_value(id, key, x), locked)
+
+
+## Wybór jednej z opcji (lista "options" w mod.json); wartość to tekst opcji.
+func _choice(id: String, key: String, text: String, v: Variant, d: Dictionary, locked: bool) -> Control:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	var l := UI.label(text, 17)
+	l.custom_minimum_size = Vector2(220, 0)
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	row.add_child(l)
+	var ob := OptionButton.new()
+	ob.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	ob.custom_minimum_size = Vector2(160, 44)
+	var options: Array = d.get("options", [])
+	for o in options:
+		ob.add_item(str(o))
+	ob.selected = maxi(0, options.find(str(v)))
+	ob.disabled = locked
+	ob.item_selected.connect(func(i): ModManager.set_value(id, key, str(options[i])))
+	row.add_child(ob)
+	return row
 
 
 ## Ustawienie z przełącznikiem dla każdego bloku w grze (lista budowana z rejestru bloków).
@@ -159,10 +182,11 @@ func _block_toggles(id: String, key: String, text: String, v: Variant, d: Dictio
 	var def := bool(d.get("default", true))
 	var grid := GridContainer.new()
 	grid.columns = 1 if UI.narrow(get_viewport_rect().size) else 2
-	for b in range(1, Blocks.COUNT):
-		var bkey: String = Blocks.KEYS[b]
+	var reg := Mods.menu_registry() if not Mods.is_running() else Mods.registry
+	for b in range(1, reg.count()):
+		var bkey: String = reg.keys[b]
 		var on := bool(values.get(bkey, def))
-		grid.add_child(UI.check_row(Blocks.NAMES[b], on, func(state):
+		grid.add_child(UI.check_row(reg.names[b], on, func(state):
 			var cur: Variant = ModManager.get_value(id, key)
 			var dict: Dictionary = (cur as Dictionary).duplicate() if cur is Dictionary else {}
 			dict[bkey] = state
