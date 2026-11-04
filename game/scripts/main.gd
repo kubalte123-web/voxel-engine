@@ -150,7 +150,10 @@ func _ready() -> void:
 		touch.refresh_binds()
 
 	if not GameState.autotest_dir.is_empty():
-		_autotest(GameState.autotest_dir)
+		if Net.is_client():
+			_autotest_client(GameState.autotest_dir)
+		else:
+			_autotest(GameState.autotest_dir)
 	else:
 		for a in OS.get_cmdline_user_args():
 			if a.begins_with("--shots="):
@@ -281,8 +284,9 @@ func remove_remote_player(p: int) -> void:
 		_store_player(s.account, node)
 		Mods.window_closed(p, "")
 		Mods.as_player(p, func(): Mods.emit_event("player.leave", {"id": p, "name": s.account}))
-		_announce("%s opuszcza grę" % s.account)
 	Mods.remove_session(p)
+	if s and s.logged_in:
+		_announce("%s opuszcza grę" % s.account)
 	pending_names.erase(p)
 	if node:
 		node.queue_free()
@@ -731,6 +735,8 @@ func _wait(sec: float) -> void:
 
 
 func _shot(dir: String, name: String) -> void:
+	if DisplayServer.get_name() == "headless":
+		return
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(dir.path_join(name + ".png"))
 	print("SHOT ", name)
@@ -748,7 +754,7 @@ func _wait_loaded() -> void:
 func _inv_total() -> int:
 	var n := 0
 	for c in ["hotbar", "backpack"]:
-		for sl in Mods.container_slots(c):
+		for sl in Mods.container_slots(Mods.cid(c)):
 			n += int(sl.get("count", 0))
 	return n
 
@@ -1037,9 +1043,143 @@ func _goto(x: float, y: float, z: float) -> void:
 	await _wait_loaded()
 
 
+## Test klienta gry wieloosobowej: --login=konto --password=hasło [--register] [--stay=s] [--place]
+func _autotest_client(dir: String) -> void:
+	var opt := {}
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--") and "=" in a:
+			opt[a.substr(2, a.find("=") - 2)] = a.substr(a.find("=") + 1)
+		elif a.begins_with("--"):
+			opt[a.substr(2)] = true
+	Settings.render_distance = 3
+	_apply_settings()
+	var t0 := Time.get_ticks_msec()
+	while my_account == "" and not windows.has("login") and Time.get_ticks_msec() - t0 < 60000:
+		await _wait(0.2)
+	print("KLIENT ", Settings.player_name, " okno logowania=", windows.has("login"), " konto=", my_account)
+	if windows.has("login"):
+		await _wait(0.5)
+		await _shot(dir, "mp_login_" + Settings.player_name)
+		var w: ModWindow = windows["login"]
+		w.inputs["login"].text = str(opt.get("login", Settings.player_name))
+		w.inputs["password"].text = str(opt.get("password", "haslo"))
+		w._press("accounts:" + ("register" if opt.has("register") else "enter"))
+		t0 = Time.get_ticks_msec()
+		while my_account == "" and Time.get_ticks_msec() - t0 < 20000:
+			await _wait(0.2)
+	print("KLIENT ", Settings.player_name, " zalogowany jako=", my_account)
+	await _wait_loaded()
+	await _wait(2.0)
+	print("KLIENT pozycja=", player.global_position.snapped(Vector3(0.1, 0.1, 0.1)), " zdrowie=", player.health,
+		" pasek[0]=", Mods.hotbar_item(0), " gracze=", players.keys().size())
+	if opt.has("place"):
+		player.pitch = -0.75
+		player.select(0)
+		await _wait(0.5)
+		var t: Dictionary = player.target.duplicate()
+		if not t.is_empty():
+			var at: Vector3i = t.pos + t.normal
+			player.use_item()
+			await _wait(1.5)
+			print("KLIENT postawił at=", at, " blok=", Blocks.key(world.get_block(at)), " pasek[0]=", Mods.hotbar_item(0))
+			player.break_block()
+			await _wait(1.5)
+			print("KLIENT zniszczył at=", at, " blok=", Blocks.key(world.get_block(at)))
+	if opt.has("walk"):
+		player.global_position += Vector3(float(opt.walk), 1.0, 0.0)
+		await _wait(1.0)
+	var stay := float(opt.get("stay", "3"))
+	var until := Time.get_ticks_msec() + int(stay * 1000)
+	var shot_done := false
+	while Time.get_ticks_msec() < until:
+		await _wait(0.5)
+		# patrzymy na najbliższego innego gracza, żeby nad głową pojawiła się nazwa
+		for p in players:
+			var other: Node3D = players[p]
+			if other != player and other is RemotePlayer and other.visible:
+				var d: Vector3 = other.global_position - player.global_position
+				player.yaw = atan2(-d.x, -d.z)
+				player.pitch = -0.1
+				if not shot_done and d.length() < 30.0:
+					Mods.camera_stats.erase("mode")
+					player.first_person = true
+					await _wait(3.0)
+					await _shot(dir, "mp_view_" + Settings.player_name)
+					print("KLIENT widzi gracza ", other.account, " odległość=", snappedf(d.length(), 0.1), " nazwa=", other.label.text, " widoczność=", snappedf(other.label.modulate.a, 0.01))
+					shot_done = true
+	print("KLIENT koniec ", Settings.player_name, " konto=", my_account, " pozycja=", player.global_position.snapped(Vector3(0.1, 0.1, 0.1)), " pasek[0]=", Mods.hotbar_item(0))
+	Net.leave()
+	await _wait(0.5)
+	get_tree().quit()
+
+
+## Test rzemiosła: siatka 3x3 (kilof), lustrzana siekiera, bezkształtne deski, warsztat odkrywczy.
+func _test_craft(dir: String) -> void:
+	await _wait_loaded()
+	await _wait(0.5)
+	var me := Net.my_id()
+	var g3 := Mods.cid("craft3")
+	var out3 := Mods.cid("craft3_out")
+	print("CRAFT mody=", Mods.loaded)
+	if Mods.containers.has(g3):
+		var put := func(cells: Dictionary) -> void:
+			for i in 9:
+				Mods.set_slot(g3, i, cells.get(i, {}))
+			Mods.as_player(me, func(): Mods.after("slot.click", {"container": "craft3", "index": 1}))
+		put.call({0: {"item": "cobblestone", "count": 3}, 1: {"item": "cobblestone", "count": 1}, 2: {"item": "cobblestone", "count": 1},
+			4: {"item": "stick", "count": 2}, 7: {"item": "stick", "count": 1}})
+		print("CRAFT kilof wynik=", Mods.slot(out3, 0))
+		Mods.as_player(me, func(): return Mods.before("block.use", {"pos": Vector3i(0, 10, 0), "normal": Vector3i.UP, "block": Blocks.id("crafting_table"), "item": "", "slot": 1}))
+		await _wait(0.5)
+		await _shot(dir, "craft_table")
+		_close_mod_window("crafting_table")
+		Mods.window_click(me, out3, 0, false)
+		print("CRAFT po kliknięciu trzymany=", Mods.local_held, " pole0=", Mods.slot(g3, 0), " pole4=", Mods.slot(g3, 4), " pole7=", Mods.slot(g3, 7), " wynik=", Mods.slot(out3, 0))
+		Mods.local_held.clear()
+		# siekiera w lustrzanym odbiciu (MM / SM / S_) i deski z pnia w dowolnym polu
+		put.call({0: {"item": "planks", "count": 1}, 1: {"item": "planks", "count": 1}, 3: {"item": "stick", "count": 1}, 4: {"item": "planks", "count": 1}, 6: {"item": "stick", "count": 1}})
+		print("CRAFT siekiera lustrzana wynik=", Mods.slot(out3, 0))
+		put.call({8: {"item": "log", "count": 5}})
+		print("CRAFT deski wynik=", Mods.slot(out3, 0))
+		put.call({0: {"item": "dirt", "count": 1}, 4: {"item": "sand", "count": 1}})
+		print("CRAFT brak przepisu wynik=", Mods.slot(out3, 0))
+		# zamknięcie okna stołu: przedmioty z siatki wracają do plecaka
+		put.call({8: {"item": "log", "count": 5}})
+		var before_inv := _inv_total()
+		Mods.window_closed(me, "crafting_table")
+		print("CRAFT zamknięcie siatka=", Mods.slot(g3, 8), " plecak +", _inv_total() - before_inv)
+	var forge := Mods.cid("forge")
+	if Mods.containers.has(forge):
+		var bench := Blocks.id("workbench")
+		Mods.as_player(me, func(): return Mods.before("block.use", {"pos": Vector3i(0, 10, 0), "normal": Vector3i.UP, "block": bench, "item": "", "slot": 1}))
+		print("ODKRYCIE okno warsztatu=", windows.has("workbench"))
+		Mods.set_slot(forge, 0, {"item": "log", "count": 2})
+		var inv := _inv_total()
+		Mods.window_action("crafting_discovery:forge")
+		print("ODKRYCIE wykuwanie, pola=", Mods.slot(forge, 0))
+		await _wait(2.5)
+		print("ODKRYCIE deski: plecak +", _inv_total() - inv, " (2 pnie → 8 desek + premia 4)")
+		Mods.set_slot(forge, 0, {"item": "cobblestone", "count": 1})
+		Mods.set_slot(forge, 1, {"item": "stick", "count": 1})
+		Mods.window_action("crafting_discovery:forge")
+		await _wait(0.3)
+		var w: ModWindow = windows.get("workbench")
+		var msg := ""
+		if w:
+			for c in w.content.get_children():
+				if c is Label or c is RichTextLabel:
+					msg += c.text.left(60) + " | "
+		print("ODKRYCIE złe ilości, okno: ", msg)
+		await _shot(dir, "craft_workbench")
+	get_tree().quit()
+
+
 func _autotest(dir: String) -> void:
 	if OS.get_cmdline_user_args().has("--light-only"):
 		await _test_light(dir)
+		return
+	if OS.get_cmdline_user_args().has("--craft-only"):
+		await _test_craft(dir)
 		return
 	Settings.render_distance = 4
 	_apply_settings()

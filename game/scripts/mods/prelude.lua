@@ -42,7 +42,7 @@ local function to_godot(v)
 		end
 		local d = Dictionary()
 		for k, x in pairs(v) do
-			if type(x) ~= "function" then d[k] = to_godot(x) end
+			if type(x) ~= "function" then d:set(k, to_godot(x)) end
 		end
 		return d
 	end
@@ -522,7 +522,10 @@ local function make_api(mod_id)
 			for _, p in ipairs(to_lua(host.players_list())) do
 				host.set_ctx(p.id)
 				local ok, err = pcall(fn, p)
-				if not ok then host.report_error(mod_id, "players.each: " .. tostring(err)) end
+				if not ok then
+					if guard.tripped then host.set_ctx(prev); error(err, 0) end
+					host.report_error(mod_id, "players.each: " .. tostring(err))
+				end
 			end
 			host.set_ctx(prev)
 		end,

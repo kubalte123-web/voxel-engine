@@ -30,7 +30,7 @@ func _ready() -> void:
 	var args := OS.get_cmdline_user_args()
 	for a in args:
 		if a.begins_with("--server="):
-			_dedicated(a.trim_prefix("--server="), args)
+			_dedicated.call_deferred(a.trim_prefix("--server="), args)
 			return
 		if a.begins_with("--join="):
 			_auto_join(a.trim_prefix("--join="), args)
@@ -207,6 +207,11 @@ func _dedicated(world_name: String, args: PackedStringArray) -> void:
 			port = int(a.trim_prefix("--port="))
 		if a.begins_with("--seed="):
 			seed_text = a.trim_prefix("--seed=")
+		# --enable=accounts,crafting_discovery: mody włączone tylko dla tego uruchomienia (bez zapisu ustawień)
+		if a.begins_with("--enable="):
+			for id in a.trim_prefix("--enable=").split(","):
+				if ModManager.manifests.has(id):
+					ModManager.enabled[id] = true
 	var dir := ""
 	for w in GameState.list_worlds():
 		if str(w.get("name", "")) == world_name or str(w.dir).get_file() == world_name:
@@ -299,6 +304,8 @@ func _notification(what: int) -> void:
 
 func _shot(dir: String, name: String) -> void:
 	await get_tree().create_timer(0.4).timeout
+	if DisplayServer.get_name() == "headless":
+		return
 	await RenderingServer.frame_post_draw
 	get_viewport().get_texture().get_image().save_png(dir.path_join(name + ".png"))
 	print("SHOT ", name)
@@ -306,6 +313,16 @@ func _shot(dir: String, name: String) -> void:
 
 func _autotest(dir: String) -> void:
 	GameState.autotest_dir = dir
+	var args := OS.get_cmdline_user_args()
+	for a in args:
+		if a.begins_with("--enable="):
+			for id in a.trim_prefix("--enable=").split(","):
+				if ModManager.manifests.has(id):
+					ModManager.enabled[id] = true
+	# testy wybranych funkcji: od razu świat testowy, bez zrzutów menu
+	if args.has("--craft-only") or args.has("--light-only"):
+		GameState.start(GameState.create_world("Test", "42"))
+		return
 	await _shot(dir, "m1_menu")
 	show_new_world()
 	await _shot(dir, "m2_new_world")

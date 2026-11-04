@@ -7,6 +7,7 @@ powietrze: bloki, przedmioty, biomy, woda, stworzenia, zasady, kamera i animacje
 - `game/` – projekt Godot 4.6 (GDScript): świat, gracz, interfejs, menu, system modów
 - `game/mods/` – mody dołączone do gry (podstawowy świat i przykłady)
 - `native/` – rdzeń w C++ (GDExtension): generowanie świata z danych modów i budowa siatek
+- Gra wieloosobowa do 8 graczy (serwer z oknem albo bez, konta graczy przez mod)
 - `docs/MODDING.md` – instrukcja tworzenia modów, `llms.txt` – punkt startowy dla AI
 - `.github/workflows/build.yml` – automatyczne budowanie wersji na Windowsa i do przeglądarki
 
@@ -21,4 +22,8 @@ Telefon: joystick po lewej, przeciąganie po prawej obraca kamerę, przyciski ak
 
 - `godot --headless --path game -s tests/bench.gd` – czy generator i siatki w C++ dają to samo co GDScript.
 - `godot --headless --path game -s tests/lua_guard.gd` – zabezpieczenia Lua (pętle, pamięć, bajtkod).
-- `godot --path game -- --shots=FOLDER` – przejście przez menu i grę ze zrzutami ekranu.
+- `godot --path game -- --shots=FOLDER` – przejście przez menu i grę ze zrzutami ekranu
+  (`--craft-only --enable=crafting_discovery` – tylko test rzemiosła).
+- `godot --headless --path game -s tests/parse_all.gd` – czy wszystkie skrypty się kompilują.
+- Sieć: `godot --headless --path game -- --server=mp_test --enable=accounts`, potem klient
+  `godot --path game -- --join=127.0.0.1:7777 --name=Jacek --shots=FOLDER --login=Kacper --password=tajne1 [--register] [--place]`.

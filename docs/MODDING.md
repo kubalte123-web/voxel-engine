@@ -241,13 +241,16 @@ Wyższy priorytet działa wcześniej. Po `cancel` kolejne haki „before” się
 | `block.break` | `pos`, `block` (id), `drops` (lista `{item, count}`, można zmienić), `item` (w ręce) |
 | `block.dig` | `pos`, `block`, `time` (sekundy kopania, można zmienić, np. narzędzia), `item` |
 | `block.place` | `pos`, `block` (można zmienić na inny), `slot` (1..8), `item` |
+| `block.use` | prawy przycisk na bloku, przed użyciem przedmiotu: `pos`, `normal`, `block`, `item`, `slot`; `cancel` zatrzymuje stawianie (np. stół otwiera okno) |
 | `item.use` | `item`, `slot`, a gdy celujesz w blok: `pos`, `normal`, `block` |
+| `slot.click` | kliknięcie w miejsce w oknie: `container` (id bez konta), `index` (od 1), `right`, `held` (przedmiot pod kursorem); `cancel` przejmuje kliknięcie, np. pole wyniku rzemiosła |
+| `player.login` | gracz dołączył do serwera: `id`, `name`; `ctx.wait = true` zatrzymuje go do `engine.players.accept`, `cancel` + `reason` wyrzuca |
 | `player.damage` | `amount` (można zmienić), `cause` (`fall`, `hunger`, `void`, własne) |
 | `player.respawn` | `pos` (Vector3, można zmienić) |
 | `entity.damage` | `id`, `type`, `amount` (można zmienić), `cause` |
 | `entity.interact` | prawy przycisk na stworzeniu: `id`, `type`, `item`, `slot` |
 | `item.pickup` | gracz podchodzi do przedmiotu: `item`, `count`; ustaw `ctx.taken` (ile zabrano) |
-| `camera.update` | co klatkę (tylko `after`): `mode`, `yaw`, `pitch`, `distance`, `height`, `side`, `fov_offset` |
+| `camera.update` | co klatkę (tylko `after`, tylko gracz lokalny): `mode`, `yaw`, `pitch`, `distance`, `height`, `side`, `fov_offset` |
 
 ## Zdarzenia
 
@@ -264,6 +267,9 @@ Wyższy priorytet działa wcześniej. Po `cancel` kolejne haki „before” się
 | `entity.death` | `id`, `type`, `pos`, `cause`, `data` |
 | `entity.tick` | raz na sekundę dla każdego stworzenia: `id`, `type`, `state`, `pos`, `data` |
 | `entity.graze` | `id`, `type`, `pos` (blok, który stworzenie skubało) |
+| `player.join` | `id`, `name` (konto) – gracz wszedł do gry (po zalogowaniu); tu twórz kontenery gracza |
+| `player.leave` | `id`, `name` – gracz wyszedł z serwera |
+| `ui.closed` | `id` okna zamkniętego przez gracza |
 
 ## API `engine`
 
@@ -277,7 +283,7 @@ Wyższy priorytet działa wcześniej. Po `cancel` kolejne haki „before” się
 | `engine.blocks.register(k, def)`, `get(k)` | Rejestracja i definicja bloku (content) |
 | `engine.blocks.id(k)`, `key(id)`, `name(id)`, `list()` | Rejestr bloków |
 | `engine.items.register(k, def)`, `def(k)`, `name(k)`, `block_of(k)`, `max_stack(k)` | Przedmioty |
-| `engine.items.container(id, rozmiar, zapis)` | Tworzy kontener przedmiotów (domyślnie zapisywany w świecie) |
+| `engine.items.container(id, rozmiar, zapis, na_gracza)` | Tworzy kontener przedmiotów (domyślnie zapisywany w świecie); `na_gracza = true` daje każdemu kontu osobną kopię pod tym samym id |
 | `engine.items.get(id, i)`, `set(id, i, {item, count})`, `size(id)` | Miejsca w kontenerze, liczone od 1 |
 | `engine.worldgen.*` | Biomy, struktury, rudy (content), opis wyżej |
 | `engine.world.get_block(pos)`, `set_block(pos, id_lub_klucz)` | Bloki w świecie |
@@ -300,6 +306,12 @@ Wyższy priorytet działa wcześniej. Po `cancel` kolejne haki „before” się
 | `engine.ui.window(spec)`, `close(id)`, `is_open(id)`, `notify(tekst)` | Okna i powiadomienia |
 | `engine.ui.bar({id, label, value, max, color})`, `text({id, text, color})`, `remove(id)` | Paski i napisy na ekranie gry |
 | `engine.input.bind({id, key, label, on_press})` | Klawisz na PC i przycisk na telefonie |
+| `engine.ui.held()`, `set_held(slot)` | Przedmiot trzymany kursorem w oknie |
+| `engine.player.id()`, `name()`, `is_host()` | Kim jest gracz, w którego imieniu działa kod (nazwa = konto) |
+| `engine.player.storage.get(k, domyślna)`, `set(k, v)` | Dane moda osobne dla każdego konta (zapisywane w świecie) |
+| `engine.players.list()`, `each(fn)`, `accept(id, konto)`, `kick(id, powód)` | Gracze na serwerze; `each` wywołuje `fn(id)` w imieniu każdego gracza |
+| `engine.as_player(id, fn)` | Wywołuje `fn` w imieniu gracza `id` (np. z licznika czasu) |
+| `engine.is_multiplayer()`, `engine.hash(tekst)` | Czy gra jest sieciowa; skrót SHA-256 (np. haseł) |
 
 ### Animacje
 
@@ -331,10 +343,59 @@ engine.ui.window({
 		{ type = "character", lines = { "Linia 1", "Linia 2" } },
 		{ type = "slots", container = "plecak", columns = 9, title = "Plecak" },
 		{ type = "text", text = "Opis" },
-		{ type = "button", id = "ok", text = "OK", on_press = function() engine.ui.close("moje_okno") end },
+		{ type = "input", id = "imie", label = "Imię", placeholder = "...", secret = false },
+		{ type = "progress", label = "Postęp", value = 0.4 },
+		{ type = "button", id = "ok", text = "OK", on_press = function(fields)
+			engine.log(fields.imie)   -- wartości pól „input” trafiają do przycisku
+			engine.ui.close("moje_okno")
+		end },
 	},
+	closable = false,   -- bez przycisku „Zamknij” i klawisza Esc (np. logowanie)
 })
 ```
+
+Okno o tym samym `id` otwarte ponownie odświeża się na miejscu (tekst wpisany w pola zostaje).
+
+## Gra wieloosobowa
+
+Do 8 graczy. Serwer jest jedynym miejscem, gdzie działają skrypty modów, ciecze, stworzenia i zapis świata.
+Klienci wczytują tylko fazę `content` (bloki, tekstury, generator) i sami liczą teren z ziarna; serwer
+wysyła im zmienione bloki. Przy dołączaniu klient dostaje od serwera kolejność, włączenie i ustawienia modów
+i porównuje skrót całej treści – gracz z innymi modami nie wejdzie i dostaje komunikat. Dlatego mod napisany
+zgodnie z tą instrukcją działa w sieci bez dodatkowej pracy, o ile wszyscy mają te same mody.
+
+Co trzeba wiedzieć, pisząc skrypty:
+
+- Kod moda zawsze działa „w imieniu” jakiegoś gracza: hak kopania – tego, kto kopie; przycisk w oknie – tego,
+  kto go nacisnął. `engine.player.*`, `engine.hotbar.*`, `engine.ui.*` i kamera dotyczą tego gracza.
+- Liczniki czasu i `tick` nie mają gracza: użyj `engine.players.each(fn)` albo `engine.as_player(id, fn)`.
+- Dane gracza trzymaj w `engine.player.storage` albo w kontenerach z `na_gracza = true`, a nie w `engine.storage`
+  (to jedne dane świata dla wszystkich). Kontenery gracza twórz w zdarzeniu `player.join`.
+- Gracz ma nazwę z ustawień gry (widoczną nad głową, gdy ktoś na niego patrzy). Mod „Konta graczy” (`accounts`)
+  przez hak `player.login` pyta o login i hasło i wpuszcza gracza na wybrane konto – ekwipunek, pozycja
+  i dane modów należą do konta, więc można wejść na nie z innego urządzenia pod inną nazwą.
+
+Serwer bez okna: `godot --headless --path game -- --server=nazwa_świata [--port=7777] [--seed=42] [--enable=accounts]`.
+Gra z oknem: menu „Gra wieloosobowa” (dołącz po adresie albo „Graj na serwerze” na własnym świecie).
+
+## Rzemiosło i narzędzia
+
+- `tools` – patyk i narzędzia (drewniane, kamienne, żelazne). Blok z polem `tool = "pickaxe"` kopie się
+  `tool_speed` razy szybciej właściwym narzędziem; obrażenia broni w `data.damage` przedmiotu.
+- `crafting_classic` – siatka 2×2 w oknie postaci i 3×3 przy stole rzemieślniczym, przepisy kształtowe
+  (z odbiciem lustrzanym) i bezkształtne. Własne przepisy z innego moda:
+
+```lua
+local craft = engine.require("crafting_classic")   -- "requires": ["crafting_classic"]
+craft.shaped({ "RR", "RR" }, { R = "ruby" }, "ruby_block", 1)
+craft.shapeless({ ruby = 1, stick = 1 }, "ruby_wand", 1)
+```
+
+- `crafting_discovery` (domyślnie wyłączony) – warsztat z czterema polami: składniki bez kolejności, przepisy
+  ukryte do odkrycia, podpowiedzi („Prawie!”), wykuwanie trwa (ogień w pobliżu przyspiesza), premia za pierwsze
+  odkrycie i księga przepisów gracza. Przepis z innego moda:
+  `engine.require("crafting_discovery").add("id", { ruby = 2, stick = 1 }, "ruby_wand", 1, 4)` (ostatnie: sekundy).
+  Zdarzenia: `crafting.discovered`, `crafting.crafted`.
 
 ## Biblioteka „Zestaw modera” (modkit)
 
@@ -365,6 +426,10 @@ Mod „Plecak i postać” udostępnia `engine.require("backpack").give(przedmio
 | `loose` | obiekty luźne (skrzynie, beczki, piłki, głazy) i flaga luźności dla zwykłych bloków |
 | `emotes` | animacje klatkowe, zamiana animacji w miejscu, tryby kamery, hak kamery, kolory postaci |
 | `destructible` | ustawienie `block_toggles` i anulowanie kopania |
+| `accounts` | logowanie na serwer (hak `player.login`, okno z polami, hasła jako skrót z solą) |
+| `tools` | narzędzia, pole `tool` bloków, hak `block.dig` |
+| `crafting_classic` | rzemiosło jak w MC: hak `slot.click`, `block.use`, zdarzenie `ui.closed`, eksport przepisów |
+| `crafting_discovery` | rzemiosło odkrywcze: przycisk z polami, pasek postępu, dane gracza, `engine.as_player` |
 
 ## Bezpieczeństwo
 
@@ -376,6 +441,5 @@ a wspólnej metatabeli tekstów nie da się zmienić. Test: `godot --headless --
 
 ## Co będzie dalej
 
-- Gra wieloosobowa: haki i dane modów synchronizowane przez serwer.
-- Narzędzia i rzemiosło (hak `block.dig` już pozwala zmieniać czas kopania).
-- Światło (pochodnie, ciemne jaskinie).
+- Piece i przetapianie rud, zbroja, więcej stworzeń.
+- Pobieranie brakujących modów z serwera przy dołączaniu.

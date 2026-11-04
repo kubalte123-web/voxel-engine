@@ -26,6 +26,10 @@ a mody mogą udostępniać sobie biblioteki przez `engine.export` i `engine.requ
 - [Zestaw modera](game/mods/modkit/main.lua): biblioteka z łatkami, ekwipunkiem i licznikami czasu
 - [Plecak i postać](game/mods/backpack/main.lua): kontenery, pasek z kontenera, okno postaci, łup z bloków
 - [Zniszczalność bloków](game/mods/destructible/main.lua): hak `block.break` i ustawienie `block_toggles`
+- [Konta graczy](game/mods/accounts/main.lua): logowanie na serwer przez hak `player.login` i okno z polami
+- [Narzędzia](game/mods/tools/content.lua): przedmioty-narzędzia, pole `tool` bloków ([skrypt](game/mods/tools/main.lua): hak `block.dig`)
+- [Rzemiosło klasyczne](game/mods/crafting_classic/main.lua): siatki 2×2/3×3, przepisy kształtowe, hak `slot.click`
+- [Rzemiosło odkrywcze](game/mods/crafting_discovery/main.lua): ukryte przepisy, wykuwanie w czasie, dane gracza
 
 ## Zasady dla generowanego moda
 
@@ -37,4 +41,8 @@ a mody mogą udostępniać sobie biblioteki przez `engine.export` i `engine.requ
 - Klucze bloków moda base: grass, dirt, stone, planks, sand, log, leaves, snow, cactus, tall_grass, flower_red, flower_yellow, glass, bricks, gravel, ice, bedrock, water (płynąca: water~1 .. water~8).
 - Przedmioty moda base: bucket, water_bucket. Stworzenia moda animals: sheep, cow, chicken.
 - Kod moda ma limit czasu i pamięci; długie obliczenia rozkładaj na zdarzenia `tick`.
+- Gra może być sieciowa: skrypty działają na serwerze w imieniu gracza. Dane gracza trzymaj w `engine.player.storage`
+  albo kontenerach `engine.items.container(id, n, true, true)` tworzonych w zdarzeniu `player.join`;
+  w `tick` i licznikach czasu używaj `engine.players.each(fn)`.
+- Przedmioty modów tools i crafting: stick, wooden_/stone_/iron_ + pickaxe/axe/shovel/sword, crafting_table, workbench.
 - Klucze biomów moda base: meadow, forest, desert, snowy.

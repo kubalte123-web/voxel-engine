@@ -640,8 +640,19 @@ func _h_item_block(key) -> int: return registry.item_block(str(key)) if registry
 func _h_max_stack(key) -> int: return max_stack(str(key)) if str(key) != "" else 64
 
 
-func _h_get_block(pos) -> int: return main.world.get_block(Vector3i(pos)) if main else 0
-func _h_set_block(pos, id) -> bool: return main.world.set_block(Vector3i(pos), int(id)) if main and int(id) >= 0 else false
+## Pozycja z Lua: Vector3/Vector3i albo tabela {x=, y=, z=}.
+static func _v3i(pos: Variant) -> Vector3i:
+	if pos is Dictionary:
+		return Vector3i(floori(float(pos.get("x", 0))), floori(float(pos.get("y", 0))), floori(float(pos.get("z", 0))))
+	if pos is Vector3:
+		return Vector3i(pos.floor())
+	if pos is Vector3i:
+		return pos
+	return Vector3i.ZERO
+
+
+func _h_get_block(pos) -> int: return main.world.get_block(_v3i(pos)) if main else 0
+func _h_set_block(pos, id) -> bool: return main.world.set_block(_v3i(pos), int(id)) if main and int(id) >= 0 else false
 
 
 func _h_biome(pos) -> String:
