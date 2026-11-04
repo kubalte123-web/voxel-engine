@@ -6,7 +6,7 @@ extends Control
 var player: Player
 
 const JOY_R := 80.0
-const SENS := 0.006
+const SENS := 0.005
 
 var joy_center := Vector2.ZERO
 var joy_knob := Vector2.ZERO
@@ -14,6 +14,8 @@ var joy_finger := -1
 var look_finger := -1
 var buttons := {}        # nazwa -> [środek, promień, etykieta]
 var button_fingers := {} # palec -> nazwa
+var last_pos := {}       # palec -> ostatnia pozycja (liczymy ruch sami, bez skoków)
+const MAX_STEP := 70.0   # większy skok między zdarzeniami to błąd przeglądarki, pomijamy go
 
 
 func _ready() -> void:
@@ -38,6 +40,7 @@ func _input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
 		_layout()
 		if event.pressed:
+			last_pos[event.index] = event.position
 			for name in buttons:
 				var bt: Array = buttons[name]
 				if event.position.distance_to(bt[0]) <= bt[1] + 12.0:
@@ -52,6 +55,7 @@ func _input(event: InputEvent) -> void:
 			elif look_finger == -1:
 				look_finger = event.index
 		else:
+			last_pos.erase(event.index)
 			if button_fingers.has(event.index):
 				_press(button_fingers[event.index], false)
 				button_fingers.erase(event.index)
@@ -61,12 +65,20 @@ func _input(event: InputEvent) -> void:
 				player.touch_move = Vector2.ZERO
 			if event.index == look_finger:
 				look_finger = -1
+			# drugi palec przejmuje rolę, jeśli pierwszy został puszczony
+			if joy_finger == -1 and look_finger == -1:
+				last_pos.clear()
 		get_viewport().set_input_as_handled()
 	elif event is InputEventScreenDrag:
 		if event.index == joy_finger:
 			_drag_joy(event.position)
 		elif event.index == look_finger:
-			player.look(event.relative * SENS)
+			var prev: Vector2 = last_pos.get(event.index, event.position)
+			var step: Vector2 = event.position - prev
+			# pozycja nagle przeskoczyła (np. przeglądarka zamieniła palce): ignorujemy ten ruch
+			if step.length() <= MAX_STEP:
+				player.look(step * SENS)
+		last_pos[event.index] = event.position
 		get_viewport().set_input_as_handled()
 
 
