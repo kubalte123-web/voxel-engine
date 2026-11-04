@@ -80,14 +80,14 @@ func _refresh() -> void:
 		name_btn.pressed.connect(func(): selected = id; _refresh())
 		row.add_child(name_btn)
 		var up := Button.new()
-		up.text = "▲"
-		up.custom_minimum_size = Vector2(46, 46)
+		up.text = "Wyżej"
+		up.custom_minimum_size = Vector2(72, 46)
 		up.disabled = ModManager.order_locked() or i == 0
 		up.pressed.connect(func(): ModManager.move(id, -1))
 		row.add_child(up)
 		var down := Button.new()
-		down.text = "▼"
-		down.custom_minimum_size = Vector2(46, 46)
+		down.text = "Niżej"
+		down.custom_minimum_size = Vector2(72, 46)
 		down.disabled = ModManager.order_locked() or i == order.size() - 1
 		down.pressed.connect(func(): ModManager.move(id, 1))
 		row.add_child(down)

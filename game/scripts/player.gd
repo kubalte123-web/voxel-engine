@@ -85,6 +85,9 @@ static func _wire_cube() -> ArrayMesh:
 func _unhandled_input(event: InputEvent) -> void:
 	if get_tree().paused:
 		return
+	# zdarzenia myszy udawane z dotyku obsługuje sterowanie dotykowe, nie gracz
+	if (event is InputEventMouse) and event.device == InputEvent.DEVICE_ID_EMULATION:
+		return
 	if event is InputEventMouseButton and event.pressed:
 		if Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
