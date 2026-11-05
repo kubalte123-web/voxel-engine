@@ -34,6 +34,16 @@ var shape_boxes := PackedFloat32Array()  # po 6 liczb na prostopadłościan, w s
 var _shape_groups := {}   # średni kolor kafelka (dalekie widoki, cząsteczki)
 var atlas: ImageTexture
 var atlas_rows := 1
+## Rozdzielczość kafelków: domyślna dla wszystkich (texture_res, z modów, paczek zasobów albo opcji gracza)
+## i własna dla bloków z polem resolution. Kafelki różnych rozmiarów są upakowane w jednym atlasie;
+## siatki biorą położenie kafelka z tile_rects (u, v, szerokość, wysokość – po 4 liczby na kafelek).
+var texture_res := 16
+var texture_cap := 512
+var tile_px := PackedInt32Array()       # docelowy rozmiar każdego kafelka
+var tile_rects := PackedFloat32Array()
+var lod_map: ImageTexture                # do ilu poziomów mipmap wolno zejść w danym miejscu atlasu
+var max_lod := 0.0
+var atlas_size := Vector2(256, 16)
 
 var items := {}                    # klucz -> {key, name, max_stack, block, mod, icon, data}
 var item_keys: Array[String] = []
@@ -62,16 +72,29 @@ func _mod_path(mod_id: String) -> String:
 	return str(mod_paths.get(mod_id, "res://mods/" + mod_id))
 
 
-func _tile(spec: Variant, mod_id: String) -> int:
+static func pow2(n: int) -> int:
+	var p := 16
+	while p < n:
+		p *= 2
+	return p
+
+
+func _tile(spec: Variant, mod_id: String, res := 0) -> int:
 	# tekstura z innego moda: "base:textures/dirt.png"
 	if spec is String and spec.find(":") > 0 and not spec.begins_with("res:") and not spec.begins_with("user:"):
 		var i: int = spec.find(":")
 		mod_id = spec.substr(0, i)
 		spec = spec.substr(i + 1)
-	var cache_key := mod_id + "|" + var_to_str(spec)
+	var cache_key := mod_id + "|" + var_to_str(spec) + "|" + str(res)
 	if _tex_index.has(cache_key):
 		return _tex_index[cache_key]
 	var img := TexGen.load_spec(spec, _mod_path(mod_id))
+	var px := texture_res
+	if res > 0:
+		px = mini(pow2(res), texture_cap)
+	elif spec is String and str(spec).begins_with("user://resourcepacks") and img.get_width() > texture_res:
+		px = mini(pow2(img.get_width()), texture_cap)   # plik z paczki zasobów większy niż reszta: zostaje ostry
+	tile_px.append(px)
 	tile_images.append(img)
 	_tex_index[cache_key] = tile_images.size() - 1
 	return tile_images.size() - 1
@@ -108,14 +131,18 @@ func _add_block(d: Dictionary, key: String, p: int, liq: int) -> int:
 		hd = -1.0  # nie do wykopania
 	hardness.append(hd)
 	var tex: Dictionary = d.get("textures", {}) if d.get("textures") is Dictionary else {}
+	var res := int(d.get("resolution", 0))   # własna rozdzielczość bloku (np. 128)
 	for f in 6:
 		var spec: Variant = _face_spec(tex, f)
-		tiles.append(_tile(spec, mod_id) if spec != null else _tile({"pattern": "noise"}, mod_id))
+		tiles.append(_tile(spec, mod_id, res) if spec != null else _tile({"pattern": "noise"}, mod_id, res))
 	return id
 
 
-func build(content: Dictionary, paths: Dictionary = {}) -> void:
+## res: domyślna rozdzielczość kafelków, cap: największa dozwolona (telefon/przeglądarka mniej).
+func build(content: Dictionary, paths: Dictionary = {}, res := 16, cap := 512) -> void:
 	mod_paths = paths
+	texture_cap = maxi(16, pow2(cap))
+	texture_res = mini(pow2(maxi(res, 16)), texture_cap)
 	_tile({"pattern": "solid", "color": "#00000000"}, "")  # kafelek 0: pusty
 	for d in arr(content.get("blocks")):
 		if not d is Dictionary:
@@ -271,22 +298,78 @@ func loose(id: int) -> Variant:
 
 func _build_atlas() -> void:
 	tile_colors.clear()
-	for img in tile_images:
+	# kafelki do docelowego rozmiaru: powiększanie bez rozmywania (piksele), zmniejszanie płynne
+	for i in tile_images.size():
+		var img: Image = tile_images[i]
+		var px: int = tile_px[i]
+		if img.get_width() != px:
+			img = img.duplicate()
+			img.resize(px, px, Image.INTERPOLATE_NEAREST if img.get_width() < px else Image.INTERPOLATE_LANCZOS)
+			tile_images[i] = img
 		var sum := Color(0, 0, 0, 0)
 		var n := 0
-		for y in PX:
-			for x in PX:
+		var step := maxi(1, px / 16)
+		for y in range(0, px, step):
+			for x in range(0, px, step):
 				var c := img.get_pixel(x, y)
 				if c.a > 0.5:
 					sum += c
 					n += 1
 		tile_colors.append(sum / maxf(1.0, float(n)) if n > 0 else Color(0, 0, 0, 0))
-	atlas_rows = maxi(1, ceili(tile_images.size() / float(ATLAS_COLS)))
-	var img := Image.create(ATLAS_COLS * PX, atlas_rows * PX, false, Image.FORMAT_RGBA8)
-	img.fill(Color(0, 0, 0, 0))
+	# pakowanie półkami: od największych, w rzędzie kafelki jednego rozmiaru, położenia wyrównane do rozmiaru
+	# (dzięki temu mipmapy jednego kafelka nie mieszają się z sąsiadami)
+	var order := range(tile_images.size())
+	order.sort_custom(func(a, b): return tile_px[a] > tile_px[b] if tile_px[a] != tile_px[b] else a < b)
+	var biggest := 16
+	var area := 0
 	for i in tile_images.size():
-		img.blit_rect(tile_images[i], Rect2i(0, 0, PX, PX), Vector2i((i % ATLAS_COLS) * PX, (i / ATLAS_COLS) * PX))
+		biggest = maxi(biggest, tile_px[i])
+		area += tile_px[i] * tile_px[i]
+	var W := maxi(biggest, mini(8192, pow2(ceili(sqrt(float(area))))))
+	if texture_res == 16 and biggest == 16:
+		W = ATLAS_COLS * 16   # zwykła gra: ten sam atlas co zawsze
+	var pos := []
+	pos.resize(tile_images.size())
+	var x := 0
+	var y := 0
+	var row_h := 0
+	for i in order:
+		var px: int = tile_px[i]
+		if x + px > W or (row_h != 0 and px != row_h):
+			x = 0
+			y += row_h
+			row_h = 0
+		if row_h == 0:
+			row_h = px
+		pos[i] = Vector2i(x, y)
+		x += px
+	var H := maxi(16, y + row_h)
+	if biggest > 16:
+		H = pow2(H)
+	var img := Image.create(W, H, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	tile_rects.resize(tile_images.size() * 4)
+	var lods := Image.create(maxi(1, W / 16), maxi(1, H / 16), false, Image.FORMAT_R8)
+	lods.fill(Color(0, 0, 0))
+	max_lod = 0.0
+	for i in tile_images.size():
+		var px: int = tile_px[i]
+		var p: Vector2i = pos[i]
+		img.blit_rect(tile_images[i], Rect2i(0, 0, px, px), p)
+		tile_rects[i * 4] = float(p.x) / W
+		tile_rects[i * 4 + 1] = float(p.y) / H
+		tile_rects[i * 4 + 2] = float(px) / W
+		tile_rects[i * 4 + 3] = float(px) / H
+		var lv := log(float(px) / 16.0) / log(2.0)
+		max_lod = maxf(max_lod, lv)
+		if lv > 0.0:
+			lods.fill_rect(Rect2i(p / 16, Vector2i(px / 16, px / 16)), Color(lv * 32.0 / 255.0, 0, 0))
+	atlas_rows = H / 16
+	atlas_size = Vector2(W, H)
+	if max_lod > 0.0:
+		img.generate_mipmaps()
 	atlas = ImageTexture.create_from_image(img)
+	lod_map = ImageTexture.create_from_image(lods)
 
 
 ## Skrót treści: ten sam zestaw bloków, przedmiotów, stworzeń i opisu świata u klienta i serwera.

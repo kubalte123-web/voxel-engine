@@ -48,6 +48,23 @@ W menu Mody → Paczki zasobów włącza się paczki i ustawia kolejność (wyż
 **Eksportuj szablon zasobów** zapisuje wszystko, czego gra teraz używa, w tej strukturze (także tekstury ze
 wzorów jako PNG i listę części każdego stworzenia do nazwania węzłów w Blenderze) – wystarczy zmienić pliki.
 
+
+## Rozdzielczość tekstur
+
+Kafelki bloków mają domyślnie 16 × 16 pikseli. Wyższą rozdzielczość można ustawić na trzy sposoby:
+
+- **mod** w `content.lua`: `engine.textures.resolution(64)` – cała gra w 64 × 64 (tekstury 16 px i wzory są
+  powiększane bez rozmywania, większe pliki zmniejszane),
+- **paczka zasobów**: `"resolution": 64` w `pack.json` albo po prostu pliki 64 × 64 w `blocks/`,
+- **pojedynczy blok**: `resolution = 128` w definicji – tylko ten blok jest ostry, reszta zostaje w swojej
+  rozdzielczości (przykład: „Płyty marmurowe” w modzie `building`).
+
+Gra bierze największą rozdzielczość z modów i włączonych paczek. Gracz może ją zmienić w opcjach
+(„Rozdzielczość tekstur bloków”: automatycznie albo na sztywno 16–256; wtedy to także górna granica dla
+pojedynczych bloków). W przeglądarce najwyżej 32. Kafelki różnych rozmiarów leżą w jednym atlasie, więc bloki
+w wysokiej rozdzielczości są tak samo szybkie jak zwykłe; w oddali gra używa mipmap (bez migotania).
+Rozdzielczość jest ustawieniem każdego gracza – na serwerze każdy może mieć inną.
+
 ## Dwie fazy: content i scripts
 
 | Faza | Pliki w mod.json | Kiedy | Do czego |

@@ -15,6 +15,7 @@ func _run() -> void:
 		mm.enabled[id] = true  # wszystkie mody, żeby sprawdzić też rudy i struktury
 	var reg: Registry = mods.start_content("")
 	GDMesher.set_shapes(reg.shape_index, reg.shape_boxes)
+	GDMesher.set_tile_rects(reg.tile_rects)
 	var spec := WorldgenSpec.compile(reg.worldgen, reg, 42)
 	print("BENCH bloki: %d, przedmioty: %d, biomy: %s, bledy: %s" % [reg.count(), reg.items.size(), spec.names, spec.errors])
 	var terrain := Terrain.new(42, spec)
@@ -74,6 +75,7 @@ func _run() -> void:
 	var m: Object = ClassDB.instantiate("VoxelMesher")
 	m.call("configure", terrain.native_noises(), spec, reg.tiles, reg.props, reg.liquid, Registry.ATLAS_COLS, reg.atlas_rows)
 	m.call("set_shapes", reg.shape_index, reg.shape_boxes)
+	m.call("set_tile_rects", reg.tile_rects)
 	var same := true
 	var diff_at := ""
 	t0 = Time.get_ticks_usec()

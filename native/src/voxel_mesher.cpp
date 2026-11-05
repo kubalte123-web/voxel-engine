@@ -78,6 +78,7 @@ void VoxelMesher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("build", "padded", "plight"), &VoxelMesher::build);
 	ClassDB::bind_method(D_METHOD("set_light_props", "lprops"), &VoxelMesher::set_light_props);
 	ClassDB::bind_method(D_METHOD("set_shapes", "index", "boxes"), &VoxelMesher::set_shapes);
+	ClassDB::bind_method(D_METHOD("set_tile_rects", "rects"), &VoxelMesher::set_tile_rects);
 	ClassDB::bind_method(D_METHOD("light", "cpos", "chunks", "skyh", "margin"), &VoxelMesher::light);
 	ClassDB::bind_method(D_METHOD("heights", "x0", "z0", "step", "n"), &VoxelMesher::heights);
 }
@@ -154,6 +155,11 @@ VoxelMesher::Col VoxelMesher::column(int x, int z) const {
 }
 
 void VoxelMesher::set_light_props(const PackedInt32Array &lp) { copy_array(lprops, lp); }
+
+void VoxelMesher::set_tile_rects(const PackedFloat32Array &rects) {
+	tile_rects.assign(rects.ptr(), rects.ptr() + rects.size());
+}
+
 
 void VoxelMesher::set_shapes(const PackedInt32Array &index, const PackedFloat32Array &boxes) {
 	copy_array(shape_index, index);
@@ -604,7 +610,12 @@ Array VoxelMesher::build(const PackedByteArray &padded, const PackedByteArray &p
 	const float iu = 1.0f / float(atlas_cols);
 	const float iv = 1.0f / float(atlas_rows);
 	const float eps = 0.002f;
+	const int rect_n = int(tile_rects.size() / 4);
 	auto uv_of = [&](int tile, float u, float v) {
+		if (tile < rect_n) {
+			const float *r = &tile_rects[tile * 4];
+			return Vector2(r[0] + clampf(u, eps, 1.0f - eps) * r[2], r[1] + clampf(v, eps, 1.0f - eps) * r[3]);
+		}
 		return Vector2((float(tile % atlas_cols) + clampf(u, eps, 1.0f - eps)) * iu,
 				(float(tile / atlas_cols) + clampf(v, eps, 1.0f - eps)) * iv);
 	};

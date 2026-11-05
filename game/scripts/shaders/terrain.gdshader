@@ -5,7 +5,11 @@
 shader_type spatial;
 render_mode diffuse_lambert, specular_disabled;
 
-uniform sampler2D atlas : source_color, filter_nearest;
+uniform sampler2D atlas : source_color, filter_nearest_mipmap;
+// tekstury wyższej rozdzielczości: mipmapy (bez migotania w oddali), ale nie niżej niż 16 px na kafelek
+uniform sampler2D lod_map : filter_nearest;
+uniform float max_lod = 0.0;
+uniform vec2 atlas_size = vec2(256.0, 16.0);
 uniform float min_light = 0.025;
 uniform vec3 torch_color : source_color = vec3(1.0, 0.78, 0.5);
 uniform float torch_strength = 2.6;
@@ -25,7 +29,17 @@ float curve(float l) {
 }
 
 void fragment() {
-	vec4 tex = texture(atlas, UV);
+	vec4 tex;
+	if (max_lod > 0.0) {
+		vec2 px = UV * atlas_size;
+		vec2 dx = dFdx(px);
+		vec2 dy = dFdy(px);
+		float lod = 0.5 * log2(max(dot(dx, dx), dot(dy, dy)));
+		float lim = texture(lod_map, UV).r * 255.0 / 32.0;
+		tex = textureLod(atlas, UV, clamp(lod, 0.0, lim));
+	} else {
+		tex = textureLod(atlas, UV, 0.0);
+	}
 	float sky = COLOR.g;
 	float blk = COLOR.b;
 	if (light_override.x >= 0.0) {

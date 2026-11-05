@@ -1752,6 +1752,35 @@ func _test_perf() -> void:
 
 
 ## Test logiki bloków: skrzynia (kierunek, kontener), piec (dane, plan, świecenie), uprawy (losowe, sąsiad), dźwięki.
+## Rozdzielczość tekstur: ściana z marmuru (blok 128 px) obok kamienia i desek.
+func _test_hires(dir: String) -> void:
+	await _wait_loaded()
+	await _wait(0.5)
+	var reg := Mods.registry
+	print("HIRES domyślna=", reg.texture_res, " atlas=", reg.atlas_size, " mipmapy=", reg.max_lod)
+	time_of_day = 11.0
+	var o := Vector3i(player.global_position.floor()) + Vector3i(0, 0, -4)
+	for x in range(-4, 5):
+		for y in range(0, 4):
+			var b := "marble_tiles" if absi(x) <= 1 else ("stone" if x < 0 else "planks")
+			world.set_block(o + Vector3i(x, y, 0), reg.id_of(b))
+	for x in range(-4, 5):
+		for z in range(-3, 0):
+			world.set_block(o + Vector3i(x, -1, z + 1), reg.id_of("marble_tiles"))
+	Mods.camera_stats["mode"] = "first"
+	player.yaw = 0.0
+	player.pitch = 0.0
+	await _wait(1.5)
+	await _shot(dir, "h1_near_%d" % reg.texture_res)
+	var far_z := o.z + 20
+	var gy := world.terrain.height(o.x, far_z)
+	player.teleport(Vector3(o.x + 0.5, maxi(gy + 1, o.y) + 0.1, far_z + 0.5))
+	player.pitch = -0.05
+	await _wait(1.5)
+	await _shot(dir, "h2_far_%d" % reg.texture_res)
+	get_tree().quit()
+
+
 ## Dodatki: tłumaczenia, dane przedmiotu na ziemi, wersje zależności, pogoda i niebo, przedmiot w ręce, kapelusz.
 func _test_extras(dir: String) -> void:
 	await _wait_loaded()
@@ -2255,6 +2284,9 @@ func _autotest(dir: String) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--creatures-only"):
 		await _test_creatures(dir)
+		return
+	if OS.get_cmdline_user_args().has("--hires-only"):
+		await _test_hires(dir)
 		return
 	if OS.get_cmdline_user_args().has("--extras-only"):
 		await _test_extras(dir)

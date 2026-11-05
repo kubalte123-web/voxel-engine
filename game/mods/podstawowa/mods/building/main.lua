@@ -22,6 +22,7 @@ if classic then
 	if has("cobblestone_wall") then classic.shaped({ "CCC", "CCC" }, { C = "cobblestone" }, "cobblestone_wall", 6) end
 	classic.shaped({ "GGG", "GGG" }, { G = "glass" }, "glass_pane", 16)
 	classic.shaped({ "PPP", " P ", " P " }, { P = "planks" }, "planks_table", 1)
+	if has("marble_tiles") then classic.shaped({ "SS", "SS" }, { S = "stone_slab" }, "marble_tiles", 4) end
 end
 if discovery then
 	if has("stick") then discovery.add("plot", { planks = 2, stick = 1 }, "planks_fence", 3, 1) end
@@ -39,5 +40,6 @@ engine.on("player.join", function()
 		if has(k) then bp.give(k, 16) end
 	end
 	if has("planks_table") then bp.give("planks_table", 2) end
+	if has("marble_tiles") then bp.give("marble_tiles", 16) end
 	engine.player.storage.set("building_started", true)
 end)

@@ -136,6 +136,27 @@ func move_resource(id: String, delta: int) -> void:
 	save_user()
 
 
+## Rozdzielczość paczki zasobów: pole "resolution" w pack.json albo rozmiar jej tekstur bloków.
+func resource_resolution(id: String) -> int:
+	var r := resource_pack(id)
+	if r.is_empty():
+		return 16
+	var info: Variant = JSON.parse_string(FileAccess.get_file_as_string(str(r.path).path_join("pack.json"))) if FileAccess.file_exists(str(r.path).path_join("pack.json")) else null
+	if info is Dictionary and info.has("resolution"):
+		return int(info.resolution)
+	if r.has("auto_res"):
+		return int(r.auto_res)
+	var best := 16
+	var files := DirAccess.get_files_at(str(r.path).path_join("blocks"))
+	for i in mini(files.size(), 6):
+		if files[i].get_extension().to_lower() == "png":
+			var img := Image.load_from_file(str(r.path).path_join("blocks").path_join(files[i]))
+			if img:
+				best = maxi(best, img.get_width())
+	r["auto_res"] = best
+	return best
+
+
 ## Plik z włączonej paczki zasobów (pierwsza na liście wygrywa) albo "". rel np. "blocks/stone.png".
 func resource_file(rel: String) -> String:
 	for id in resource_order:

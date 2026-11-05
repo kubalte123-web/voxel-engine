@@ -30,7 +30,10 @@ static func cube(reg: Registry, block: int, size: float) -> ArrayMesh:
 			v.append(FACES[f][k] * size)
 			n.append(NORMALS[f])
 			var u: Vector2 = UV[k]
-			uv.append(Vector2((t % Registry.ATLAS_COLS + clampf(u.x, 0.002, 0.998)) * iu, (t / Registry.ATLAS_COLS + clampf(u.y, 0.002, 0.998)) * iv))
+			if t * 4 + 3 < reg.tile_rects.size():
+				uv.append(Vector2(reg.tile_rects[t * 4] + clampf(u.x, 0.002, 0.998) * reg.tile_rects[t * 4 + 2], reg.tile_rects[t * 4 + 1] + clampf(u.y, 0.002, 0.998) * reg.tile_rects[t * 4 + 3]))
+			else:
+				uv.append(Vector2((t % Registry.ATLAS_COLS + clampf(u.x, 0.002, 0.998)) * iu, (t / Registry.ATLAS_COLS + clampf(u.y, 0.002, 0.998)) * iv))
 			col.append(Color(SHADE[f], 1.0, 0.0))
 		idx.append_array([base, base + 2, base + 1, base, base + 3, base + 2])
 	var arr := []

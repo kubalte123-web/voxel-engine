@@ -39,6 +39,18 @@ func _ready() -> void:
 		func(v): return "%d%%" % int(v * 100), func(v): s.sound_volume = v; s.save_settings()))
 	add_child(UI.slider_row("Jasność w ciemności", 0.0, 1.0, 0.05, s.brightness,
 		func(v): return "%d%%" % int(v * 100), func(v): s.brightness = v; s.save_settings()))
+	add_child(UI.label("Rozdzielczość tekstur bloków (po wczytaniu świata)", 16, UI.MUTED))
+	var resb := OptionButton.new()
+	resb.custom_minimum_size = Vector2(0, 44)
+	var res_opts := [0, 16, 32] if web else [0, 16, 32, 64, 128, 256]
+	for i in res_opts.size():
+		resb.add_item("Automatycznie (z modów i paczek zasobów)" if res_opts[i] == 0 else "%d × %d" % [res_opts[i], res_opts[i]])
+		if res_opts[i] == s.texture_resolution:
+			resb.select(i)
+	resb.item_selected.connect(func(i: int):
+		s.texture_resolution = res_opts[i]
+		s.save_settings())
+	add_child(resb)
 	add_child(UI.check_row("Fale na wodzie", s.water_waves, func(on): s.water_waves = on; s.save_settings()))
 	add_child(UI.slider_row("Pole widzenia", 55, 100, 1, s.fov,
 		func(v): return "%d°" % int(v), func(v): s.fov = v; s.save_settings()))

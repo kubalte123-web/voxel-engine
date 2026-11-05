@@ -198,6 +198,12 @@ function engine.items.set_data(id, index, key, value) end
 ---@param fn any
 function engine.items.tooltip(key, fn) end
 
+---@class engine.textures
+engine.textures = {}
+
+---@param n any
+function engine.textures.resolution(n) end
+
 ---@class engine.worldgen
 engine.worldgen = {}
 

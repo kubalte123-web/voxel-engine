@@ -89,7 +89,8 @@ func start_content(world_dir: String) -> Registry:
 	var paths := {}
 	for id in ModManager.manifests:
 		paths[id] = ModManager.manifests[id].path
-	registry.build(content, paths)
+	var tr := texture_resolution(int(content.get("texture_resolution", 16)))
+	registry.build(content, paths, tr.x, tr.y)
 	Sfx.reset()
 	for e in registry.errors:
 		report_error("silnik", e)
@@ -138,6 +139,21 @@ func _open_lua() -> bool:
 	for k in ["dispatch", "make_env", "input", "window_action", "finalize", "run_chunk", "block_update", "projectile_hit", "item_tooltip", "console", "entity_think", "command", "worldgen"]:
 		_api[k] = res.get(k)
 	return true
+
+
+## Rozdzielczość kafelków: (domyślna, największa dozwolona). Opcja gracza ustawia ją na sztywno (także jako
+## górną granicę dla bloków z własną rozdzielczością); „automatycznie” bierze największą z modów
+## (engine.textures.resolution) i włączonych paczek zasobów. Przeglądarka: najwyżej 32.
+func texture_resolution(requested: int) -> Vector2i:
+	var cap := 32 if OS.has_feature("web") else 512
+	var forced := int(Settings.texture_resolution)
+	if forced > 0:
+		var f := mini(Registry.pow2(forced), cap)
+		return Vector2i(f, f)
+	var r := requested
+	for id in ModManager.resource_order:
+		r = maxi(r, ModManager.resource_resolution(id))
+	return Vector2i(mini(Registry.pow2(maxi(r, 16)), cap), cap)
 
 
 func stop() -> void:

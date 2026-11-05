@@ -121,7 +121,7 @@ Zmień pliki, które chcesz, a resztę usuń (paczka podmienia tylko to, co zawi
 Paczki leżą w folderze resourcepacks gry; włączasz je w menu Mody → Paczki zasobów.
 Paczka wyżej na liście ma pierwszeństwo.
 
-blocks/<klucz>.png                 tekstura bloku na wszystkie ściany (16 × 16 pikseli)
+blocks/<klucz>.png                 tekstura bloku na wszystkie ściany (kwadrat: 16, 32, 64, 128 ... pikseli)
 blocks/<klucz>.top.png / .bottom / .side   góra, dół, boki
 blocks/<klucz>.front.png           przód bloku z kierunkiem (piec, skrzynia)
 blocks/<klucz>.north.png ...       konkretna strona (north, south, east, west)
@@ -133,5 +133,6 @@ entities/<rodzaj>.json             ustawienia modelu: scale, offset, rotation, s
 sounds/<nazwa>.ogg                 dźwięk (kilka wersji: <nazwa>.1.ogg, <nazwa>.2.ogg ...)
 lang/pl.json, lang/en.json         teksty modów: "mod:klucz": "tekst"
 
+Rozdzielczość: w pack.json "resolution": 64 (albo rozmiar plików w blocks/) – gra użyje jej dla wszystkich bloków.
 Paczka zasobów zmienia tylko wygląd i dźwięk – działa też na cudzym serwerze i nie wpływa na zgodność świata.
 """

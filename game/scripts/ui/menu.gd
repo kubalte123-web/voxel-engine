@@ -377,13 +377,16 @@ func _shot(dir: String, name: String) -> void:
 func _autotest(dir: String) -> void:
 	GameState.autotest_dir = dir
 	var args := OS.get_cmdline_user_args()
+	for a2 in args:
+		if a2.begins_with("--texres="):
+			Settings.texture_resolution = int(a2.trim_prefix("--texres="))   # tylko na ten test (bez zapisu)
 	for a in args:
 		if a.begins_with("--enable="):
 			for id in a.trim_prefix("--enable=").split(","):
 				if ModManager.manifests.has(id):
 					ModManager.enabled[id] = true
 	# testy wybranych funkcji: od razu świat testowy, bez zrzutów menu
-	if args.has("--craft-only") or args.has("--light-only") or args.has("--blocks-only") or args.has("--perf-only") or args.has("--alchemy-only") or args.has("--fishing-only") or args.has("--gun-only") or args.has("--api-only") or args.has("--console-only") or args.has("--shapes-only") or args.has("--creatures-only") or args.has("--chat-only") or args.has("--ui-only") or args.has("--worldgen-only") or args.has("--extras-only"):
+	if args.has("--craft-only") or args.has("--light-only") or args.has("--blocks-only") or args.has("--perf-only") or args.has("--alchemy-only") or args.has("--fishing-only") or args.has("--gun-only") or args.has("--api-only") or args.has("--console-only") or args.has("--shapes-only") or args.has("--creatures-only") or args.has("--chat-only") or args.has("--ui-only") or args.has("--worldgen-only") or args.has("--extras-only") or args.has("--hires-only"):
 		GameState.start(GameState.create_world("Test", "42"))
 		return
 	await _shot(dir, "m1_menu")

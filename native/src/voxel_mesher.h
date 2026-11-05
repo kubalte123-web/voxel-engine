@@ -26,6 +26,7 @@ class VoxelMesher : public RefCounted {
 	std::vector<int32_t> liquid;
 	std::vector<int32_t> shape_index;
 	std::vector<float> shape_boxes;
+	std::vector<float> tile_rects;   // po 4 liczby na kafelek: u, v, szerokość, wysokość w atlasie
 	std::vector<int32_t> lprops;  // id -> świecenie (0..15) | 16 nieprzezroczysty | 32 ciecz
 	double max_sum = 0.0;
 	std::vector<double> B, F, PL, O;
@@ -44,6 +45,7 @@ public:
 	// kształty z prostopadłościanów: na id 11 liczb [przes, ile, grupa, N przes, N ile, E.., S.., W..],
 	// prostopadłościany po 6 liczb (x1, y1, z1, x2, y2, z2) w szesnastkach bloku
 	void set_shapes(const PackedInt32Array &index, const PackedFloat32Array &boxes);
+	void set_tile_rects(const PackedFloat32Array &rects);
 	// Światło chunka cpos: obszar chunka z marginesem `margin` bloków (27 chunków: own i sąsiedzi, null =
 	// brak danych, przybliżane mapą wysokości), skyh = najwyższy nieprzezroczysty blok w kolumnach obszaru.
 	// Zwraca [światło obwódki P^3, światło wnętrza S^3, najwyższe nieprzezroczyste bloki kolumn chunka S^2];

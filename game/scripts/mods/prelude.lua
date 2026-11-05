@@ -741,6 +741,7 @@ local function finalize()
 		blocks = blocks, items = items, animations = copy(R.animations), entities = copy(R.entities),
 		sounds = copy(R.sounds), particles = copy(R.particles), projectiles = copy(R.projectiles), effects = copy(R.effects),
 		worldgen = { config = copy(R.config), biomes = biomes, ores = ores, structures = structures },
+		texture_resolution = R.texture_res or 16,
 	})
 end
 
@@ -898,6 +899,16 @@ local function make_api(mod_id)
 			assert(type(fn) == "function", "items.tooltip: drugi argument musi być funkcją")
 			tooltip_fns[key] = { fn = fn, owner = mod_id }
 			host.item_tooltip_register(key)
+		end,
+	}
+
+	-- rozdzielczość tekstur bloków całej gry (content.lua): engine.textures.resolution(64);
+	-- gra bierze największą z modów i paczek zasobów, gracz może ją zmienić w opcjach.
+	-- Pojedynczy blok: pole resolution = 128 w jego definicji.
+	E.textures = {
+		resolution = function(n)
+			open_registry("textures.resolution")
+			R.texture_res = math.max(R.texture_res or 16, math.floor(tonumber(n) or 16))
 		end,
 	}
 

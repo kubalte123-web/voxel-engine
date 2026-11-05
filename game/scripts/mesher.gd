@@ -29,6 +29,20 @@ const PLANT_SHADE := 0.9
 const SHAPE_STRIDE := 11
 const CONN := [Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0)]  # N, E, S, W
 
+## Położenie kafelków w atlasie: po 4 liczby (u, v, szerokość, wysokość); puste – siatka ATLAS_COLS.
+static var tile_rects := PackedFloat32Array()
+
+
+static func set_tile_rects(r: PackedFloat32Array) -> void:
+	tile_rects = r
+
+
+static func _uv(t: int, u: float, v: float, cols_n: int, iu: float, iv: float, eps: float) -> Vector2:
+	if t * 4 + 3 < tile_rects.size():
+		return Vector2(tile_rects[t * 4] + clampf(u, eps, 1.0 - eps) * tile_rects[t * 4 + 2], tile_rects[t * 4 + 1] + clampf(v, eps, 1.0 - eps) * tile_rects[t * 4 + 3])
+	return Vector2((t % cols_n + clampf(u, eps, 1.0 - eps)) * iu, (t / cols_n + clampf(v, eps, 1.0 - eps)) * iv)
+
+
 ## Kształty z prostopadłościanów (ustawiane z rejestru, jak w rdzeniu C++).
 static var shape_index := PackedInt32Array()
 static var shape_boxes := PackedFloat32Array()
@@ -161,7 +175,7 @@ static func build(padded: PackedByteArray, tiles: PackedInt32Array, cols_n: int,
 						verts.append(Vector3(x - 1 + c.x, y - 1 + c.y, z - 1 + c.z))
 						norms.append(Vector3(n))
 						var uv: Vector2 = uvset[k]
-						uvs.append(Vector2((t % cols_n + clampf(uv.x, eps, 1.0 - eps)) * iu, (t / cols_n + clampf(uv.y, eps, 1.0 - eps)) * iv))
+						uvs.append(_uv(t, uv.x, uv.y, cols_n, iu, iv, eps))
 						var shade: float = AO_LEVELS[level] * FACE_SHADE[f]
 						cols.append(Color(shade, float(lsum) / float(ln) / 15.0, float(bsum) / float(ln) / 15.0))
 					# kolejność zgodna z ruchem wskazówek zegara (przód ściany w Godocie);
@@ -328,7 +342,7 @@ static func _boxes(x: int, y: int, z: int, b: int, pr: int, padded: PackedByteAr
 						3: u = lx; w = 1.0 - lz
 						4: u = lx; w = 1.0 - ly
 						_: u = 1.0 - lx; w = 1.0 - ly
-					uvs.append(Vector2((t % cols_n + clampf(u, eps, 1.0 - eps)) * iu, (t / cols_n + clampf(w, eps, 1.0 - eps)) * iv))
+					uvs.append(_uv(t, u, w, cols_n, iu, iv, eps))
 					cols.append(Color(FACE_SHADE[f], sk, bl))
 				for q in [0, 2, 1, 0, 3, 2]:
 					idx.append(base + q)
@@ -363,7 +377,7 @@ static func _thin(x: int, y: int, z: int, b: int, tiles: PackedInt32Array, cols_
 			else:
 				u = ((bb if cc.z == 1 else a) if (f == 0 or f == 1) else (bb if cc.x == 1 else a))
 				v = 2.0 / 16.0 if cc.y == 1 else 1.0
-			uvs.append(Vector2((t % cols_n + clampf(u, eps, 1.0 - eps)) * iu, (t / cols_n + clampf(v, eps, 1.0 - eps)) * iv))
+			uvs.append(_uv(t, u, v, cols_n, iu, iv, eps))
 			cols.append(Color(FACE_SHADE[f], sk, bl))
 		for q in [0, 2, 1, 0, 3, 2]:
 			idx.append(base + q)
@@ -379,7 +393,7 @@ static func _cross(x: int, y: int, z: int, t: int, cols_n: int, iu: float, iv: f
 			verts.append(Vector3(x - 1, y - 1, z - 1) + c)
 			norms.append(Vector3.UP)
 			var uv: Vector2 = SIDE_UV[k]
-			uvs.append(Vector2((t % cols_n + clampf(uv.x, eps, 1.0 - eps)) * iu, (t / cols_n + clampf(uv.y, eps, 1.0 - eps)) * iv))
+			uvs.append(_uv(t, uv.x, uv.y, cols_n, iu, iv, eps))
 			cols.append(Color(PLANT_SHADE, float(l >> 4) / 15.0, float(l & 15) / 15.0))
 		idx.append_array([base, base + 2, base + 1, base, base + 3, base + 2,
 			base, base + 1, base + 2, base, base + 2, base + 3])

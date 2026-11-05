@@ -35,8 +35,11 @@ static func _from_file(path: String) -> Image:
 		push_warning("Brak tekstury: " + path)
 		return _missing()
 	img.convert(Image.FORMAT_RGBA8)
-	if img.get_width() != PX or img.get_height() != PX:
-		img.resize(PX, PX, Image.INTERPOLATE_NEAREST)
+	if img.get_width() != img.get_height():   # kafelek musi być kwadratem (rozmiar dopasuje rejestr)
+		var n := maxi(img.get_width(), img.get_height())
+		img.resize(n, n, Image.INTERPOLATE_NEAREST)
+	if img.get_width() > 1024:
+		img.resize(1024, 1024, Image.INTERPOLATE_BILINEAR)
 	return img
 
 
@@ -275,27 +278,31 @@ static func _shape(img: Image, kind: String, a: Color, b: Color, rng: RandomNumb
 
 ## Ikona bloku: mały sześcian w rzucie izometrycznym (góra jaśniejsza, boki ciemniejsze).
 static func cube_icon(top: Image, side: Image, front: Image) -> Image:
-	var n := 32
+	var sc := clampi(top.get_width() / 16, 1, 4)   # tekstury o wyższej rozdzielczości: większa ikona
+	var n := 32 * sc
+	var tw := top.get_width()
+	var fw := front.get_width()
+	var sw := side.get_width()
 	var img := Image.create(n, n, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0, 0, 0, 0))
 	for y in n:
 		for x in n:
-			var fx := float(x) + 0.5
-			var fy := float(y) + 0.5
+			var fx := (float(x) + 0.5) / sc
+			var fy := (float(y) + 0.5) / sc
 			# górny romb: środek (16, 8), połowa szerokości 15, wysokość 7.5
 			var u := (fx - 16.0) / 15.0
 			var v := (fy - 8.5) / 7.5
 			if absf(u) + absf(v) <= 1.0:
 				var tu := clampf((u + v) * 0.5 + 0.5, 0.0, 0.999)
 				var tv := clampf((v - u) * 0.5 + 0.5, 0.0, 0.999)
-				img.set_pixel(x, y, top.get_pixel(int(tu * 16), int(tv * 16)))
+				img.set_pixel(x, y, top.get_pixel(int(tu * tw), int(tv * tw)))
 				continue
 			# lewa ściana
 			if fx >= 1.0 and fx < 16.0:
 				var k := (fx - 1.0) / 15.0
 				var y0 := 8.5 + 7.5 * k
 				if fy >= y0 and fy < y0 + 15.0:
-					var c := front.get_pixel(int(k * 15.99), int((fy - y0) / 15.0 * 15.99))
+					var c := front.get_pixel(mini(int(k * fw), fw - 1), mini(int((fy - y0) / 15.0 * fw), fw - 1))
 					img.set_pixel(x, y, Color(c.r * 0.78, c.g * 0.78, c.b * 0.78, c.a))
 					continue
 			# prawa ściana
@@ -303,7 +310,7 @@ static func cube_icon(top: Image, side: Image, front: Image) -> Image:
 				var k := (fx - 16.0) / 15.0
 				var y0 := 16.0 - 7.5 * k
 				if fy >= y0 and fy < y0 + 15.0:
-					var c := side.get_pixel(int(k * 15.99), int((fy - y0) / 15.0 * 15.99))
+					var c := side.get_pixel(mini(int(k * sw), sw - 1), mini(int((fy - y0) / 15.0 * sw), sw - 1))
 					img.set_pixel(x, y, Color(c.r * 0.6, c.g * 0.6, c.b * 0.6, c.a))
 	return img
 
@@ -311,7 +318,11 @@ static func cube_icon(top: Image, side: Image, front: Image) -> Image:
 ## Ikona bloku zbudowanego z prostopadłościanów (w szesnastkach): ten sam rzut co cube_icon, każdy piksel
 ## to promień w stronę widza (kierunek (1, 1, 1)); widać ściany +y, +z (lewa) i +x (prawa).
 static func boxes_icon(boxes: Array, top: Image, side: Image, front: Image) -> Image:
-	var n := 32
+	var sc := clampi(top.get_width() / 16, 1, 4)
+	var n := 32 * sc
+	var tw := top.get_width()
+	var fw := front.get_width()
+	var sw := side.get_width()
 	var img := Image.create(n, n, false, Image.FORMAT_RGBA8)
 	img.fill(Color(0, 0, 0, 0))
 	var bx := []
@@ -321,8 +332,8 @@ static func boxes_icon(boxes: Array, top: Image, side: Image, front: Image) -> I
 			bx.append([Vector3(float(a[0]), float(a[1]), float(a[2])) / 16.0, Vector3(float(a[3]), float(a[4]), float(a[5])) / 16.0])
 	for y in n:
 		for x in n:
-			var a := (float(x) + 0.5 - 16.0) / 15.0
-			var c := (float(y) + 0.5 - 8.5) / 15.0
+			var a := ((float(x) + 0.5) / sc - 16.0) / 15.0
+			var c := ((float(y) + 0.5) / sc - 8.5) / 15.0
 			var p0 := Vector3(a, (a + 1.0) * 0.5 - c, 0.0)
 			var best := -INF
 			var face := -1
@@ -347,12 +358,12 @@ static func boxes_icon(boxes: Array, top: Image, side: Image, front: Image) -> I
 			var q := p0 + Vector3.ONE * best
 			var col: Color
 			if face == 1:
-				col = top.get_pixel(clampi(int(q.x * 16.0), 0, 15), clampi(int(q.z * 16.0), 0, 15))
+				col = top.get_pixel(clampi(int(q.x * tw), 0, tw - 1), clampi(int(q.z * tw), 0, tw - 1))
 			elif face == 2:
-				col = front.get_pixel(clampi(int(q.x * 16.0), 0, 15), clampi(int((1.0 - q.y) * 16.0), 0, 15))
+				col = front.get_pixel(clampi(int(q.x * fw), 0, fw - 1), clampi(int((1.0 - q.y) * fw), 0, fw - 1))
 				col = Color(col.r * 0.78, col.g * 0.78, col.b * 0.78, col.a)
 			else:
-				col = side.get_pixel(clampi(int((1.0 - q.z) * 16.0), 0, 15), clampi(int((1.0 - q.y) * 16.0), 0, 15))
+				col = side.get_pixel(clampi(int((1.0 - q.z) * sw), 0, sw - 1), clampi(int((1.0 - q.y) * sw), 0, sw - 1))
 				col = Color(col.r * 0.6, col.g * 0.6, col.b * 0.6, col.a)
 			img.set_pixel(x, y, col)
 	return img

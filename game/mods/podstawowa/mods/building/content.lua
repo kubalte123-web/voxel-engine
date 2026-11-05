@@ -47,3 +47,11 @@ shape("glass_pane", "glass", "pane", "Szyba", { drops = false })
 shape("planks_table", "planks", "boxes", "Stolik", {
 	boxes = { { 0, 14, 0, 16, 16, 16 }, { 7, 0, 7, 9, 14, 9 } },
 })
+
+-- blok w wyższej rozdzielczości: tekstura 128 × 128 zostaje ostra, choć reszta świata ma 16 × 16
+engine.blocks.register("marble_tiles", {
+	name = "Płyty marmurowe",
+	texture = "textures/marble_tiles.png",
+	resolution = 128,
+	hardness = 2.0, tool = "pickaxe", sound = "stone",
+})

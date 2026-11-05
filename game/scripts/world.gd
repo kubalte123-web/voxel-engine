@@ -87,16 +87,21 @@ func _ready() -> void:
 	material = ShaderMaterial.new()
 	material.shader = load("res://scripts/shaders/terrain.gdshader")
 	material.set_shader_parameter("atlas", atlas)
+	material.set_shader_parameter("lod_map", reg.lod_map)
+	material.set_shader_parameter("max_lod", reg.max_lod)
+	material.set_shader_parameter("atlas_size", reg.atlas_size)
 	remote = Net.is_client()
 	if ClassDB.class_exists("VoxelMesher"):
 		native = ClassDB.instantiate("VoxelMesher")
 		native.call("configure", terrain.native_noises(), terrain.spec, tiles, props, reg.liquid, Registry.ATLAS_COLS, reg.atlas_rows)
 		native.call("set_light_props", reg.lprops)
 		native.call("set_shapes", reg.shape_index, reg.shape_boxes)
+		native.call("set_tile_rects", reg.tile_rects)
 		mesher_name = "C++"
 	else:
 		light_margin = 6  # wersja w GDScript (przeglądarka): mniejszy zasięg światła spoza chunka
 	GDMesher.set_shapes(reg.shape_index, reg.shape_boxes)
+	GDMesher.set_tile_rects(reg.tile_rects)
 	if OS.has_feature("web"):
 		threaded = false
 	max_queued = maxi(2, OS.get_processor_count())
