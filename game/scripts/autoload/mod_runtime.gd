@@ -162,6 +162,7 @@ func stop() -> void:
 	entity_brains.clear()
 	mod_commands.clear()
 	worldgen_mods.clear()
+	lang_tables.clear()
 	_gen_noises.clear()
 	hotbar.container = ""
 	hotbar.first = 0
@@ -191,11 +192,21 @@ func resolve_load_order() -> Array[String]:
 			var reqs: Array = ModManager.manifests[id].get("requires", [])
 			var missing := []
 			var waiting := false
-			for r in reqs:
+			var bad_ver := []
+			for req in reqs:
+				var r: String = ModManager.dep_parse(str(req))[0]
 				if not wanted.has(r):
 					missing.append(r)
 				elif not out.has(r):
 					waiting = true
+				var vp: String = ModManager.dep_version_problem(str(req))
+				if vp != "":
+					bad_ver.append(vp)
+			if not bad_ver.is_empty():
+				load_errors[id] = "wymaga innej wersji: " + ", ".join(bad_ver)
+				pending.erase(id)
+				progress = true
+				continue
 			# "after": mody opcjonalne – jeśli są włączone, wczytujemy je wcześniej
 			for r in ModManager.manifests[id].get("after", []):
 				if wanted.has(r) and not out.has(r) and r != id:
@@ -291,6 +302,48 @@ func press_bind(id: String) -> void:
 func projectile_hit(type: String, ctx: Dictionary) -> void:
 	if _api.has("projectile_hit"):
 		_api.projectile_hit.invoke(type, ctx)
+
+
+## Tekst moda w języku (lang/<język>.json); po kolei: język, polski, angielski, inne mody, sam klucz.
+func translate(mod_id: String, key: String, lang: String) -> String:
+	for l in [lang, "pl", "en"]:
+		var t := _lang(mod_id, l)
+		if t.has(key):
+			return str(t[key])
+	for m in order:
+		if m != mod_id:
+			var t := _lang(m, lang)
+			if t.has(key):
+				return str(t[key])
+	return key
+
+
+func _lang(mod_id: String, lang: String) -> Dictionary:
+	var k := mod_id + "|" + lang
+	if not lang_tables.has(k):
+		var path := str(ModManager.manifests[mod_id].path).path_join("lang/%s.json" % lang) if ModManager.manifests.has(mod_id) else ""
+		var d: Variant = JSON.parse_string(FileAccess.get_file_as_string(path)) if path != "" and FileAccess.file_exists(path) else null
+		lang_tables[k] = d if d is Dictionary else {}
+	return lang_tables[k]
+
+
+func _h_weather_set(kind, intensity) -> void:
+	if main and not Net.is_client():
+		main.set_weather({"kind": str(kind), "intensity": float(intensity)})
+
+
+func _h_weather_get() -> Dictionary:
+	return main.weather.state() if main else {"kind": "clear", "intensity": 0.0}
+
+
+func _h_sky_set(sky) -> void:
+	if main and not Net.is_client():
+		main.set_weather({"sky": sky if sky is Dictionary else {}})
+
+
+func _h_t(mod_id, key) -> String:
+	var s := S()
+	return translate(str(mod_id), str(key), s.lang if s and not s.local else Settings.language)
 
 
 func worldgen_active() -> bool:
@@ -408,6 +461,7 @@ func _mod_name(id: String) -> String:
 # data – dane egzemplarza (np. amunicja w broni); stosy z różnymi danymi się nie łączą.
 # info – linie opisu policzone przez mod (engine.items.tooltip), wysyłane do graczy razem z miejscem.
 
+var lang_tables := {}     # "mod|język" -> {klucz: tekst} (pliki lang/<język>.json modów)
 var worldgen_mods := {}   # mod -> true (ma engine.worldgen.on_generate)
 var _gen_noises := {}
 var mod_commands := {}    # polecenie -> {description, permission, usage, mod} (engine.commands.register)
@@ -683,7 +737,7 @@ func window_closed(peer: int, id: String) -> void:
 				set_slot(c, i, with_count(sl, int(sl.count) + n))
 				left -= n
 	if left > 0 and main and s.node:
-		main.entities.drop_item(str(s.held.item), left, s.node.global_position + Vector3(0, 1, 0))
+		main.entities.drop_item(str(s.held.item), left, s.node.global_position + Vector3(0, 1, 0), s.held.get("data", {}) if s.held.get("data") is Dictionary else {})
 	_set_held(s, {})
 	ctx = prev
 
@@ -703,7 +757,8 @@ func _host_table() -> Dictionary:
 		"entity_spawn", "entity_remove", "entity_exists", "entity_get", "entity_list", "entity_set",
 		"entity_damage", "entity_tag", "entity_data", "item_drop", "entity_brain", "entity_mount", "entity_dismount",
 		"entity_nearest_player", "world_light", "command_register", "chat_send", "role_get", "role_set", "hud_image",
-		"worldgen_on", "gen_get", "gen_set", "gen_height", "gen_biome", "gen_noise",
+		"worldgen_on", "gen_get", "gen_set", "gen_height", "gen_biome", "gen_noise", "t",
+		"weather_set", "weather_get", "sky_set", "player_wear",
 		"player_id", "player_name", "player_is_host", "players_list", "set_ctx", "get_ctx",
 		"pstorage_get", "pstorage_set", "players_accept", "players_kick", "is_multiplayer", "hash",
 		"block_state", "block_set_state", "block_with_state", "block_base", "block_data", "block_set_data",
@@ -1219,6 +1274,18 @@ func _h_player_colors(t) -> void:
 		Net.broadcast_look(s)
 
 
+func _h_player_wear(id, spec) -> void:
+	var s := S()
+	if spec is Dictionary:
+		s.wear[str(id)] = spec
+	else:
+		s.wear.erase(str(id))
+	if s.node and s.node.model:
+		s.node.model.set_wear(s.wear)
+	if Net.online() and Net.is_server():
+		Net.s_wear.rpc(s.peer, s.wear)
+
+
 func _h_player_in_liquid() -> bool:
 	var p := _pl()
 	return p.in_liquid if p else false
@@ -1569,7 +1636,7 @@ func _h_entity_data(id, key, v) -> void:
 			e.data[str(key)] = v
 
 
-func _h_item_drop(item, count, pos) -> int:
+func _h_item_drop(item, count, pos, data) -> int:
 	if main == null:
 		return -1
-	return main.entities.drop_item(str(item), int(count), Vector3(pos))
+	return main.entities.drop_item(str(item), int(count), Vector3(pos), data if data is Dictionary else {})

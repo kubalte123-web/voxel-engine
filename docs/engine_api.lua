@@ -8,6 +8,11 @@ engine = {}
 ---@class engine.mod
 engine.mod = {}
 
+--- tłumaczenie: engine.t("klucz", {nazwa = "Ola"}) -> tekst z lang/<język gracza>.json, "{nazwa}" podmienione
+---@param key any
+---@param args any
+function engine.t(key, args) end
+
 function engine.log(...) end
 
 --- zdarzenia
@@ -474,10 +479,29 @@ function engine.entities.rider(id) end
 function engine.entities.nearest_player(pos, radius) end
 
 --- przedmiot leżący na ziemi; gracz podnosi go, podchodząc (hak item.pickup)
+--- data: dane egzemplarza (zostają po podniesieniu, hak item.pickup dostaje ctx.data)
 ---@param item any
 ---@param count any
 ---@param pos any
-function engine.entities.drop(item, count, pos) end
+---@param data any
+function engine.entities.drop(item, count, pos, data) end
+
+---@class engine.weather
+engine.weather = {}
+
+---@param kind any
+---@param intensity any
+function engine.weather.set(kind, intensity) end
+
+function engine.weather.get() end
+
+---@class engine.sky
+engine.sky = {}
+
+---@param t any
+function engine.sky.set(t) end
+
+function engine.sky.reset() end
 
 ---@class engine.commands
 engine.commands = {}
@@ -623,6 +647,12 @@ function engine.player.stop_animation() end
 --- kolory części postaci: {tunic = "#aa3333", scarf = Color(...)} (klucze w docs/MODDING.md)
 ---@param t any
 function engine.player.colors(t) end
+
+--- rzecz założona na postać (widzą wszyscy): wear(id, {part = "head", boxes = {{size, pos, color, rot}}}),
+--- wear(id, nil) zdejmuje; części: body, head, arm_left, arm_right, leg_left, leg_right
+---@param id any
+---@param spec any
+function engine.player.wear(id, spec) end
 
 --- blok, w który celuje gracz: {pos, normal, block}; with_liquids = true uwzględnia ciecze
 ---@param with_liquids any

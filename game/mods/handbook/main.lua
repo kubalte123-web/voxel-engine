@@ -49,11 +49,11 @@ open = function()
 	local info = {
 		{ type = "image", item = key, size = { 96, 96 } },
 		{ type = "text", text = engine.items.name(key), size = 22 },
-		{ type = "text", text = def.description or "Bez opisu.", color = "#b8c4d0" },
-		{ type = "text", text = string.format("Klucz: %s · stos: %d%s", key, engine.items.max_stack(key), def.food and (" · jedzenie: " .. def.food) or ""), size = 14, color = "#8a96a4" },
+		{ type = "text", text = def.description or engine.t("no_description"), color = "#b8c4d0" },
+		{ type = "text", text = engine.t("item_info", { key = key, stack = engine.items.max_stack(key) }) .. (def.food and engine.t("food", { food = def.food }) or ""), size = 14, color = "#8a96a4" },
 	}
 	if engine.players.role() == "admin" then
-		info[#info + 1] = { type = "item_button", id = "take", item = key, text = "Weź 1 (administrator)", on_press = function()
+		info[#info + 1] = { type = "item_button", id = "take", item = key, text = engine.t("take"), on_press = function()
 			local bp = engine.optional("backpack")
 			if bp then bp.give(key, 1) end
 		end }
@@ -61,33 +61,33 @@ open = function()
 	local creatures = {}
 	for _, t in ipairs({ "sheep", "cow", "chicken", "horse", "zombie" }) do
 		local d = engine.entities.def(t)
-		if d then creatures[#creatures + 1] = { text = d.name .. (d.ai and d.ai.hostile and "  (wróg)" or ""), color = d.ai and d.ai.hostile and "#ff8a7a" or nil } end
+		if d then creatures[#creatures + 1] = { text = d.name .. (d.ai and d.ai.hostile and engine.t("enemy") or ""), color = d.ai and d.ai.hostile and "#ff8a7a" or nil } end
 	end
 	engine.ui.window({
-		id = "handbook", title = "Poradnik",
+		id = "handbook", title = engine.t("title"),
 		sections = {
 			{ type = "tabs", id = "tab", selected = st("tab", 1), on_change = on_change, tabs = {
-				{ title = "Przedmioty", sections = {
+				{ title = engine.t("tab.items"), sections = {
 					{ type = "row", sections = {
 						{ type = "list", id = "items", items = list, selected = sel, height = 320, on_change = on_change },
 						{ type = "column", sections = info },
 					} },
 				} },
-				{ title = "Stworzenia", sections = {
-					{ type = "text", text = "Stworzenia w tym świecie:" },
+				{ title = engine.t("tab.mobs"), sections = {
+					{ type = "text", text = engine.t("mobs.header") },
 					{ type = "list", id = "mobs", items = creatures, height = 200 },
 				} },
-				{ title = "Ekran", sections = {
-					{ type = "toggle", id = "compass", text = "Kompas na ekranie", value = st("compass", true), on_change = on_change },
-					{ type = "slider", id = "alpha", label = "Przezroczystość kompasu", min = 0.2, max = 1, step = 0.05, value = st("compass_alpha", 1.0), on_change = on_change },
-					{ type = "dropdown", id = "place", label = "Miejsce kompasu", options = { "Góra", "Lewy górny róg", "Prawy górny róg" }, selected = st("compass_place", 1), on_change = on_change },
+				{ title = engine.t("tab.screen"), sections = {
+					{ type = "toggle", id = "compass", text = engine.t("compass"), value = st("compass", true), on_change = on_change },
+					{ type = "slider", id = "alpha", label = engine.t("compass.alpha"), min = 0.2, max = 1, step = 0.05, value = st("compass_alpha", 1.0), on_change = on_change },
+					{ type = "dropdown", id = "place", label = engine.t("compass.place"), options = { engine.t("place.top"), engine.t("place.top_left"), engine.t("place.top_right") }, selected = st("compass_place", 1), on_change = on_change },
 				} },
 			} },
 		},
 	})
 end
 
-engine.input.bind({ id = "open", key = "J", label = "Poradnik", on_press = open })
+engine.input.bind({ id = "open", key = "J", label = engine.t("key"), on_press = open })
 
 engine.on("player.join", function() compass(true) end)
 engine.on("player.leave", function(e) shown[e.id] = nil end)

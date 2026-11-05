@@ -1,0 +1,19 @@
+{
+	"title": "Poradnik",
+	"tab.items": "Przedmioty",
+	"tab.mobs": "Stworzenia",
+	"tab.screen": "Ekran",
+	"no_description": "Bez opisu.",
+	"item_info": "Klucz: {key} · stos: {stack}",
+	"food": " · jedzenie: {food}",
+	"take": "Weź 1 (administrator)",
+	"mobs.header": "Stworzenia w tym świecie:",
+	"enemy": "  (wróg)",
+	"compass": "Kompas na ekranie",
+	"compass.alpha": "Przezroczystość kompasu",
+	"compass.place": "Miejsce kompasu",
+	"place.top": "Góra",
+	"place.top_left": "Lewy górny róg",
+	"place.top_right": "Prawy górny róg",
+	"key": "Poradnik"
+}

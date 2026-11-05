@@ -26,18 +26,18 @@ engine.hooks.before("entity.interact", function(ctx)
 		engine.particles.spawn("horses.heart", engine.entities.position(ctx.id) + Vector3(0, 1.8, 0))
 		if engine.random() < chance then
 			tame(ctx.id)
-			engine.ui.notify("Koń jest oswojony – kliknij, żeby wsiąść")
+			engine.ui.notify(engine.t("tamed"))
 		else
 			engine.entities.look_at(ctx.id, engine.player.position())
 		end
 	else
-		engine.ui.notify("Dziki koń. Oswój go jabłkiem albo pszenicą")
+		engine.ui.notify(engine.t("wild"))
 		engine.entities.set_state(ctx.id, "flee", 2)
 	end
 end)
 
 engine.on("entity.mount", function(e)
-	if horse(e.type) then engine.ui.notify("Shift albo dotknięcie w powietrze – zsiadanie") end
+	if horse(e.type) then engine.ui.notify(engine.t("dismount")) end
 end)
 
 -- oswojony koń na start (raz na konto)
@@ -51,13 +51,13 @@ end)
 
 -- polecenie: oswojony koń obok gracza (moderator i administrator)
 engine.commands.register("kon", {
-	description = "oswojony koń obok ciebie", usage = "/kon [siwy]", permission = "moderator",
+	description = engine.t("cmd"), usage = "/kon [siwy]", permission = "moderator",
 	fn = function(ctx)
 		local kind = ctx.args[1] == "siwy" and "horse_white" or "horse"
 		local id = engine.entities.spawn(kind, engine.player.position() + Vector3(2, 0.5, 0))
 		if not id or id < 0 then return "Nie udało się" end
 		tame(id)
-		engine.chat.send(ctx.name .. " przywołał konia", { color = "#c8a070" })
-		return "Koń czeka obok"
+		engine.chat.send(engine.t("summoned", { name = ctx.name }), { color = "#c8a070" })
+		return engine.t("waiting")
 	end,
 })

@@ -36,6 +36,11 @@ a mody mogą udostępniać sobie biblioteki przez `engine.export` i `engine.requ
 - [Skrzynie](game/mods/storage/main.lua): kontener bloku, stan facing
 - [Alchemia](game/mods/alchemy/content.lua): blok z modelem GLB i klocków, animacje, emitery cząsteczek ([skrypt](game/mods/alchemy/main.lua): wygląd z gry, mikstury)
 - [Piec](game/mods/smelting/main.lua): dane bloku, zaplanowane aktualizacje, wariant świecący ([treść](game/mods/smelting/content.lua))
+- [Budowanie](game/mods/building/content.lua): kształty z prostopadłościanów – półbloki, schody, płoty, murki, szyby, własne `boxes`
+- [Potwory](game/mods/monsters/content.lua): wrogie zombie z modelem GLB i animacjami z pliku ([skrypt](game/mods/monsters/main.lua): mózg `on_think`, polecenie `/zombie`)
+- [Konie](game/mods/horses/content.lua): jazda (`ride`), tłumaczenia `@klucz` ([skrypt](game/mods/horses/main.lua): oswajanie hakiem `entity.interact`, `engine.t`)
+- [Poradnik](game/mods/handbook/main.lua): okno z zakładkami, listą, obrazkiem, suwakiem, przełącznikiem; kompas na ekranie z `anchor`
+- [Głazy i ruiny](game/mods/ruins/main.lua): generator świata w Lua (`engine.worldgen.on_generate`, szum, deterministyczny los)
 
 ## Zasady dla generowanego moda
 
@@ -64,3 +69,13 @@ a mody mogą udostępniać sobie biblioteki przez `engine.export` i `engine.requ
 - Pozycje jako `{x =, y =, z =}` albo wektor. Mod opcjonalny: `"after"` w mod.json i `engine.optional(id)`.
 - Przedmioty modów tools i crafting: stick, wooden_/stone_/iron_ + pickaxe/axe/shovel/sword, crafting_table, workbench.
 - Klucze biomów moda base: meadow, forest, desert, snowy.
+- Kształty bloków: `shape = "slab" | "stairs" | "fence" | "pane" | "wall"` albo `boxes = {{x1,y1,z1,x2,y2,z2}}` w szesnastkach.
+- Stworzenia: `ai.hostile = {damage, range, sight}`, `ai.think`, mózg `engine.entities.on_think(rodzaj, fn)`,
+  model z pliku `model = {file = "x.glb", animations = {idle, walk, attack}}`, jazda `ride = {seat, speed}`.
+- Czat i polecenia: `engine.commands.register(nazwa, {permission, fn})`, `engine.chat.send`, hak `chat.message`,
+  role `player` / `moderator` / `admin` (`engine.players.role`).
+- Okna: sekcje `tabs`, `row`, `column`, `list`, `slider`, `toggle`, `dropdown`, `image`, `item_button`; `on_change(fields)`.
+  Ekran: `engine.ui.bar/text/image` z `anchor` i `offset`.
+- Generator w Lua: `engine.worldgen.on_generate(function(ch) ... end)`, `ch.set/get/height/biome/random`, `engine.worldgen.noise`.
+- Pogoda `engine.weather.set("rain", 1)`, niebo `engine.sky.set{top, horizon}`; tłumaczenia `lang/pl.json` + `engine.t(klucz)`;
+  rzeczy na postaci `engine.player.wear(id, {part, boxes})`; wersje zależności `"requires": ["modkit>=0.1"]`.

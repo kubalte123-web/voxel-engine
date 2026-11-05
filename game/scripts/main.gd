@@ -51,6 +51,13 @@ func _ready() -> void:
 	var we := WorldEnvironment.new()
 	we.environment = env
 	add_child(we)
+	weather = Weather.new()
+	weather.main = self
+	add_child(weather)
+	if info.get("weather") is Dictionary:
+		var w0: Dictionary = info.weather.duplicate()
+		w0["instant"] = true
+		weather.set_state(w0)
 
 	sun = DirectionalLight3D.new()
 	sun.directional_shadow_max_distance = 60.0
@@ -261,6 +268,21 @@ func _announce(text: String) -> void:
 	broadcast_chat("", text, "#ffe08a")
 
 
+# ---------- pogoda ----------
+
+var weather: Weather
+
+
+## Serwer: nowa pogoda albo niebo; trafia do wszystkich graczy. st: kind, intensity, sky.
+func set_weather(st: Dictionary) -> void:
+	var before := weather.state()
+	weather.set_state(st)
+	if Net.online() and Net.is_server():
+		Net.s_weather.rpc(weather.state())
+	if str(before.kind) != weather.kind:
+		Mods.emit_event("weather.changed", {"kind": weather.kind, "intensity": weather.target, "from": before.kind})
+
+
 # ---------- czat ----------
 
 var chat: Chat
@@ -332,6 +354,10 @@ func add_remote_player(p: int, name: String) -> void:
 	players[p] = node
 	var s := Mods.add_session(p, name, node, false)
 	node.session = s
+	s.lang = str(Net.peer_langs.get(p, "pl"))
+	var ws := weather.state()
+	ws["instant"] = true
+	Net.s_weather.rpc_id(p, ws)
 	Net.s_binds.rpc_id(p, Mods.binds)
 	for e in entities.entities.values():
 		Net.s_entity_spawn.rpc_id(p, entities.describe(e))
@@ -339,6 +365,8 @@ func add_remote_player(p: int, name: String) -> void:
 		var o: Session = Mods.sessions[q]
 		if o.logged_in and q != p:
 			Net.s_look.rpc_id(p, q, o.model_colors, o.anim_overrides)
+			if not o.wear.is_empty():
+				Net.s_wear.rpc_id(p, q, o.wear)
 	# logowanie: mod może zatrzymać gracza (ctx.wait = true) i przyjąć go później (engine.players.accept)
 	var ctx: Dictionary = Mods.as_player(p, func(): return Mods.before("player.login", {"id": p, "name": name}))
 	if ctx.get("cancel", false):
@@ -528,7 +556,7 @@ func players_snapshot() -> Array:
 		var n: Node3D = players[p]
 		out.append({"peer": p, "name": s.account, "pos": n.global_position, "vel": n.velocity,
 			"yaw": n.yaw, "pitch": n.pitch, "floor": n.is_on_floor() if n is Player else n.on_floor,
-			"mount": s.mount, "seat": s.mount_seat})
+			"mount": s.mount, "seat": s.mount_seat, "held": str(n.current_item().get("item", ""))})
 	return out
 
 
@@ -572,6 +600,14 @@ func player_anim(p: int, name: String) -> void:
 	var node: Node3D = players.get(p)
 	if node and node.model:
 		node.model.play(name)
+
+
+func player_wear(p: int, wear: Dictionary) -> void:
+	var node: Node3D = players.get(p)
+	if node == null and p == Net.my_id():
+		node = player
+	if node and node.model:
+		node.model.set_wear(wear)
 
 
 func player_look(p: int, colors: Dictionary, overrides: Dictionary) -> void:
@@ -632,7 +668,7 @@ func _process(delta: float) -> void:
 	if daynight:
 		time_of_day = fmod(time_of_day + delta * 24.0 / (day_minutes * 60.0), 24.0)
 		_update_sky()
-	elif Net.is_client():
+	elif Net.is_client() or (weather and (weather.intensity > 0.0 or not weather.sky.is_empty())):
 		_update_sky()
 	_update_underwater()
 	_update_hand_light()
@@ -804,11 +840,24 @@ func _update_sky() -> void:
 	sky_mat.sky_horizon_color = hor
 	sky_mat.ground_horizon_color = hor
 	sky_mat.ground_bottom_color = hor.darkened(0.4)
-	sun.light_energy = 0.75 * day
+	var amb := lerpf(0.025 if dark_nights else 0.07, 0.3, day)   # noc jest ciemna, żeby pochodnie miały znaczenie
+	var sun_e := 0.75 * day
+	if weather:
+		var w := weather.apply_sky(top, hor, sun_e, amb)
+		top = w[0]
+		hor = w[1]
+		sun_e = w[2]
+		amb = w[3]
+		sky_mat.sky_top_color = top
+		sky_mat.sky_horizon_color = hor
+		sky_mat.ground_horizon_color = hor
+		sky_mat.ground_bottom_color = hor.darkened(0.4)
+		if not was_underwater:
+			env.fog_density = fog_base * weather.fog_mul()
+	sun.light_energy = sun_e
 	sun.light_color = Color(1, 1, 1).lerp(Color(1.0, 0.72, 0.5), dusk)
 	sun.visible = day > 0.01
-	# noc jest ciemna, żeby pochodnie miały znaczenie (Ciemne noce: prawie czarno)
-	env.ambient_light_energy = lerpf(0.025 if dark_nights else 0.07, 0.3, day)
+	env.ambient_light_energy = amb
 	env.fog_light_color = hor
 
 
@@ -883,6 +932,7 @@ func save_game() -> void:
 	info.erase("player")
 	info["palette"] = Mods.registry.keys.duplicate()
 	info["time_of_day"] = time_of_day
+	info["weather"] = weather.state()
 	info["played"] = int(Time.get_unix_time_from_system())
 	GameState.current = info
 	GameState.write_info(GameState.current_dir, info)
@@ -1293,6 +1343,7 @@ func _autotest_client(dir: String) -> void:
 			send_chat(t)
 			await _wait(1.0)
 		print("KLIENT czat: ", chat.text_lines())
+		print("KLIENT pogoda: ", weather.state(), " gracze z kapeluszem/przedmiotem: ", players.values().map(func(n): return [n.model.held_key, n.model.wear_nodes.size()] if n is RemotePlayer else []))
 	if opt.has("walk"):
 		player.global_position += Vector3(float(opt.walk), 1.0, 0.0)
 		await _wait(1.0)
@@ -1616,6 +1667,10 @@ func _test_api(dir: String) -> void:
 	Mods.as_player(me, func(): return Mods.before("item.use", {"item": "test_launcher", "slot": 1}))
 	await _wait(1.0)
 	print("API strzał w owcę: ", Mods._h_storage_get("apitest", "last_hit"), " zdrowie owcy ", hp, " -> ", sheep.health if is_instance_valid(sheep) else "zginęła")
+	var lh: Variant = Mods._h_storage_get("apitest", "last_hit")
+	if lh is Dictionary and lh.has("entity"):
+		var he := entities.get_entity(int(lh.entity))
+		print("API trafione stworzenie: id=", lh.entity, " owca=", sid, " rodzaj=", he.type if he is Creature else "?")
 	get_tree().quit()
 
 
@@ -1697,6 +1752,57 @@ func _test_perf() -> void:
 
 
 ## Test logiki bloków: skrzynia (kierunek, kontener), piec (dane, plan, świecenie), uprawy (losowe, sąsiad), dźwięki.
+## Dodatki: tłumaczenia, dane przedmiotu na ziemi, wersje zależności, pogoda i niebo, przedmiot w ręce, kapelusz.
+func _test_extras(dir: String) -> void:
+	await _wait_loaded()
+	await _wait(0.5)
+	var me := Mods.local_peer
+	# tłumaczenia
+	print("I18N koń=", Mods.registry.entities.get("horse", {}).get("name", "?"), " pl=", Mods.translate("horses", "tamed", "pl"),
+		" en=", Mods.translate("horses", "tamed", "en"), " brak=", Mods.translate("horses", "nie_ma", "en"))
+	print("I18N engine.t: ", Mods.console_exec(me, "return engine.t('x')"))
+	# dane przedmiotu po wyrzuceniu i podniesieniu
+	Mods.set_slot(Mods.cid("backpack"), 26, {})   # wolne miejsce (zestawy startowe wielu modów zapełniają plecak)
+	var id := entities.drop_item("stone", 1, player.global_position + Vector3(0.5, 1.0, 0), {"ammo": 5, "owner": "test"})
+	await _wait(1.5)
+	var found := {}
+	for c in ["hotbar", "backpack"]:
+		for sl in Mods.container_slots(Mods.cid(c)):
+			if sl is Dictionary and sl.get("data") is Dictionary and sl.data.has("ammo"):
+				found = sl
+	print("DANE przedmiot na ziemi=", entities.get_entity(id) != null, " w plecaku=", found)
+	# wersje zależności
+	print("WERSJE ", ModManager.version_ok("1.2.3", ">=", "1.2"), ModManager.version_ok("1.2.3", "^", "2.0"), ModManager.version_ok("0.3.9", "~", "0.3.1"),
+		ModManager.version_ok("0.4.0", "~", "0.3.1"), " ", ModManager.dep_parse("modkit >= 0.2"))
+	var keep: Array = ModManager.manifests["horses"].get("requires", [])
+	ModManager.manifests["horses"]["requires"] = ["modkit>=9.0"]
+	Mods.load_errors.erase("horses")
+	Mods.resolve_load_order()
+	print("WERSJE błąd: ", Mods.load_errors.get("horses", ""))
+	ModManager.manifests["horses"]["requires"] = keep
+	Mods.load_errors.erase("horses")
+	# przedmiot w ręce i kapelusz
+	Mods.set_slot(Mods.cid("hotbar"), 0, {"item": "iron_sword" if Mods.registry.items.has("iron_sword") else "torch", "count": 1})
+	player.select(0)
+	Mods.as_player(me, func(): Mods.press_bind("emotes:hat"))
+	await _wait(0.4)
+	print("RĘKA ", player.model.held_key, " kapelusz części=", player.model.wear_nodes.size())
+	# pogoda
+	time_of_day = 12.0
+	Mods.console_exec(me, "engine.weather.set('rain', 1)")
+	await _wait(7.0)
+	print("POGODA ", weather.state(), " siła=", snappedf(weather.intensity, 0.01), " deszcz=", weather.rain.emitting if weather.rain else "brak okna", " mgła=", snappedf(env.fog_density / fog_base, 0.01))
+	await _shot(dir, "e1_rain_hat")
+	set_weather({"kind": "storm", "intensity": 1.0, "instant": true})
+	Mods.console_exec(me, "engine.sky.set({ top = '#4a2a5a', horizon = '#c0603a', sun = 0.6 })")
+	await _wait(1.0)
+	await _shot(dir, "e2_storm_sky")
+	Mods.console_exec(me, "engine.weather.set('clear') engine.sky.reset()")
+	await _wait(1.0)
+	print("POGODA po: ", weather.state())
+	get_tree().quit()
+
+
 ## Generator świata w Lua (mod ruins): ruiny, głazy, kryształy; zapisy przez granice chunków.
 func _test_worldgen(dir: String) -> void:
 	await _wait_loaded()
@@ -2149,6 +2255,9 @@ func _autotest(dir: String) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--creatures-only"):
 		await _test_creatures(dir)
+		return
+	if OS.get_cmdline_user_args().has("--extras-only"):
+		await _test_extras(dir)
 		return
 	if OS.get_cmdline_user_args().has("--worldgen-only"):
 		await _test_worldgen(dir)

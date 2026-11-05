@@ -1,0 +1,19 @@
+{
+	"title": "Handbook",
+	"tab.items": "Items",
+	"tab.mobs": "Creatures",
+	"tab.screen": "Screen",
+	"no_description": "No description.",
+	"item_info": "Key: {key} · stack: {stack}",
+	"food": " · food: {food}",
+	"take": "Take 1 (admin)",
+	"mobs.header": "Creatures in this world:",
+	"enemy": "  (hostile)",
+	"compass": "Compass on screen",
+	"compass.alpha": "Compass opacity",
+	"compass.place": "Compass position",
+	"place.top": "Top",
+	"place.top_left": "Top left",
+	"place.top_right": "Top right",
+	"key": "Handbook"
+}

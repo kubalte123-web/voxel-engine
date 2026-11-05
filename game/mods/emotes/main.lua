@@ -43,3 +43,19 @@ engine.hooks.after("camera.update", function(cam)
 		cam.yaw = cam.yaw + math.sin(angle) * 0.6
 	end
 end)
+
+-- Kapelusz pod klawiszem K: rzecz założona na głowę postaci (engine.player.wear), widzą ją wszyscy gracze.
+local HAT = { part = "head", boxes = {
+	{ size = { 0.62, 0.04, 0.62 }, pos = { 0, 0.5, 0 }, color = "#5a3a22" },     -- rondo
+	{ size = { 0.4, 0.22, 0.4 }, pos = { 0, 0.62, 0 }, color = "#6a4428" },      -- główka
+	{ size = { 0.41, 0.05, 0.41 }, pos = { 0, 0.54, 0 }, color = "#c8a040" },    -- wstążka
+	{ size = { 0.05, 0.16, 0.02 }, pos = { 0.16, 0.66, -0.2 }, color = "#d84040", rot = { 0, 0, 20 } },  -- piórko
+} }
+engine.input.bind({ id = "hat", key = "K", label = "Kapelusz", on_press = function()
+	local on = not engine.player.storage.get("hat", false)
+	engine.player.storage.set("hat", on)
+	engine.player.wear("hat", on and HAT or nil)
+end })
+engine.on("player.join", function()
+	if engine.player.storage.get("hat", false) then engine.player.wear("hat", HAT) end
+end)

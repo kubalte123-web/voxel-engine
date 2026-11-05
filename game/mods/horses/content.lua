@@ -9,7 +9,8 @@ local function leg(x, z, swing, color)
 	}
 end
 
-for _, v in ipairs({ { "horse", "Koń", "#8a5a34", "#4a2e1a" }, { "horse_white", "Siwy koń", "#d8d2c8", "#8a8478" } }) do
+-- nazwy z "@" tłumaczy silnik z plików lang/pl.json, lang/en.json (język z opcji gracza)
+for _, v in ipairs({ { "horse", "@horse", "#8a5a34", "#4a2e1a" }, { "horse_white", "@horse_white", "#d8d2c8", "#8a8478" } }) do
 	local COAT, MANE = v[3], v[4]
 	engine.entities.register(v[1], {
 		name = v[2],

@@ -41,7 +41,7 @@ end, 100)
 
 -- przedmioty leżące na ziemi i podnoszone obiekty trafiają do plecaka gracza, który je podniósł
 engine.hooks.before("item.pickup", function(ctx)
-	local left = kit.inventory.add_many({ HOTBAR, BACKPACK }, ctx.item, ctx.count)
+	local left = kit.inventory.add_many({ HOTBAR, BACKPACK }, ctx.item, ctx.count, ctx.data)
 	ctx.taken = ctx.count - left
 end)
 

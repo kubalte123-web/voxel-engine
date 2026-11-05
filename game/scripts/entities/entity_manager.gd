@@ -103,7 +103,7 @@ func spawn_prop(block: int, pos: Vector3, rot: Vector3 = Vector3.ZERO) -> int:
 	return id
 
 
-func drop_item(item: String, count: int, pos: Vector3) -> int:
+func drop_item(item: String, count: int, pos: Vector3, data: Dictionary = {}) -> int:
 	if not world.reg.items.has(item):
 		return -1
 	var d := ItemDrop.new()
@@ -114,6 +114,7 @@ func drop_item(item: String, count: int, pos: Vector3) -> int:
 	d.id = id
 	d.item = item
 	d.count = count
+	d.data = data.duplicate(true)
 	add_child(d)
 	d.global_position = pos
 	entities[id] = d
@@ -409,7 +410,7 @@ func load_from(dir: String) -> void:
 				spawn_prop(b, Vector3(s.pos[0], s.pos[1], s.pos[2]), Vector3(s.rot[0], s.rot[1], s.rot[2]))
 	for s in d.get("drops", []):
 		if s is Dictionary:
-			drop_item(str(s.item), int(s.count), Vector3(s.pos[0], s.pos[1], s.pos[2]))
+			drop_item(str(s.item), int(s.count), Vector3(s.pos[0], s.pos[1], s.pos[2]), s.get("data", {}) if s.get("data") is Dictionary else {})
 
 
 

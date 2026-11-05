@@ -4,7 +4,7 @@
 	"version": "0.1.0",
 	"author": "Jakub Lewicki",
 	"description": "Dzikie konie na łąkach. Oswój konia jabłkami albo pszenicą (kilka prób), potem kliknij go, żeby wsiąść. Na koniu jedziesz szybciej i skaczesz wyżej; Shift (albo dotknięcie w powietrze) zsiada. Przykład jazdy (pole ride), haka entity.interact z anulowaniem i danych stworzenia.",
-	"requires": ["modkit"],
+	"requires": ["modkit>=0.1"],
 	"after": ["base", "survival", "animals"],
 	"content": ["content.lua"],
 	"scripts": ["main.lua"],

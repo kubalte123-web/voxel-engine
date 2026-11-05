@@ -18,6 +18,7 @@ var player_name := "Gracz"  # nazwa gracza (konto w grze wieloosobowej, podpis n
 var last_address := "127.0.0.1"
 var last_port := 7777
 var sound_volume := 0.8  # głośność dźwięków 0..1
+var language := "pl"     # język tekstów modów (pliki lang/<język>.json)
 var brightness := 0.3    # jasność w ciemności (jaskinie, noc): 0 = prawie czarno, 1 = jaśniej
 
 
@@ -48,6 +49,7 @@ func load_settings() -> void:
 	brightness = cfg.get_value("video", "brightness", brightness)
 	sound_volume = cfg.get_value("audio", "volume", sound_volume)
 	player_name = cfg.get_value("player", "name", player_name)
+	language = cfg.get_value("player", "language", language)
 	last_address = cfg.get_value("player", "address", last_address)
 	last_port = cfg.get_value("player", "port", last_port)
 	mouse_sensitivity = cfg.get_value("controls", "mouse_sensitivity", mouse_sensitivity)
@@ -66,6 +68,7 @@ func save_settings() -> void:
 	cfg.set_value("video", "brightness", brightness)
 	cfg.set_value("audio", "volume", sound_volume)
 	cfg.set_value("player", "name", player_name)
+	cfg.set_value("player", "language", language)
 	cfg.set_value("player", "address", last_address)
 	cfg.set_value("player", "port", last_port)
 	cfg.set_value("controls", "mouse_sensitivity", mouse_sensitivity)

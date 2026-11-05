@@ -21,11 +21,23 @@ kit.inventory = {}
 -- Stosy z danymi egzemplarza (data) nie łączą się ze zwykłymi.
 
 -- Dodaje przedmioty do kontenera: najpierw dokłada do istniejących stosów, potem w puste miejsca.
+-- data (dane egzemplarza) – tylko w puste miejsca, bez łączenia ze stosami.
 -- Zwraca liczbę sztuk, które się nie zmieściły.
-function kit.inventory.add(container, item, count)
+function kit.inventory.add(container, item, count, data)
 	local size = engine.items.size(container)
 	local stack = engine.items.max_stack(item)
 	local left = count
+	if data ~= nil and next(data) ~= nil then
+		for i = 1, size do
+			if left <= 0 then break end
+			if engine.items.get(container, i).item == nil then
+				local n = math.min(left, stack)
+				engine.items.set(container, i, { item = item, count = n, data = data })
+				left = left - n
+			end
+		end
+		return left
+	end
 	for i = 1, size do
 		if left <= 0 then break end
 		local s = engine.items.get(container, i)
@@ -48,11 +60,11 @@ function kit.inventory.add(container, item, count)
 end
 
 -- To samo dla kilku kontenerów po kolei, np. {"hotbar", "backpack"}.
-function kit.inventory.add_many(containers, item, count)
+function kit.inventory.add_many(containers, item, count, data)
 	local left = count
 	for _, c in ipairs(containers) do
 		if left <= 0 then break end
-		left = kit.inventory.add(c, item, left)
+		left = kit.inventory.add(c, item, left, data)
 	end
 	return left
 end

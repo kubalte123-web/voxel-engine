@@ -20,6 +20,7 @@ const MAX_PLAYERS := 8
 const STATE_DT := 1.0 / 15.0
 const ENTITY_DT := 0.1
 
+var peer_langs := {}     # serwer: język klienta (przed utworzeniem sesji)
 var admins: Array = []   # konta administratorów serwera dedykowanego (--admin=a,b)
 var mode := "single"     # single | host | client | dedicated
 var peer: ENetMultiplayerPeer = null
@@ -459,8 +460,24 @@ func client_ready(content_hash: String) -> bool:
 		last_error = "Mody różnią się od serwera (inne bloki, przedmioty albo świat). Zaktualizuj mody."
 		leave()
 		return false
+	c_lang.rpc_id(1, Settings.language)
 	c_ready.rpc_id(1)
 	return true
+
+
+@rpc("any_peer", "reliable")
+func c_lang(lang: String) -> void:
+	var p := multiplayer.get_remote_sender_id()
+	peer_langs[p] = lang.left(8)
+	var s: Session = Mods.sessions.get(p)
+	if s:
+		s.lang = lang.left(8)
+
+
+@rpc("authority", "reliable")
+func s_weather(st: Dictionary) -> void:
+	if main and main.weather:
+		main.weather.set_state(st)
 
 
 @rpc("any_peer", "reliable")
@@ -573,6 +590,12 @@ func s_anim(p: int, name: String) -> void:
 func broadcast_look(s: Session) -> void:
 	if online() and is_server():
 		s_look.rpc(s.peer, s.model_colors, s.anim_overrides)
+
+
+@rpc("authority", "reliable")
+func s_wear(p: int, wear: Dictionary) -> void:
+	if main:
+		main.player_wear(p, wear)
 
 
 @rpc("authority", "reliable")

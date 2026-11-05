@@ -14,6 +14,7 @@ const BUILTIN := {
 	"tp": ["moderator", "/tp <x> <y> <z> | /tp <gracz> | /tp <gracz> <gracz>"],
 	"give": ["admin", "/give <przedmiot> [ilość] [gracz]"],
 	"time": ["moderator", "/time <godzina> | /time day | /time night"],
+	"weather": ["moderator", "/weather clear|rain|snow|storm [siła 0-1]"],
 	"kick": ["moderator", "/kick <gracz> [powód]"],
 	"op": ["admin", "/op <konto> – nadaje rolę administratora"],
 	"deop": ["admin", "/deop <konto> – odbiera rolę"],
@@ -117,6 +118,14 @@ static func _builtin(main: Node, p: int, name: String, args: Array, role: String
 			var h := 8.0 if a == "day" or a == "dzien" or a == "dzień" else 21.0 if a == "night" or a == "noc" else float(a)
 			main.time_of_day = fposmod(h, 24.0)
 			return "Ustawiono godzinę %.1f." % main.time_of_day
+		"weather":
+			if args.is_empty():
+				return "Pogoda: %s (%.1f)" % [main.weather.kind, main.weather.target]
+			var k := str(args[0]).to_lower()
+			if not ["clear", "rain", "snow", "storm"].has(k):
+				return BUILTIN.weather[1]
+			main.set_weather({"kind": k, "intensity": float(args[1]) if args.size() > 1 else 1.0})
+			return "Pogoda: " + k
 		"kick":
 			if args.is_empty():
 				return BUILTIN.kick[1]

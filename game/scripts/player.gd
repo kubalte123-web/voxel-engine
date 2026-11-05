@@ -267,6 +267,7 @@ func _update_camera(delta: float) -> void:
 	pivot.position = Vector3(0, float(cam.height) + mount_seat, 0) + Vector3(cos(yaw), 0, -sin(yaw)) * float(cam.side)
 	model.position.y = mount_seat
 	model.sitting = mount_id >= 0
+	model.set_held(str(current_item().get("item", "")))
 	pivot.rotation = Vector3(float(cam.pitch), float(cam.yaw), 0)
 	spring.spring_length = lerpf(spring.spring_length, float(cam.distance), minf(1.0, delta * 10.0))
 	camera.fov = Settings.fov + float(cam.fov_offset)

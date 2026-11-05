@@ -113,7 +113,7 @@ func _removed(p: Vector3i, old: int) -> void:
 		if Mods.containers.has(cid):
 			for sl in Mods.container_slots(cid):
 				if sl is Dictionary and not sl.is_empty() and main and main.entities:
-					main.entities.drop_item(str(sl.item), int(sl.count), Vector3(p) + Vector3(0.5, 0.5, 0.5))
+					main.entities.drop_item(str(sl.item), int(sl.count), Vector3(p) + Vector3(0.5, 0.5, 0.5), sl.get("data", {}) if sl.get("data") is Dictionary else {})
 			Mods.containers.erase(cid)
 
 

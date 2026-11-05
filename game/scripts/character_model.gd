@@ -56,6 +56,75 @@ var light_value := Vector2(-1, 0)
 func set_light(l: Vector2) -> void:
 	light_value = l
 	EntityLight.apply(mats.values(), l)
+	if held_sprite:
+		var f := EntityLight.factors(l)
+		var v := clampf(f.x + f.y, 0.0, 1.0)
+		held_sprite.modulate = Color(v, v, v)
+
+
+# ---------- przedmiot w ręce i rzeczy założone przez mody ----------
+
+var held_sprite: Sprite3D
+var held_key := ""
+var wear_nodes: Array = []
+
+
+## Przedmiot trzymany w prawej ręce (ikona). Pusty klucz chowa.
+func set_held(key: String) -> void:
+	if key == held_key or arms.size() < 2:
+		return
+	held_key = key
+	if held_sprite:
+		held_sprite.queue_free()
+		held_sprite = null
+	if key == "" or Mods.registry == null or not Mods.registry.items.has(key):
+		return
+	held_sprite = Sprite3D.new()
+	held_sprite.texture = Mods.registry.icon(key)
+	held_sprite.pixel_size = 0.36 / maxf(1.0, float(held_sprite.texture.get_width()))
+	held_sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	held_sprite.shaded = false
+	held_sprite.position = Vector3(0, -0.62, -0.14)
+	held_sprite.rotation_degrees = Vector3(-60, 90, 0)
+	arms[1].add_child(held_sprite)
+	set_light(light_value if light_value.x >= 0.0 else Vector2(1, 0))
+
+
+## Rzeczy założone przez mody (hełm, plecak, peleryna): id -> {part, boxes = {{size, pos, color, rot}}}.
+## part: body, head, arm_left, arm_right, leg_left, leg_right.
+func set_wear(wear: Dictionary) -> void:
+	for n in wear_nodes:
+		if is_instance_valid(n):
+			n.queue_free()
+	wear_nodes.clear()
+	for id in wear:
+		var w: Variant = wear[id]
+		if not w is Dictionary:
+			continue
+		var parent: Node3D = parts.get(str(w.get("part", "head")))
+		if parent == null:
+			continue
+		for b in Registry.arr(w.get("boxes")):
+			if not b is Dictionary:
+				continue
+			var col := TexGen._col(b.get("color", "#888888"), Color.GRAY)
+			var key := "wear|" + col.to_html()
+			if not mats.has(key):
+				var m := StandardMaterial3D.new()
+				m.albedo_color = col
+				m.roughness = 0.85
+				mats[key] = m
+			var mi := MeshInstance3D.new()
+			var bm := BoxMesh.new()
+			bm.size = Creature.vec(b.get("size"), Vector3(0.2, 0.2, 0.2))
+			mi.mesh = bm
+			mi.material_override = mats[key]
+			mi.position = Creature.vec(b.get("pos"))
+			mi.rotation_degrees = Creature.vec(b.get("rot"))
+			parent.add_child(mi)
+			wear_nodes.append(mi)
+	if light_value.x >= 0.0:
+		set_light(light_value)
 
 
 func _box(parent: Node3D, size: Vector3, pos: Vector3, slot: String) -> MeshInstance3D:

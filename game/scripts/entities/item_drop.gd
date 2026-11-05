@@ -8,6 +8,7 @@ var world: World
 var id := 0
 var item := ""
 var count := 1
+var data := {}       # dane egzemplarza (np. amunicja broni) – zostają po wyrzuceniu i podniesieniu
 var vy := 2.5
 var age := 0.0
 var sprite: Sprite3D
@@ -51,7 +52,7 @@ func _physics_process(delta: float) -> void:
 	sprite.position.y = 0.15 + sin(age * 2.5) * 0.06
 	var near: Node3D = manager.nearest_player(global_position)
 	if age > 0.6 and near and near.global_position.distance_to(global_position) < 1.6:
-		var ctx: Dictionary = Mods.as_player(EntityManager.peer_of(near), func(): return Mods.before("item.pickup", {"item": item, "count": count}))
+		var ctx: Dictionary = Mods.as_player(EntityManager.peer_of(near), func(): return Mods.before("item.pickup", {"item": item, "count": count, "data": data} if not data.is_empty() else {"item": item, "count": count}))
 		var taken := int(ctx.get("taken", 0))
 		if taken > 0:
 			Sfx.emit("item.pickup", global_position, 0.7)
@@ -65,4 +66,4 @@ func _physics_process(delta: float) -> void:
 
 func save_state() -> Dictionary:
 	var p := global_position
-	return {"item": item, "count": count, "pos": [p.x, p.y, p.z]}
+	return {"item": item, "count": count, "pos": [p.x, p.y, p.z], "data": data}

@@ -77,6 +77,7 @@ func apply_state(st: Dictionary) -> void:
 	if not is_server_side:
 		mount_id = int(st.get("mount", -1))
 		mount_seat = float(st.get("seat", 0.0))
+		model.set_held(str(st.get("held", "")))
 	if is_server_side:
 		target = _target(st.get("target", {}))
 		target_liq = _target(st.get("target_liq", {}))

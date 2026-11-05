@@ -19,6 +19,18 @@ func _ready() -> void:
 		s.player_name = t.strip_edges() if not t.strip_edges().is_empty() else "Gracz"
 		s.save_settings())
 	add_child(name_edit)
+	add_child(UI.label("Język tekstów modów", 16, UI.MUTED))
+	var lang := OptionButton.new()
+	lang.custom_minimum_size = Vector2(0, 44)
+	var langs := [["pl", "Polski"], ["en", "English"]]
+	for i in langs.size():
+		lang.add_item(langs[i][1])
+		if langs[i][0] == s.language:
+			lang.select(i)
+	lang.item_selected.connect(func(i: int):
+		s.language = langs[i][0]
+		s.save_settings())
+	add_child(lang)
 	add_child(UI.slider_row("Zasięg widzenia", 2, s.max_render_distance(), 1, s.render_distance,
 		func(v): return "%d chunków" % int(v), func(v): s.render_distance = int(v); s.save_settings()))
 	add_child(UI.slider_row("Daleki widok", 0, 4, 1, s.far_view,

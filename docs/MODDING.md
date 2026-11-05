@@ -49,7 +49,7 @@ tylko w fazie content; wywołane później zgłoszą błąd.
 | Pole | Znaczenie |
 | --- | --- |
 | `id` | Stały identyfikator, małe litery i podkreślenia |
-| `requires` | Mody, które muszą być włączone; wczytają się przed tym modem |
+| `requires` | Mody, które muszą być włączone; wczytają się przed tym modem. Z wersją: `"modkit>=0.2"`, `"ores^1.0"` (ta sama główna), `"base~0.3"` (ta sama główna i poboczna), `>`, `<`, `<=`, `=` |
 | `after` | Mody opcjonalne: jeśli są włączone, wczytają się wcześniej (biblioteka przez `engine.optional(id)`) |
 | `content` | Pliki Lua fazy content (rejestracja treści) |
 | `scripts` | Pliki Lua fazy scripts (logika w świecie) |
@@ -454,7 +454,9 @@ engine.items.set(hb, i, { item = "block_gun", count = 1, data = { ammo = 8, bloc
 ```
 
 Stosy z różnymi `data` się nie łączą (`kit.inventory.add` dokłada tylko do stosów bez danych), a
-`kit.inventory.take` zachowuje dane. Przedmiot upuszczony na ziemię (np. z rozbitej skrzyni) traci dane.
+`kit.inventory.take` zachowuje dane. Przedmiot upuszczony na ziemię (z rozbitej skrzyni, z kursora okna albo
+`engine.entities.drop(item, n, pos, data)`) zachowuje dane: hak `item.pickup` dostaje je w `ctx.data`, a plecak
+kładzie taki przedmiot na wolne miejsce.
 
 ## Świat
 
@@ -657,6 +659,7 @@ Wyższy priorytet działa wcześniej. Po `cancel` kolejne haki „before” się
 
 | Zdarzenie | Dane |
 | --- | --- |
+| `weather.changed` | `kind`, `from`, `intensity` – zmiana pogody |
 | `world_ready` | brak, po wczytaniu wszystkich modów |
 | `tick` | `dt` (0.1 s), `time` (godzina) – 10 razy na sekundę |
 | `player.land` | `fall` (wysokość upadku w blokach), `speed` |
@@ -748,6 +751,22 @@ Klatka to `{czas, {x, y, z}}`: obrót części w stopniach. Między klatkami ruc
 `engine.player.colors({ tunic = "#a83a32", scarf = "#e0b040" })`. Części: `skin`, `tunic`, `tunic_dark`,
 `trousers`, `boots`, `leather`, `scarf`, `hair`, `bedroll`, `gold`, `eye`, `mouth`, `nose`, `strap`.
 
+### Przedmiot w ręce i rzeczy na postaci
+
+Postać trzyma w prawej ręce wybrany przedmiot (ikona), widzą to wszyscy gracze. Mod może założyć na postać
+własne klocki – hełm, plecak, pelerynę:
+
+```lua
+engine.player.wear("helm", { part = "head", boxes = {
+	{ size = { 0.46, 0.2, 0.46 }, pos = { 0, 0.42, 0 }, color = "#8a8a94" },
+	{ size = { 0.06, 0.18, 0.02 }, pos = { 0, 0.3, -0.23 }, color = "#6a6a74" },
+} })
+engine.player.wear("helm", nil)   -- zdejmuje
+```
+
+Części: `body`, `head`, `arm_left`, `arm_right`, `leg_left`, `leg_right`; `pos` względem punktu obrotu części
+(głowa: szyja, ręce: bark, nogi: biodro). Przykład: kapelusz pod klawiszem K w modzie `emotes`.
+
 ### Okna
 
 ```lua
@@ -805,6 +824,35 @@ engine.ui.remove("kompas")
 ```
 
 Bez `anchor` paski i obrazki stoją w lewym górnym rogu jeden pod drugim, napisy po prawej.
+
+## Pogoda i niebo
+
+```lua
+engine.weather.set("rain", 0.8)       -- "clear", "rain", "snow", "storm"; siła 0..1
+local w = engine.weather.get()        -- {kind, intensity, sky}
+engine.sky.set({ top = "#4a2a5a", horizon = "#c0603a", fog = 2.0, sun = 0.6, ambient = 0.8 })
+engine.sky.reset()
+engine.on("weather.changed", function(e) ... end)   -- e.kind, e.from, e.intensity
+```
+
+Serwer ustawia pogodę, gracze widzą ją u siebie: deszcz w zimnych biomach pada jako śnieg, na pustyni nie
+pada, a pod dachem opadów nie widać. Pogoda przyciemnia niebo i słońce, zagęszcza mgłę i zapisuje się w świecie.
+Polecenie `/weather rain 0.5` (moderator).
+
+## Tłumaczenia
+
+Teksty moda mogą leżeć w plikach `lang/pl.json`, `lang/en.json` (płaski słownik klucz → tekst). Gracz wybiera
+język w opcjach („Język tekstów modów”).
+
+```lua
+-- content.lua: nazwa z "@" pochodzi z pliku języka
+engine.blocks.register("lamp", { name = "@lamp", ... })
+-- skrypty: tekst w języku gracza, którego dotyczy (w grze sieciowej każdy może mieć inny)
+engine.ui.notify(engine.t("welcome", { name = engine.player.name() }))   -- "Witaj, {name}!"
+```
+
+Brakujący klucz szuka się po kolei: w języku gracza, po polsku, po angielsku, w innych modach; na końcu zwracany
+jest sam klucz. Przykłady: mody `horses` i `handbook`.
 
 ## Czat, polecenia i uprawnienia
 
@@ -963,7 +1011,6 @@ a wspólnej metatabeli tekstów nie da się zmienić. Test: `godot --headless --
 
 ## Co będzie dalej
 
-- Kształty bloków w siatce chunka (półbloki, schody), modele z plików dla stworzeń i przedmiotów w ręce.
-- Czat i komendy, uprawnienia na serwerze.
-- Przedmioty z danymi (zużycie narzędzi), konsola modera i przeładowanie modów bez restartu.
-- Pobieranie brakujących modów z serwera przy dołączaniu.
+- Wymiary (osobne światy, np. jaskiniowy albo niebiański, z przejściem między nimi).
+- Tłumaczenie interfejsu samej gry (teraz tłumaczą się teksty modów).
+- Modele GLB dla przedmiotów w ręce i dla rzeczy zakładanych na postać.

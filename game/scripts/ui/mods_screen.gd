@@ -109,15 +109,22 @@ func _details() -> void:
 	var reqs: Array = m.get("requires", [])
 	if not reqs.is_empty():
 		var names := []
-		for r in reqs:
-			names.append(ModManager.manifests.get(r, {}).get("name", r + " (brak)"))
 		var ok := true
-		for r in reqs:
+		var bad := []
+		for req in reqs:
+			var d := ModManager.dep_parse(str(req))
+			var r: String = d[0]
+			names.append(str(ModManager.manifests.get(r, {}).get("name", r + " (brak)")) + (" %s%s" % [d[1], d[2]] if d[1] != "" else ""))
 			if not ModManager.is_enabled(r):
 				ok = false
-		details.add_child(UI.wrap("Wymaga: " + ", ".join(names), 16, UI.MUTED if ok else UI.DANGER))
+			var vp := ModManager.dep_version_problem(str(req))
+			if vp != "":
+				bad.append(vp)
+		details.add_child(UI.wrap("Wymaga: " + ", ".join(names), 16, UI.MUTED if ok and bad.is_empty() else UI.DANGER))
 		if not ok:
 			details.add_child(UI.wrap("Włącz wymagane mody, inaczej ten mod się nie wczyta.", 15, UI.DANGER))
+		if not bad.is_empty():
+			details.add_child(UI.wrap("Zła wersja: " + ", ".join(bad), 15, UI.DANGER))
 	var defs: Array = ModManager.setting_defs(selected)
 	if defs.is_empty():
 		details.add_child(UI.wrap("Ten mod nie ma ustawień."))

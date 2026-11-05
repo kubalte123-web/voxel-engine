@@ -112,6 +112,62 @@ func save_user(notify: bool = true) -> void:
 
 # ---------- kolejność i włączenie ----------
 
+# ---------- zależności z wersjami ----------
+
+## Wpis z "requires": "modkit", "modkit>=0.2", "backpack^1.0", "ores~0.3", "base=1.2.0" -> [id, op, wersja].
+static func dep_parse(r: String) -> Array:
+	var t := r.replace(" ", "")
+	for op in [">=", "<=", "==", "=", ">", "<", "^", "~"]:
+		var i := t.find(op)
+		if i > 0:
+			return [t.substr(0, i), "=" if op == "==" else op, t.substr(i + op.length())]
+	return [t, "", ""]
+
+
+static func _ver(v: String) -> Array:
+	var out := [0, 0, 0]
+	var parts := v.split(".")
+	for i in mini(3, parts.size()):
+		out[i] = int(parts[i])
+	return out
+
+
+static func _cmp(a: Array, b: Array) -> int:
+	for i in 3:
+		if a[i] != b[i]:
+			return -1 if a[i] < b[i] else 1
+	return 0
+
+
+## Czy wersja `have` spełnia warunek: ^ – ta sama główna wersja i nie starsza, ~ – ta sama główna i poboczna.
+static func version_ok(have: String, op: String, want: String) -> bool:
+	if op == "":
+		return true
+	var h := _ver(have)
+	var w := _ver(want)
+	var c := _cmp(h, w)
+	match op:
+		">=": return c >= 0
+		">": return c > 0
+		"<=": return c <= 0
+		"<": return c < 0
+		"=": return c == 0
+		"^": return c >= 0 and h[0] == w[0]
+		"~": return c >= 0 and h[0] == w[0] and h[1] == w[1]
+	return true
+
+
+## Opis niespełnionej wersji zależności albo "" (brak moda sprawdza się osobno).
+func dep_version_problem(r: String) -> String:
+	var d := dep_parse(r)
+	if not manifests.has(d[0]) or d[1] == "":
+		return ""
+	var have := str(manifests[d[0]].get("version", "0.0.0"))
+	if version_ok(have, d[1], d[2]):
+		return ""
+	return "%s %s%s (jest %s)" % [d[0], d[1], d[2], have]
+
+
 func effective_order() -> Array[String]:
 	if server_profile.has("order"):
 		var out: Array[String] = []

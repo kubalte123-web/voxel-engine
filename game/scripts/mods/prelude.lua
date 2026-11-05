@@ -606,8 +606,19 @@ local function expand_states(key, b)
 	return out
 end
 
+-- nazwy "@klucz" tłumaczone z plików lang/<język>.json moda
+local function tr_name(d)
+	if type(d) == "table" and type(d.name) == "string" and d.name:sub(1, 1) == "@" then
+		d.name = host.t(d.mod or "", d.name:sub(2))
+	end
+end
+
 local function finalize()
 	R.frozen = true
+	for _, k in ipairs(R.block_list) do tr_name(R.blocks[k]) end
+	for _, k in ipairs(R.item_list) do tr_name(R.items[k]) end
+	for _, d in pairs(R.entities) do tr_name(d) end
+	for _, d in pairs(R.effects) do tr_name(d) end
 	local blocks = {}
 	local list = {}
 	for _, key in ipairs(R.block_list) do
@@ -669,6 +680,20 @@ end
 local function make_api(mod_id)
 	local E = {}
 	E.mod = { id = mod_id }
+
+	-- tłumaczenie: engine.t("klucz", {nazwa = "Ola"}) -> tekst z lang/<język gracza>.json, "{nazwa}" podmienione
+	function E.t(key, args)
+		key = tostring(key):gsub("^@", "")
+		local text = host.t(mod_id, key)
+		if type(args) == "table" then
+			text = text:gsub("{([%w_]+)}", function(k)
+				local v = args[tonumber(k) or k]
+				if v == nil then return "{" .. k .. "}" end
+				return tostring(v)
+			end)
+		end
+		return text
+	end
 
 	function E.log(...)
 		local parts = {}
@@ -987,7 +1012,20 @@ local function make_api(mod_id)
 		-- najbliższy gracz w promieniu: {id, distance, position} albo nil
 		nearest_player = function(pos, radius) return to_lua(host.entity_nearest_player(VF(pos), radius or 16)) end,
 		-- przedmiot leżący na ziemi; gracz podnosi go, podchodząc (hak item.pickup)
-		drop = function(item, count, pos) return host.item_drop(item, count or 1, VF(pos)) end,
+		-- data: dane egzemplarza (zostają po podniesieniu, hak item.pickup dostaje ctx.data)
+		drop = function(item, count, pos, data) return host.item_drop(item, count or 1, VF(pos), to_godot(data or {})) end,
+	}
+
+	-- pogoda (serwer, widzą wszyscy): kind = "clear" | "rain" | "snow" | "storm", intensity 0..1
+	-- deszcz w zimnych biomach pada jako śnieg, na pustyni nie pada; pod dachem opadów nie widać
+	E.weather = {
+		set = function(kind, intensity) host.weather_set(tostring(kind or "clear"), intensity or 1) end,
+		get = function() return to_lua(host.weather_get()) end,
+	}
+	-- niebo: {top = kolor, horizon = kolor, fog = mnożnik mgły, sun = mnożnik słońca, ambient = mnożnik}
+	E.sky = {
+		set = function(t) host.sky_set(to_godot(t or {})) end,
+		reset = function() host.sky_set({}) end,
 	}
 
 	-- polecenia czatu: /nazwa argumenty; fn(ctx) z ctx.player, ctx.name, ctx.args (lista słów), ctx.text, ctx.role
@@ -1094,6 +1132,9 @@ local function make_api(mod_id)
 		stop_animation = function() host.player_animate("") end,
 		-- kolory części postaci: {tunic = "#aa3333", scarf = Color(...)} (klucze w docs/MODDING.md)
 		colors = function(t) host.player_colors(to_godot(t)) end,
+		-- rzecz założona na postać (widzą wszyscy): wear(id, {part = "head", boxes = {{size, pos, color, rot}}}),
+		-- wear(id, nil) zdejmuje; części: body, head, arm_left, arm_right, leg_left, leg_right
+		wear = function(id, spec) host.player_wear(tostring(id), spec and to_godot(spec) or nil) end,
 		-- blok, w który celuje gracz: {pos, normal, block}; with_liquids = true uwzględnia ciecze
 		target = function(with_liquids) return to_lua(host.player_target(with_liquids == true)) end,
 		-- statystyki: base = wartość bez modyfikatorów; modify dokłada modyfikator od źródła (add, mul)
