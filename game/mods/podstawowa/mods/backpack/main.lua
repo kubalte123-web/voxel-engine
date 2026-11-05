@@ -16,12 +16,19 @@ local function give(item, count)
 	return left
 end
 
--- Inne mody mogą dokładać sekcje do okna postaci (np. siatka rzemiosła): add_section(function() return {...} end)
+-- Inne mody mogą dokładać sekcje do okna postaci: add_section(fn) – prawa kolumna obok postaci
+-- (np. siatka rzemiosła 2×2), add_side(fn) – panel z lewej strony okna (np. księga przepisów, gdy otwarta).
+-- fn() zwraca listę sekcji (albo nil).
 local extra = {}
+local side = {}
+
+-- miejsca wyposażenia: głowa, tułów, nogi, buty, lewa ręka
+local EQUIP_HINTS = { "Głowa", "Tułów", "Nogi", "Buty", "Lewa ręka" }
 
 engine.export({
 	give = give, HOTBAR = HOTBAR, BACKPACK = BACKPACK, EQUIPMENT = EQUIPMENT,
 	add_section = function(fn) extra[#extra + 1] = fn end,
+	add_side = function(fn) side[#side + 1] = fn end,
 	open = function() open_window() end,
 })
 
@@ -29,7 +36,7 @@ engine.export({
 engine.on("player.join", function()
 	engine.items.container(HOTBAR, 8, true, true)
 	engine.items.container(BACKPACK, rows * 9, true, true)
-	engine.items.container(EQUIPMENT, 4, true, true)
+	engine.items.container(EQUIPMENT, #EQUIP_HINTS, true, true)
 	if not creative then engine.hotbar.bind(HOTBAR, 1, 8) end
 	if engine.settings.get("starter") and not engine.player.storage.get("started", false) then
 		kit.inventory.add(HOTBAR, "planks", 32)
@@ -85,27 +92,43 @@ local function total(container)
 	return n
 end
 
+-- Okno jak w MC, całe widoczne bez przewijania: u góry wyposażenie z lewej, postać, z prawej rzemiosło
+-- (sekcje innych modów); niżej plecak, na dole pasek. Panel boczny (np. księga przepisów) z lewej.
+local CELL = 46
+
 function open_window()
 	local pos = engine.player.position()
 	local st = stats()
-	local sections = {
-		{ type = "character", lines = {
-			engine.player.name(),
-			string.format("Zdrowie: %d / %d", math.floor(engine.player.health() + 0.5), engine.player.max_health()),
-			"Biom: " .. engine.world.biome(Vector3i(math.floor(pos.x), 0, math.floor(pos.z))),
-			"Wykopane bloki: " .. string.format("%d", st.mined),
-			"Postawione bloki: " .. string.format("%d", st.placed),
-			creative and "Tryb kreatywny" or ("Przedmioty w plecaku: " .. string.format("%d", total(BACKPACK))),
-		} },
-		{ type = "slots", container = EQUIPMENT, columns = 4, title = "Wyposażenie (głowa, tułów, nogi, buty)" },
-	}
+	local right = {}
 	for _, fn in ipairs(extra) do
-		for _, s in ipairs(fn() or {}) do sections[#sections + 1] = s end
+		for _, s in ipairs(fn() or {}) do right[#right + 1] = s end
 	end
-	sections[#sections + 1] = { type = "slots", container = BACKPACK, columns = 9, title = "Plecak" }
-	sections[#sections + 1] = { type = "slots", container = HOTBAR, columns = 8, title = "Pasek szybkiego dostępu" }
-	sections[#sections + 1] = { type = "text", text = "Kliknij, żeby wziąć stos, i kliknij inne miejsce, żeby go odłożyć. Prawy przycisk bierze połowę albo odkłada jedną sztukę." }
-	engine.ui.window({ id = "character", title = "Postać i plecak", sections = sections })
+	local info = string.format("%s · zdrowie %d/%d · %s · wykopane %d · postawione %d", engine.player.name(),
+		math.floor(engine.player.health() + 0.5), engine.player.max_health(),
+		engine.world.biome(Vector3i(math.floor(pos.x), 0, math.floor(pos.z))), st.mined, st.placed)
+	if creative then info = info .. " · tryb kreatywny" end
+	local main = {
+		{ type = "row", wrap = false, gap = 14, sections = {
+			{ type = "slots", container = EQUIPMENT, columns = 1, cell = CELL - 6, hints = EQUIP_HINTS, expand = false },
+			{ type = "character", width = 150, height = (CELL - 2) * #EQUIP_HINTS, expand = false },
+			{ type = "column", gap = 6, sections = right },
+		} },
+		{ type = "slots", container = BACKPACK, columns = 9, cell = CELL },
+		{ type = "slots", container = HOTBAR, columns = 8, cell = CELL },
+		{ type = "text", size = 13, color = "#9aa4b2", text = info },
+	}
+	local left = {}
+	for _, fn in ipairs(side) do
+		for _, s in ipairs(fn() or {}) do left[#left + 1] = s end
+	end
+	local sections = main
+	if #left > 0 then
+		sections = { { type = "row", wrap = false, gap = 18, sections = {
+			{ type = "column", gap = 6, sections = left, expand = false },
+			{ type = "column", gap = 8, sections = main, expand = false },
+		} } }
+	end
+	engine.ui.window({ id = "character", title = "Ekwipunek", fit = true, sections = sections })
 end
 
 engine.input.bind({

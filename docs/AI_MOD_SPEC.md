@@ -1024,8 +1024,22 @@ Więcej sekcji (wszystkie można zagnieżdżać w `row`, `column` i zakładkach)
 { type = "dropdown", id = "trudnosc", label = "Trudność", options = { "Łatwy", "Normalny" }, selected = 2, on_change = fn },
 { type = "item_button", id = "kup", item = "bread", count = 3, text = "Kup chleb", on_press = fn },
 { type = "text", text = "Uwaga!", size = 22, color = "#ffd060", align = "center" },
-{ type = "separator" }, { type = "space", size = 16 },
+{ type = "text", text = "→", size = 26, wrap = false },   -- krótki napis w jednej linii (bez zawijania)
+{ type = "separator" }, { type = "space", size = 16, width = 36 },
+-- sloty: wielkość komórki (px) i podpisy pustych miejsc (np. wyposażenie)
+{ type = "slots", container = "equipment", columns = 1, cell = 40, hints = { "Głowa", "Tułów", "Nogi", "Buty" } },
+{ type = "character", width = 150, height = 220 },   -- sam podgląd postaci (bez lines: bez tekstu obok)
 ```
+
+`fit = true` w oknie: okno ma rozmiar zawartości (np. ekwipunek widoczny cały, bez przewijania); bez tego
+okno ma stałą szerokość i przewija się, gdy zawartość jest dłuższa. `expand = false` przy sekcji w `row`
+nie rozciąga jej na wolne miejsce.
+
+Okno ekwipunku (mod `backpack`, klawisz E) przyjmuje sekcje innych modów: `backpack.add_section(fn)` dokłada
+je w prawej kolumnie obok postaci (tam jest siatka rzemiosła), `backpack.add_side(fn)` – panel z lewej
+strony okna (tam jest księga przepisów, gdy otwarta); `fn()` zwraca listę sekcji albo `nil`.
+Księga przepisów (mod `crafting_classic`) ma ustawienie: wszystkie przepisy, tylko odkryte (już wytworzone)
+albo z tego, co gracz zdobył (przepis widać, gdy gracz miał choć jeden składnik).
 
 `fields` w `on_press` i `on_change` zawiera wartości wszystkich pól okna po `id`: tekst pól, liczby suwaków,
 `true/false` przełączników, numer wybranej pozycji listy, listy rozwijanej i zakładki (od 1). `on_change`

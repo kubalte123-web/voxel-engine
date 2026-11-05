@@ -2539,6 +2539,55 @@ func _test_items(dir: String) -> void:
 	get_tree().quit()
 
 
+## Test ekwipunku: okno całe widoczne (bez przewijania), księga przepisów, ułożenie przepisu w siatce 2×2.
+func _test_inventory(dir: String) -> void:
+	await _wait_loaded()
+	await _wait(0.5)
+	var hb := Mods.cid("hotbar")
+	Mods.set_slot(hb, 0, {"item": "planks", "count": 8})
+	Mods.set_slot(hb, 1, {"item": "log", "count": 3})
+	Mods.set_slot(hb, 2, {"item": "iron_pickaxe", "count": 1})
+	Mods.press_bind("backpack:toggle")
+	await _wait(1.2)
+	await _shot(dir, "v1_inventory")
+	var w: ModWindow = windows.get("character")
+	if w == null:
+		print("EKWIPUNEK brak okna")
+		get_tree().quit()
+		return
+	var fits := w.scroll.get_v_scroll_bar().max_value <= w.scroll.size.y + 1.0
+	print("EKWIPUNEK okno=", w.scroll.size, " zawartość=", w.content.get_combined_minimum_size(), " bez przewijania=", fits)
+	w._press("backpack:book_toggle")
+	await _wait(0.8)
+	w = windows.get("character")
+	await _shot(dir, "v2_book")
+	# wybór przepisu na patyki (deski są w ekwipunku, więc przepis jest widoczny)
+	var names := []
+	var stick_n := 0
+	var list: ItemList = w.find_children("*", "ItemList", true, false)[0] if not w.find_children("*", "ItemList", true, false).is_empty() else null
+	if list:
+		for i in list.item_count:
+			names.append(list.get_item_text(i))
+			if list.get_item_text(i).begins_with("Patyk"):
+				stick_n = i + 1
+	print("EKWIPUNEK przepisy w księdze: ", names.size(), " ", names)
+	w.values["book_sel"] = stick_n
+	w._press("backpack:book_sel")
+	await _wait(0.6)
+	w = windows.get("character")
+	await _shot(dir, "v3_book_selected")
+	w._press("backpack:book_fill")
+	await _wait(0.6)
+	w = windows.get("character")
+	var grid := []
+	for i in 4:
+		grid.append(str(Mods.slot(Mods.cid("craft2"), i).get("item", "-")))
+	print("EKWIPUNEK siatka po ułożeniu: ", grid, " wynik=", Mods.slot(Mods.cid("craft2_out"), 0), " deski w pasku=", Mods.slot(hb, 0).get("count", 0))
+	await _shot(dir, "v4_filled")
+	w.close()
+	get_tree().quit()
+
+
 ## Test wchodzenia po schodach: 6 stopni schodów (po pół bloku), gracz idzie do przodu przez 4 s.
 ## Liczy skoki (prędkość w górę jak przy skoku) i największy przyrost wysokości kamery w jednej klatce.
 func _test_stairs(dir: String) -> void:
@@ -2880,6 +2929,9 @@ func _autotest(dir: String) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--seams-only"):
 		await _test_seams(dir)
+		return
+	if OS.get_cmdline_user_args().has("--inventory-only"):
+		await _test_inventory(dir)
 		return
 	if OS.get_cmdline_user_args().has("--items-only"):
 		await _test_items(dir)

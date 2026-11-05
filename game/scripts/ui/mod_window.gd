@@ -33,6 +33,7 @@ var _tab_init: Array = []   # [TabContainer, indeks] – ustawiane po wejściu d
 var held_icon: Control
 var slot_views := []       # [kontener, indeks, Button]
 var content: VBoxContainer
+var scroll: ScrollContainer
 var _refresh := 0.0
 
 
@@ -52,7 +53,7 @@ func _ready() -> void:
 	add_child(center)
 	var panel := PanelContainer.new()
 	center.add_child(panel)
-	var scroll := ScrollContainer.new()
+	scroll = ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	var vs := get_viewport_rect().size
 	scroll.custom_minimum_size = Vector2(minf(vs.x - 40.0, 720.0), minf(vs.y - 60.0, 600.0))
@@ -105,6 +106,11 @@ func _end_build() -> void:
 			(t[0] as TabContainer).current_tab = int(t[1])
 	_tab_init.clear()
 	_building = false
+	# fit = true: okno ma rozmiar zawartości (np. ekwipunek widoczny cały, bez przewijania)
+	if bool(spec.get("fit", false)):
+		var vs := get_viewport_rect().size
+		var want := content.get_combined_minimum_size() + Vector2(16, 8)
+		scroll.custom_minimum_size = Vector2(minf(vs.x - 40.0, maxf(want.x, 320.0)), minf(vs.y - 40.0, want.y))
 
 
 func _sections(list: Variant, parent: Container, narrow: bool, keep: Dictionary) -> void:
@@ -134,7 +140,12 @@ func _section(s: Dictionary, narrow: bool, keep: Dictionary) -> Control:
 		"slots":
 			return _slots(s, narrow)
 		"text":
-			var l := UI.wrap(str(s.get("text", "")), int(s.get("size", 17)), Color.from_string(str(s.get("color", "")), UI.TEXT))
+			# wrap = false: krótki napis w jednej linii (np. strzałka między siatką a wynikiem)
+			var col := Color.from_string(str(s.get("color", "")), UI.TEXT)
+			var l := UI.wrap(str(s.get("text", "")), int(s.get("size", 17)), col) if bool(s.get("wrap", true)) \
+				else UI.label(str(s.get("text", "")), int(s.get("size", 17)), col)
+			if not bool(s.get("wrap", true)):
+				l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 			match str(s.get("align", "")):
 				"center": l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 				"right": l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -242,6 +253,7 @@ func _section(s: Dictionary, narrow: bool, keep: Dictionary) -> Control:
 			var sel := int(s.get("selected", _kept.get(fid, 0)))
 			if sel >= 1 and sel <= il.item_count:
 				il.select(sel - 1)
+				il.ensure_current_is_visible.call_deferred()
 			values[fid] = sel
 			il.item_selected.connect(func(i: int):
 				values[fid] = i + 1
@@ -299,7 +311,7 @@ func _section(s: Dictionary, narrow: bool, keep: Dictionary) -> Control:
 			return HSeparator.new()
 		"space":
 			var sp := Control.new()
-			sp.custom_minimum_size = Vector2(0, float(s.get("size", 12)))
+			sp.custom_minimum_size = Vector2(float(s.get("width", 0)), float(s.get("size", 12)))
 			return sp
 	return null
 
@@ -355,12 +367,14 @@ func _character(s: Dictionary, narrow: bool) -> Control:
 	var row: BoxContainer = VBoxContainer.new() if narrow else HBoxContainer.new()
 	row.add_theme_constant_override("separation", 16)
 	var svc := SubViewportContainer.new()
-	svc.custom_minimum_size = Vector2(200, 240)
+	var w := int(s.get("width", 200))
+	var h := int(s.get("height", 240))
+	svc.custom_minimum_size = Vector2(w, h)
 	svc.stretch = true
 	var vp := SubViewport.new()
 	vp.own_world_3d = true
 	vp.transparent_bg = true
-	vp.size = Vector2i(200, 240)
+	vp.size = Vector2i(w, h)
 	svc.add_child(vp)
 	var cam := Camera3D.new()
 	cam.position = Vector3(0, 1.05, 2.7)
@@ -379,6 +393,9 @@ func _character(s: Dictionary, narrow: bool) -> Control:
 	model.rotation.y = PI
 	model.name = "Preview"
 	vp.add_child(model)
+	if Registry.arr(s.get("lines")).is_empty():
+		row.queue_free()
+		return svc   # sam podgląd postaci (bez tekstu obok)
 	row.add_child(svc)
 	var col := VBoxContainer.new()
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -398,20 +415,24 @@ func _slots(s: Dictionary, narrow: bool) -> Control:
 	var grid := GridContainer.new()
 	var n: int = Mods.container_slots(cid).size()
 	var cols := clampi(int(s.get("columns", 9)), 1, 12)
-	var cell := 52.0
+	var cell := float(s.get("cell", 52))
+	var gap := 6 if cell >= 48.0 else 4
 	var avail := minf(get_viewport_rect().size.x - 100.0, 670.0)
-	if cols * (cell + 6) > avail:
-		cell = maxf(36.0, avail / cols - 6)
+	if cols * (cell + gap) > avail:
+		cell = maxf(36.0, avail / cols - gap)
 	grid.columns = cols
-	grid.add_theme_constant_override("h_separation", 6)
-	grid.add_theme_constant_override("v_separation", 6)
+	grid.add_theme_constant_override("h_separation", gap)
+	grid.add_theme_constant_override("v_separation", gap)
+	var hints := Registry.arr(s.get("hints"))   # podpisy pustych miejsc (np. "Głowa", "Buty")
 	for i in n:
 		var b := Button.new()
 		b.custom_minimum_size = Vector2(cell, cell)
 		b.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		b.expand_icon = true
 		b.add_theme_font_size_override("font_size", 13)
-		b.add_theme_constant_override("icon_max_width", int(cell) - 16)
+		b.add_theme_constant_override("icon_max_width", int(cell) - 10)
+		if i < hints.size():
+			b.set_meta("hint", str(hints[i]))
 		var idx := i
 		b.gui_input.connect(func(e: InputEvent) -> void:
 			if not e is InputEventMouseButton:
@@ -480,8 +501,13 @@ func _update_slots() -> void:
 		var b: Button = v[2]
 		if sl.is_empty():
 			b.icon = null
-			b.text = ""
+			b.text = str(b.get_meta("hint", ""))   # pusty slot wyposażenia: co tu się zakłada
+			b.add_theme_font_size_override("font_size", 10 if b.has_meta("hint") else 13)
+			b.add_theme_color_override("font_color", UI.MUTED if b.has_meta("hint") else UI.TEXT)
+			b.tooltip_text = str(b.get_meta("hint", ""))
 		else:
+			b.add_theme_font_size_override("font_size", 13)
+			b.remove_theme_color_override("font_color")
 			b.icon = Mods.registry.icon(str(sl.item))
 			b.text = str(sl.count) if int(sl.count) > 1 else ""
 			b.tooltip_text = Mods.registry.tooltip(sl)

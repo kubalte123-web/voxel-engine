@@ -3,11 +3,12 @@
 	"name": "Rzemiosło klasyczne",
 	"version": "0.1.0",
 	"author": "Jakub Lewicki",
-	"description": "Rzemiosło jak w Minecrafcie: siatka 2×2 w oknie postaci i 3×3 przy stole rzemieślniczym. Przedmioty układa się według wzoru (przepisy kształtowe) albo w dowolnym miejscu (bezkształtne). Inne mody mogą dodawać przepisy: engine.require(\"crafting_classic\").shaped(...).",
+	"description": "Rzemiosło jak w Minecrafcie: siatka 2×2 w oknie postaci i 3×3 przy stole rzemieślniczym. Przedmioty układa się według wzoru (przepisy kształtowe) albo w dowolnym miejscu (bezkształtne). Księga przepisów w oknie ekwipunku pokazuje wzory i układa składniki w siatce. Inne mody mogą dodawać przepisy: engine.require(\"crafting_classic\").shaped(...).",
 	"requires": ["modkit", "backpack", "tools"],
 	"content": ["content.lua"],
 	"scripts": ["main.lua"],
 	"settings": [
-		{"key": "grid_in_inventory", "label": "Siatka 2×2 w oknie postaci", "type": "bool", "default": true}
+		{"key": "grid_in_inventory", "label": "Siatka 2×2 w oknie postaci", "type": "bool", "default": true},
+		{"key": "recipe_book", "label": "Księga przepisów pokazuje", "type": "choice", "options": ["Wszystkie przepisy", "Tylko odkryte (już wytworzone)", "Z tego, co gracz zdobył"], "default": "Z tego, co gracz zdobył"}
 	]
 }
