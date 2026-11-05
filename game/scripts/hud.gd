@@ -89,7 +89,7 @@ func _outlined(size_px: int) -> Label:
 
 
 func _update_help() -> void:
-	var t := "WASD ruch · Spacja skok · LPM kop · PPM postaw / użyj · 1-9 / kółko przedmiot · V widok · Esc pauza"
+	var t := "WASD ruch · Spacja skok · Ctrl bieg · Shift kucanie · X pełzanie · Z siad · LPM kop i atak (seria) · PPM postaw / użyj · 1-9 przedmiot · V widok · T czat · Esc pauza"
 	for b in Mods.binds:
 		if b.key != "":
 			t += " · %s %s" % [b.key, b.label]

@@ -653,6 +653,9 @@ function engine.player.stop_animation() end
 ---@param t any
 function engine.player.colors(t) end
 
+--- postawa: "stand" | "crouch" | "crawl" | "sit" (zdarzenie player.pose przy zmianie)
+function engine.player.pose() end
+
 --- rzecz założona na postać (widzą wszyscy): wear(id, {part = "head", boxes = {{size, pos, color, rot}}}),
 --- wear(id, nil) zdejmuje; części: body, head, arm_left, arm_right, leg_left, leg_right
 ---@param id any

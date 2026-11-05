@@ -35,6 +35,7 @@ func _layout() -> void:
 		"place": [Vector2(r - 20, b - 260), 48.0, "Postaw"],
 		"next": [Vector2(r - 180, b - 200), 32.0, "Blok"],
 		"view": [Vector2(size.x - 60, 60), 32.0, "Widok"],
+		"pose": [Vector2(r - 210, b - 70), 34.0, _pose_label()],
 		"menu": [Vector2(size.x - 140, 60), 32.0, "Menu"],
 	}
 	var i := 0
@@ -110,11 +111,30 @@ func _press(name: String, down: bool) -> void:
 			if down: player.select((player.selected + 1) % player.hotbar_size())
 		"view":
 			if down: player.toggle_view()
+		"pose":   # postawy po kolei: stoi -> kuca -> pełza -> siedzi
+			if down:
+				if player.pose == "stand":
+					player.touch_crouch = true
+				elif player.pose == "crouch":
+					player.touch_crouch = false
+					player.crawl_toggle = true
+				elif player.pose == "crawl":
+					player.crawl_toggle = false
+					player.sit_toggle = true
+				else:
+					player.sit_toggle = false
+					player.touch_crouch = false
 		"menu":
 			if down and main: main.open_pause()
 		_:
 			if down and mod_buttons.has(name):
 				Mods.press_bind(mod_buttons[name][0])
+
+
+func _pose_label() -> String:
+	if player == null:
+		return "Kucnij"
+	return {"stand": "Kucnij", "crouch": "Pełzaj", "crawl": "Usiądź", "sit": "Wstań"}.get(player.pose, "Kucnij")
 
 
 func _process(_delta: float) -> void:

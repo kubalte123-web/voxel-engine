@@ -469,7 +469,7 @@ func _remote_action(p: int, node: RemotePlayer, kind: String, args: Dictionary) 
 				var e: Node3D = entities.get_entity(int(args.get("id", -1)))
 				if e and e.global_position.distance_to(node.global_position) <= reach + 1.0:
 					if kind == "attack":
-						Actions.attack(node, e)
+						Actions.attack(node, e, int(args.get("stage", 1)))
 					elif kind == "kick":
 						Actions.kick(node, e, Vector3(args.get("dir", Vector3.FORWARD)))
 					else:
@@ -556,7 +556,8 @@ func players_snapshot() -> Array:
 		var n: Node3D = players[p]
 		out.append({"peer": p, "name": s.account, "pos": n.global_position, "vel": n.velocity,
 			"yaw": n.yaw, "pitch": n.pitch, "floor": n.is_on_floor() if n is Player else n.on_floor,
-			"mount": s.mount, "seat": s.mount_seat, "held": str(n.current_item().get("item", ""))})
+			"mount": s.mount, "seat": s.mount_seat, "held": str(n.current_item().get("item", "")),
+			"pose": n.pose, "sprint": n.sprinting, "dig": n.model.digging, "liquid": n.in_liquid, "act": [n.act_n, n.act_name]})
 	return out
 
 
@@ -593,7 +594,8 @@ func send_my_state() -> void:
 	Net.c_move.rpc_id(1, {"pos": player.global_position, "vel": player.velocity, "yaw": player.yaw,
 		"pitch": player.pitch, "floor": player.is_on_floor(), "target": Player._net_target(player.target),
 		"target_liq": Player._net_target(player.target_with_liquids()), "liquid": player.in_liquid,
-		"eyes": player.eyes_in_liquid, "cam": player.camera_mode()})
+		"eyes": player.eyes_in_liquid, "cam": player.camera_mode(), "pose": player.pose, "sprint": player.sprinting,
+		"dig": player.model.digging, "act": [player.act_n, player.act_name]})
 
 
 func player_anim(p: int, name: String) -> void:
@@ -948,6 +950,7 @@ func _setup_input() -> void:
 		"move_forward": [KEY_W, KEY_UP], "move_back": [KEY_S, KEY_DOWN],
 		"move_left": [KEY_A, KEY_LEFT], "move_right": [KEY_D, KEY_RIGHT],
 		"jump": [KEY_SPACE], "toggle_view": [KEY_V, KEY_F5], "dismount": [KEY_SHIFT],
+		"crawl": [KEY_X], "sit": [KEY_Z], "sprint": [KEY_CTRL],
 	}
 	for i in 9:
 		keys["slot_%d" % (i + 1)] = [KEY_1 + i]
@@ -1752,6 +1755,110 @@ func _test_perf() -> void:
 
 
 ## Test logiki bloków: skrzynia (kierunek, kontener), piec (dane, plan, świecenie), uprawy (losowe, sąsiad), dźwięki.
+## Postawy i animacje gracza: kucanie przy krawędzi, pełzanie pod niskim stropem, siedzenie, bieg, seria ataków.
+func _test_anim(dir: String) -> void:
+	await _wait_loaded()
+	await _wait(0.5)
+	time_of_day = 11.0
+	var reg := Mods.registry
+	var o := Vector3i(player.global_position.floor())
+	o.y -= 1
+	# platforma 5 x 5 nad przepaścią i tunel o wysokości 1 bloku
+	for x in range(-8, 9):
+		for z in range(-8, 9):
+			for y in range(-4, 5):
+				world.set_block(o + Vector3i(x, y, z), Blocks.AIR)
+	for x in range(-2, 3):
+		for z in range(-2, 3):
+			world.set_block(o + Vector3i(x, 0, z), reg.id_of("stone"))
+	for z in range(-2, 3):
+		world.set_block(o + Vector3i(2, 2, z), reg.id_of("planks"))   # strop nad x = 2 (szczelina 1 blok)
+	player.teleport(Vector3(o) + Vector3(0.5, 1.05, 0.5))
+	await _wait(0.6)
+	# kucanie: idziemy w stronę krawędzi (na zachód) i nie spadamy
+	player.yaw = PI / 2
+	Input.action_press("dismount")
+	Input.action_press("move_forward")
+	await _wait(2.0)
+	Input.action_release("move_forward")
+	print("POSTAWA kucanie: ", player.pose, " wysokość=", player.body_shape.size.y, " nad platformą=", snappedf(player.global_position.y - o.y, 0.01), " x=", snappedf(player.global_position.x - o.x, 0.01))
+	Mods.camera_stats["side"] = 2.2
+	await _wait(0.3)
+	await _shot(dir, "a1_crouch_edge")
+	Input.action_release("dismount")
+	# pełzanie pod strop
+	var ev := InputEventAction.new()
+	ev.action = "crawl"
+	ev.pressed = true
+	player._unhandled_input(ev)
+	await _wait(0.4)
+	player.teleport(Vector3(o) + Vector3(1.5, 1.05, 0.5))
+	player.yaw = -PI / 2   # na wschód, pod strop
+	Input.action_press("move_forward")
+	await _wait(1.0)
+	Input.action_release("move_forward")
+	print("POSTAWA pełzanie: ", player.pose, " wysokość=", player.body_shape.size.y, " x=", snappedf(player.global_position.x - o.x, 0.01))
+	player._unhandled_input(ev)   # próba wstania pod stropem
+	await _wait(0.3)
+	print("POSTAWA pod stropem po X: ", player.pose, " (powinno zostać pełzanie)")
+	await _shot(dir, "a2_crawl")
+	player.teleport(Vector3(o) + Vector3(-0.5, 1.05, 0.5))
+	await _wait(0.4)
+	print("POSTAWA po wyjściu spod stropu: ", player.pose)
+	# siedzenie
+	var es := InputEventAction.new()
+	es.action = "sit"
+	es.pressed = true
+	player._unhandled_input(es)
+	await _wait(0.8)
+	print("POSTAWA siad: ", player.pose)
+	await _shot(dir, "a3_sit")
+	player._unhandled_input(es)
+	# bieg
+	await _wait(0.3)
+	player.teleport(Vector3(o) + Vector3(-1.5, 1.05, 0.5))
+	for z in range(-8, 9):
+		for x in range(-8, 9):
+			world.set_block(o + Vector3i(x, 0, z), reg.id_of("stone"))
+	await _wait(0.3)
+	player.yaw = 0.0
+	Input.action_press("sprint")
+	Input.action_press("move_forward")
+	await _wait(0.6)
+	var v := Vector2(player.velocity.x, player.velocity.z).length()
+	print("POSTAWA bieg: sprint=", player.sprinting, " prędkość=", snappedf(v, 0.1))
+	await _shot(dir, "a4_run")
+	Input.action_release("move_forward")
+	Input.action_release("sprint")
+	# seria ataków na owcę
+	await _wait(0.4)
+	var sid := entities.spawn_creature("sheep", player.global_position + Vector3(0, 0.2, -2.0))
+	var sh: Creature = entities.get_entity(sid)
+	sh.set_physics_process(false)
+	Mods.camera_stats.erase("side")
+	Mods.camera_stats["mode"] = "first"
+	player.pitch = -0.25
+	await _wait(0.3)
+	var stages := []
+	var hp := [sh.health]
+	print("ATAKI cel: ", player.entity_target(), " blok=", player.target.get("pos"), " owca w ", sh.global_position, " gracz ", player.global_position)
+	for i in 3:
+		player.start_digging()
+		player.stop_digging()
+		stages.append(player.combo)
+		await _wait(0.16)
+		if i == 2:
+			Mods.camera_stats.erase("mode")
+			await _wait(0.05)
+			await _shot(dir, "a5_attack3")
+		await _wait(0.2)
+		hp.append(sh.health if is_instance_valid(sh) else -1.0)
+	print("ATAKI etapy=", stages, " zdrowie owcy=", hp, " akcje wysłane=", player.act_n)
+	Mods.camera_stats.erase("side")
+	Mods.camera_stats.erase("mode")
+	get_tree().quit()
+
+
 ## Rozdzielczość tekstur: ściana z marmuru (blok 128 px) obok kamienia i desek.
 func _test_hires(dir: String) -> void:
 	await _wait_loaded()
@@ -2284,6 +2391,9 @@ func _autotest(dir: String) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--creatures-only"):
 		await _test_creatures(dir)
+		return
+	if OS.get_cmdline_user_args().has("--anim-only"):
+		await _test_anim(dir)
 		return
 	if OS.get_cmdline_user_args().has("--hires-only"):
 		await _test_hires(dir)

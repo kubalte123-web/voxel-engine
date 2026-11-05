@@ -716,6 +716,7 @@ Wyższy priorytet działa wcześniej. Po `cancel` kolejne haki „before” się
 | Zdarzenie | Dane |
 | --- | --- |
 | `weather.changed` | `kind`, `from`, `intensity` – zmiana pogody |
+| `player.pose` | `pose` – gracz kuca, pełza, siada albo wstaje |
 | `world_ready` | brak, po wczytaniu wszystkich modów |
 | `tick` | `dt` (0.1 s), `time` (godzina) – 10 razy na sekundę |
 | `player.land` | `fall` (wysokość upadku w blokach), `speed` |
@@ -801,6 +802,17 @@ engine.animation.override("idle", "idle_look")   -- własna animacja zamiast odd
 ```
 
 Klatka to `{czas, {x, y, z}}`: obrót części w stopniach. Między klatkami ruch jest płynny.
+
+Postać ma wbudowane animacje proceduralne, które płynnie przechodzą jedna w drugą: stanie i oddech, chód,
+bieg (Ctrl), kucanie (Shift – wolniej i bez spadania z krawędzi), pełzanie (X – przejście szczeliną wysoką na
+1 blok; nie wstanie, dopóki nad głową nie ma miejsca), siedzenie (Z), jazda, pływanie, skok, spadanie i
+przysiad po lądowaniu. Do tego akcje: kopanie (pętla zamachów), machnięcie przy stawianiu, seria trzech ataków
+(cięcie, cięcie odwrotne, uderzenie z góry – szybkie kliknięcia, trzecie zadaje 1,5× obrażeń) i odrzut po
+zranieniu. Inni gracze widzą postawę i akcje. Na telefonie przycisk „Kucnij” zmienia postawę po kolei.
+
+`engine.animation.override(stan, animacja)` działa dla stanów: `idle`, `walk`, `run`, `jump`, `crouch`,
+`crawl`, `sit`, `swim`. `engine.player.pose()` zwraca postawę gracza, a zdarzenie `player.pose` mówi o zmianie.
+Podgląd animacji: `tools/anim_preview.tscn` (obrazek z klatkami z boku i z przodu).
 
 ### Kolory postaci
 

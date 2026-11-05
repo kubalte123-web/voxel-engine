@@ -28,6 +28,11 @@ var speed := 0.0
 var health := 20.0
 var mount_id := -1
 var mount_seat := 0.0
+var pose := "stand"
+var sprinting := false
+var act_n := 0
+var act_name := ""
+var _seen_act := -1
 var net_pos := Vector3.ZERO
 var label_timer := 0.0
 var _step := 0.0
@@ -74,6 +79,19 @@ func apply_state(st: Dictionary) -> void:
 	pitch = float(st.get("pitch", pitch))
 	velocity = st.get("vel", velocity)
 	on_floor = bool(st.get("floor", on_floor))
+	pose = str(st.get("pose", pose))
+	sprinting = bool(st.get("sprint", false))
+	model.digging = bool(st.get("dig", false))
+	if st.has("liquid"):
+		in_liquid = bool(st.liquid)
+	var act: Variant = st.get("act")
+	if act is Array and act.size() >= 2:
+		var n := int(act[0])
+		if _seen_act >= 0 and n > _seen_act and str(act[1]) != "":
+			model.play_action(str(act[1]))
+		_seen_act = n
+		act_n = n
+		act_name = str(act[1])
 	if not is_server_side:
 		mount_id = int(st.get("mount", -1))
 		mount_seat = float(st.get("seat", 0.0))
@@ -101,6 +119,10 @@ func _process(delta: float) -> void:
 		model.rotation.y = lerp_angle(model.rotation.y, atan2(-velocity.x, -velocity.z), minf(1.0, delta * 10.0))
 	model.position.y = mount_seat
 	model.sitting = mount_id >= 0
+	model.pose = pose
+	model.sprinting = sprinting
+	model.swimming = in_liquid and not on_floor
+	model.vertical = velocity.y
 	label.position.y = 2.25 + mount_seat
 	model.animate(delta, speed, on_floor or in_liquid, pitch)
 	# kroki innego gracza słyszymy u siebie (bez wysyłania przez sieć)

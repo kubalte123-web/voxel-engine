@@ -198,59 +198,284 @@ func _ready() -> void:
 	apply_colors(Mods.model_colors)
 
 
-## speed: prędkość pozioma, on_floor: czy stoi, look_pitch: kąt kamery (głowa lekko podąża).
+## Animacja proceduralna: każda postawa (stanie i chód, bieg, kucanie, pełzanie, siedzenie, jazda, pływanie,
+## skok i spadanie) liczy docelowe kąty stawów, postawy przenikają się płynnie (wagi), a stawy dochodzą do
+## celu wykładniczo (bez szarpnięć przy zmianie stanu). Na to nakładają się akcje: machnięcie, kopanie,
+## ataki w serii (attack1, attack2, attack3), zranienie i lądowanie.
+## Kąty: dodatnie x unosi zwisającą kończynę do przodu i odchyla tułów do tyłu; dodatnie y obraca w lewo.
+
+var pose := "stand"        # stand | crouch | crawl | sit (ustawia gracz)
+var swimming := false
+var digging := false       # kopanie bloku (pętla machnięć)
+var sprinting := false
+var vertical := 0.0        # prędkość pionowa (skok w górę, spadanie)
+var action := {}           # {name, time, length}
+var _w := {"crouch": 0.0, "crawl": 0.0, "sit": 0.0, "ride": 0.0, "air": 0.0, "swim": 0.0}
+var _was_floor := true
+var _land := 0.0
+var _land_power := 0.0
+var _dig_t := 0.0
+
+const ACTIONS := {"swing": 0.28, "attack1": 0.34, "attack2": 0.34, "attack3": 0.55, "hurt": 0.3, "dig": 0.3}
+
+
+static func _k(rate: float, delta: float) -> float:
+	return 1.0 - exp(-rate * delta)
+
+
+static func _ease(x: float) -> float:
+	x = clampf(x, 0.0, 1.0)
+	return x * x * (3.0 - 2.0 * x)
+
+
+## Jednorazowa akcja: swing, attack1, attack2, attack3, hurt (wbudowane) albo animacja klatkowa moda.
+signal acted(name: String)
+
+
+func play_action(name: String) -> void:
+	if not action.is_empty() and action.name == name and float(action.time) < 0.08:
+		return   # ta sama akcja przed chwilą (np. z serwera i od gracza)
+	acted.emit(name)
+	if ACTIONS.has(name):
+		action = {"name": name, "time": 0.0, "length": float(ACTIONS[name])}
+	else:
+		play(name)
+
+
+func reset_pose() -> void:
+	for n in [legs[0], legs[1], arms[0], arms[1], head]:
+		n.rotation = Vector3.ZERO
+	torso.rotation = Vector3.ZERO
+	torso.position = Vector3(0, 0.76, 0)
+	for k in _w:
+		_w[k] = 0.0
+	action = {}
+	walk_phase = 0.0
+	t = 0.0
+
+
+## Podgląd (tools/anim_preview.gd): postawa albo akcja po czasie `time` od początku.
+func preview(what: String, speed: float, time: float) -> void:
+	reset_pose()
+	pose = "stand"
+	swimming = false
+	digging = false
+	sprinting = false
+	sitting = false
+	var floor := true
+	match what:
+		"crouch", "crawl", "sit": pose = what
+		"swim": swimming = true; floor = false
+		"ride": sitting = true
+		"run": sprinting = true
+		"jump": floor = false; vertical = 5.0
+		"fall": floor = false; vertical = -12.0
+		"dig": digging = true
+		"stand", "walk": pass
+		_: play_action(what)
+	var step := 1.0 / 60.0
+	var n := int(time / step) + 30
+	if ACTIONS.has(what):
+		n = int(time / step)
+		for i in 30:   # ustalona postawa przed akcją
+			var keep := action
+			action = {}
+			animate(step, speed, floor, 0.0)
+			action = keep
+	for i in n:
+		animate(step, speed, floor, 0.0)
+
+
+## speed: prędkość pozioma, on_floor: czy stoi, look_pitch: kąt kamery (ujemny: patrzy w dół).
 func animate(delta: float, speed: float, on_floor: bool, look_pitch: float) -> void:
 	t += delta
-	var state := "jump" if not on_floor else ("walk" if speed > 0.3 else "idle")
+	var crawl := pose == "crawl"
+	# wagi postaw – płynne przejścia
+	var want := {"crouch": pose == "crouch", "crawl": crawl, "sit": pose == "sit" and not sitting, "ride": sitting,
+		"swim": swimming and not on_floor and not sitting, "air": not on_floor and not swimming and not sitting}
+	for k in _w:
+		_w[k] = lerpf(_w[k], 1.0 if want[k] else 0.0, _k(9.0, delta))
+	# lądowanie po upadku: przysiad
+	if on_floor and not _was_floor and vertical < -5.0:
+		_land = 1.0
+		_land_power = clampf(-vertical / 18.0, 0.3, 1.0)
+	_was_floor = on_floor
+	_land = maxf(0.0, _land - delta / 0.3)
+
 	var moving := clampf(speed / 4.5, 0.0, 1.0)
-	walk_phase += delta * (4.0 + speed * 1.8) * (1.0 if moving > 0.05 else 0.0)
+	var run := clampf((speed - 4.6) / 2.5, 0.0, 1.0) if sprinting else 0.0
+	var cadence := 3.4 + speed * 1.7
+	if crawl:
+		cadence = 2.0 + speed * 2.2
+	walk_phase += delta * cadence * (1.0 if speed > 0.25 else 0.0)
 	var s := sin(walk_phase)
-	var leg_amp := 0.75 * moving
-	var arm_amp := 0.6 * moving
-	if sitting:
+	var c := cos(walk_phase)
+	var breath := sin(t * 1.8)
+	var state := "walk" if speed > 0.3 else "idle"
+
+	# ---------- stanie, chód i bieg ----------
+	var stride := 0.7 * moving + 0.35 * run
+	var L := [Vector3(s * stride, 0, 0), Vector3(-s * stride, 0, 0)]
+	var A := [Vector3(-s * (0.55 * moving + 0.45 * run) - breath * 0.03 * (1.0 - moving), 0, -0.07 - 0.02 * (1.0 - moving)),
+		Vector3(s * (0.55 * moving + 0.45 * run) - breath * 0.03 * (1.0 - moving), 0, 0.07 + 0.02 * (1.0 - moving))]
+	if run > 0.0:   # w biegu łokcie wyżej
+		A[0].x += 0.25 * run
+		A[1].x += 0.25 * run
+	var T_rot := Vector3(-0.05 * moving - 0.22 * run, s * 0.1 * moving, c * 0.03 * moving)
+	var T_y := 0.76 + absf(c) * (0.045 * moving + 0.05 * run) + breath * 0.006 * (1.0 - moving)
+	var H := Vector3(clampf(look_pitch * 0.45, -0.5, 0.4) + 0.05 * moving, -s * 0.08 * moving, 0)
+	if speed > 0.3:
+		state = "run" if run > 0.3 else "walk"
+
+	# ---------- postawy (mieszane wagami) ----------
+	var wc: float = _w.crouch
+	if wc > 0.001:
+		L = _mixv(L, [Vector3(s * stride * 0.5 + 0.35, 0, -0.08), Vector3(-s * stride * 0.5 + 0.35, 0, 0.08)], wc)
+		A = _mixv(A, [Vector3(-s * 0.3 * moving + 0.35, 0, -0.18), Vector3(s * 0.3 * moving + 0.35, 0, 0.18)], wc)
+		T_rot = T_rot.lerp(Vector3(-0.5, s * 0.06 * moving, 0), wc)
+		T_y = lerpf(T_y, 0.6 + absf(c) * 0.02 * moving, wc)
+		H = H.lerp(Vector3(0.38 + look_pitch * 0.3, 0, 0), wc)
+		if pose == "crouch":
+			state = "crouch"
+	var wr: float = _w.crawl
+	if wr > 0.001:
+		L = _mixv(L, [Vector3(-1.5 + s * 0.35 * moving, 0, -0.1), Vector3(-1.5 - s * 0.35 * moving, 0, 0.1)], wr)
+		A = _mixv(A, [Vector3(2.7 + s * 0.45 * moving, 0, -0.25), Vector3(2.7 - s * 0.45 * moving, 0, 0.25)], wr)
+		T_rot = T_rot.lerp(Vector3(-1.5, s * 0.12 * moving, s * 0.08 * moving), wr)
+		T_y = lerpf(T_y, 0.2 + absf(c) * 0.03 * moving, wr)
+		H = H.lerp(Vector3(1.25 + look_pitch * 0.3, -s * 0.1 * moving, 0), wr)
+		if crawl:
+			state = "crawl"
+	var ws: float = _w.sit
+	if ws > 0.001:
+		L = _mixv(L, [Vector3(1.45, 0.12, -0.12), Vector3(1.45, -0.12, 0.12)], ws)
+		A = _mixv(A, [Vector3(0.55 + breath * 0.02, 0, -0.12), Vector3(0.55 + breath * 0.02, 0, 0.12)], ws)
+		T_rot = T_rot.lerp(Vector3(0.08 + breath * 0.01, 0, 0), ws)
+		T_y = lerpf(T_y, 0.34, ws)
+		if pose == "sit":
+			state = "sit"
+	var wd: float = _w.ride
+	if wd > 0.001:
+		L = _mixv(L, [Vector3(1.3, 0, -0.3), Vector3(1.3, 0, 0.3)], wd)
+		A = _mixv(A, [Vector3(0.6, 0, -0.1), Vector3(0.6, 0, 0.1)], wd)
+		T_rot = T_rot.lerp(Vector3(-0.08 + absf(c) * 0.04 * moving, 0, 0), wd)
+		T_y = lerpf(T_y, 0.76 + absf(s) * 0.03 * moving, wd)
 		state = "sit"
-		moving = 0.0
-		legs[0].rotation.x = lerpf(legs[0].rotation.x, -1.35, delta * 10.0)
-		legs[1].rotation.x = lerpf(legs[1].rotation.x, -1.35, delta * 10.0)
-		legs[0].rotation.z = lerpf(legs[0].rotation.z, 0.25, delta * 10.0)
-		legs[1].rotation.z = lerpf(legs[1].rotation.z, -0.25, delta * 10.0)
-		arms[0].rotation.x = lerpf(arms[0].rotation.x, -0.6, delta * 8.0)
-		arms[1].rotation.x = lerpf(arms[1].rotation.x, -0.6, delta * 8.0)
-	elif not on_floor:
-		legs[0].rotation.x = lerpf(legs[0].rotation.x, -0.5, delta * 8.0)
-		legs[1].rotation.x = lerpf(legs[1].rotation.x, 0.35, delta * 8.0)
-		arms[0].rotation.x = lerpf(arms[0].rotation.x, -1.0, delta * 8.0)
-		arms[1].rotation.x = lerpf(arms[1].rotation.x, -1.0, delta * 8.0)
-		arms[0].rotation.z = lerpf(arms[0].rotation.z, -0.35, delta * 8.0)
-		arms[1].rotation.z = lerpf(arms[1].rotation.z, 0.35, delta * 8.0)
+	var wsw: float = _w.swim
+	if wsw > 0.001:
+		var sw := t * 4.0
+		L = _mixv(L, [Vector3(-1.3 + sin(t * 9.0) * 0.3, 0, -0.08), Vector3(-1.3 - sin(t * 9.0) * 0.3, 0, 0.08)], wsw)
+		A = _mixv(A, [Vector3(2.4 + sin(sw) * 0.6, cos(sw) * 0.5, -0.4 - cos(sw) * 0.4), Vector3(2.4 + sin(sw) * 0.6, -cos(sw) * 0.5, 0.4 + cos(sw) * 0.4)], wsw)
+		T_rot = T_rot.lerp(Vector3(-1.2 * moving - 0.2, 0, sin(t * 2.0) * 0.06), wsw)
+		T_y = lerpf(T_y, 0.76, wsw)
+		H = H.lerp(Vector3(1.0 * moving + look_pitch * 0.3, 0, 0), wsw)
+		state = "swim"
+	var wa: float = _w.air
+	if wa > 0.001:
+		var up := clampf(vertical / 6.0, -1.0, 1.0)
+		var flail := sin(t * 14.0) * 0.25 * clampf(-vertical / 10.0, 0.0, 1.0)
+		L = _mixv(L, [Vector3(0.55 - up * 0.1, 0, -0.06), Vector3(-0.35 + up * 0.1, 0, 0.06)], wa)
+		A = _mixv(A, [Vector3(0.5 + up * 0.9 + flail, 0, -0.45 - flail), Vector3(0.5 + up * 0.9 - flail, 0, 0.45 + flail)], wa)
+		T_rot = T_rot.lerp(Vector3(-0.08 * up, 0, 0), wa)
+		state = "jump"
+	# lądowanie: krótki przysiad
+	if _land > 0.0:
+		var k := sin(_land * PI) * _land_power
+		T_y -= 0.12 * k
+		T_rot.x -= 0.25 * k
+		A[0].z -= 0.35 * k
+		A[1].z += 0.35 * k
+		L[0].x += 0.25 * k
+		L[1].x += 0.25 * k
+
+	# ---------- akcje: kopanie, machnięcie, ataki w serii, zranienie ----------
+	if digging and pose != "crawl":
+		_dig_t += delta
+		var cyc := fmod(_dig_t / float(ACTIONS.dig), 1.0)
+		var raise := _ease(cyc / 0.55) if cyc < 0.55 else 1.0 - _ease((cyc - 0.55) / 0.3)
+		A[1] = Vector3(lerpf(0.55, 2.35, raise), 0.15, 0.12)
+		A[0].x = lerpf(A[0].x, 0.45, 0.6)
+		T_rot.x += -0.12 * (1.0 - raise)
+		T_rot.y += -0.15
 	else:
-		legs[0].rotation.z = lerpf(legs[0].rotation.z, 0.0, delta * 10.0)
-		legs[1].rotation.z = lerpf(legs[1].rotation.z, 0.0, delta * 10.0)
-		legs[0].rotation.x = lerpf(legs[0].rotation.x, s * leg_amp, delta * 14.0)
-		legs[1].rotation.x = lerpf(legs[1].rotation.x, -s * leg_amp, delta * 14.0)
-		var idle := sin(t * 1.8) * 0.04 * (1.0 - moving)
-		arms[0].rotation.x = lerpf(arms[0].rotation.x, -s * arm_amp + idle, delta * 14.0)
-		arms[1].rotation.x = lerpf(arms[1].rotation.x, s * arm_amp - idle, delta * 14.0)
-		arms[0].rotation.z = lerpf(arms[0].rotation.z, -0.06, delta * 10.0)
-		arms[1].rotation.z = lerpf(arms[1].rotation.z, 0.06, delta * 10.0)
-	# machnięcie prawą ręką przy kopaniu i stawianiu
-	if swing > 0.0:
-		swing = maxf(0.0, swing - delta * 4.0)
-		var k := sin(swing * PI)
-		arms[1].rotation.x = -1.6 * k - 0.2
-	# kołysanie tułowia przy chodzie i oddech w miejscu
-	var bob := absf(s) * 0.05 * moving
-	torso.position.y = 0.76 + bob + sin(t * 1.8) * 0.006 * (1.0 - moving)
-	torso.rotation.y = s * 0.08 * moving
-	torso.rotation.x = 0.06 * moving
-	head.rotation.x = clampf(-look_pitch * 0.4, -0.35, 0.35)
-	head.rotation.y = -s * 0.06 * moving
-	scarf_tail.rotation.x = 0.25 + 0.4 * moving + sin(t * 3.0 + walk_phase) * 0.12
+		_dig_t = 0.0
+	if swing > 0.0:   # stary wywołujący: do_swing() = machnięcie
+		action = {"name": "swing", "time": 0.0, "length": float(ACTIONS.swing)}
+		swing = 0.0
+	if not action.is_empty():
+		action.time += delta
+		var p: float = action.time / float(action.length)
+		if p >= 1.0:
+			action = {}
+		else:
+			var env := minf(1.0, minf(p / 0.12, (1.0 - p) / 0.2))   # wejście i wyjście z akcji
+			var a := _action_pose(str(action.name), p)
+			if a.has("A1"):
+				A[1] = A[1].lerp(a.A1, env)
+			if a.has("A0"):
+				A[0] = A[0].lerp(a.A0, env)
+			if a.has("T"):
+				T_rot += a.T * env
+			if a.has("Ty"):
+				T_y += float(a.Ty) * env
+			if a.has("H"):
+				H += a.H * env
+			if a.has("L"):
+				L[0].x += float(a.L) * env
+				L[1].x -= float(a.L) * env * 0.5
+
+	# ---------- stawy dochodzą do celu ----------
+	var r := _k(16.0, delta)
+	var rf := _k(26.0, delta)   # akcje szybciej
+	var ra := rf if not action.is_empty() or digging else r
+	legs[0].rotation = legs[0].rotation.lerp(L[0], r)
+	legs[1].rotation = legs[1].rotation.lerp(L[1], r)
+	arms[0].rotation = arms[0].rotation.lerp(A[0], ra)
+	arms[1].rotation = arms[1].rotation.lerp(A[1], ra)
+	torso.rotation = torso.rotation.lerp(T_rot, ra)
+	torso.position.y = lerpf(torso.position.y, T_y, r)
+	# nogi idą za biodrem (przy kucaniu, pełzaniu i siedzeniu biodro jest niżej)
+	legs[0].position.y = minf(torso.position.y, 0.76)
+	legs[1].position.y = minf(torso.position.y, 0.76)
+	head.rotation = head.rotation.lerp(H, _k(10.0, delta))
+	scarf_tail.rotation.x = lerpf(scarf_tail.rotation.x, 0.25 + 0.5 * moving + 0.4 * wa + sin(t * 3.0 + walk_phase) * 0.12, _k(6.0, delta))
 	_mod_animation(delta, state)
 
 
+static func _mixv(a: Array, b: Array, w: float) -> Array:
+	return [(a[0] as Vector3).lerp(b[0], w), (a[1] as Vector3).lerp(b[1], w)]
+
+
+## Kąty akcji w chwili p (0..1): A1 prawa ręka, A0 lewa, T tułów (dodawany), Ty wysokość, H głowa, L wykrok.
+func _action_pose(name: String, p: float) -> Dictionary:
+	match name:
+		"swing":   # użycie, stawianie: szybki ruch prawej ręki w przód
+			var k := sin(p * PI)
+			return {"A1": Vector3(0.4 + 1.25 * k, 0.15 * k, 0.1), "T": Vector3(-0.08 * k, -0.12 * k, 0)}
+		"attack1":   # cięcie poziome z prawej do lewej
+			var sweep := _ease((p - 0.2) / 0.5)
+			var wind := _ease(p / 0.2)
+			return {"A1": Vector3(1.55, lerpf(-1.1 * wind, 1.0, sweep), 0.15), "A0": Vector3(0.6, 0, -0.3),
+				"T": Vector3(-0.1, lerpf(-0.45 * wind, 0.55, sweep), 0), "L": 0.25 * sweep}
+		"attack2":   # cięcie odwrotne (z lewej do prawej)
+			var sweep := _ease((p - 0.2) / 0.5)
+			var wind := _ease(p / 0.2)
+			return {"A1": Vector3(1.35, lerpf(1.1 * wind, -1.2, sweep), -0.1), "A0": Vector3(0.4, 0, -0.5),
+				"T": Vector3(-0.08, lerpf(0.5 * wind, -0.6, sweep), 0), "L": 0.2 * sweep}
+		"attack3":   # uderzenie z góry: zamach nad głową, mocne cięcie w dół, wykrok
+			var wind := _ease(p / 0.35)
+			var hit := _ease((p - 0.35) / 0.2)
+			var arm := lerpf(lerpf(0.6, 3.0, wind), 0.55, hit)
+			return {"A1": Vector3(arm, 0.1, 0.05), "A0": Vector3(lerpf(lerpf(0.5, 2.6, wind), 0.7, hit), -0.2, -0.1),
+				"T": Vector3(lerpf(0.18 * wind, -0.5, hit), 0, 0), "Ty": -0.08 * hit, "H": Vector3(-0.2 * hit, 0, 0), "L": 0.45 * hit}
+		"hurt":   # odrzut po trafieniu
+			var k := sin(p * PI)
+			return {"A0": Vector3(0.7, 0, -0.7), "A1": Vector3(0.7, 0, 0.7), "T": Vector3(0.3 * k, 0, 0.05 * k), "H": Vector3(0.35 * k, 0, 0)}
+	return {}
+
+
 func do_swing() -> void:
-	swing = 1.0
+	play_action("swing")
 
 
 # ---------- animacje klatkowe z modów ----------

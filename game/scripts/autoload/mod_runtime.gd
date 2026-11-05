@@ -386,6 +386,11 @@ func _h_res_json(rel) -> Variant:
 	return JSON.parse_string(FileAccess.get_file_as_string(f)) if f != "" else null
 
 
+func _h_player_get_pose() -> String:
+	var p := _pl()
+	return str(p.pose) if p and "pose" in p else "stand"
+
+
 func _h_mod_replacement(id) -> String:
 	var r := ModManager.replacement_of(str(id))
 	return r if loaded.has(r) else ""
@@ -822,7 +827,7 @@ func _host_table() -> Dictionary:
 		"entity_damage", "entity_tag", "entity_data", "item_drop", "entity_brain", "entity_mount", "entity_dismount",
 		"entity_nearest_player", "world_light", "command_register", "chat_send", "role_get", "role_set", "hud_image",
 		"worldgen_on", "gen_get", "gen_set", "gen_height", "gen_biome", "gen_noise", "t",
-		"weather_set", "weather_get", "sky_set", "player_wear", "mod_replacement", "res_file", "res_json",
+		"weather_set", "weather_get", "sky_set", "player_wear", "mod_replacement", "res_file", "res_json", "player_get_pose",
 		"player_id", "player_name", "player_is_host", "players_list", "set_ctx", "get_ctx",
 		"pstorage_get", "pstorage_set", "players_accept", "players_kick", "is_multiplayer", "hash",
 		"block_state", "block_set_state", "block_with_state", "block_base", "block_data", "block_set_data",

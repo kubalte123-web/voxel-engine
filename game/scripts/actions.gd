@@ -123,12 +123,14 @@ static func oriented(block: int, yaw: float, normal: Vector3i = Vector3i.UP, poi
 	return Blocks.reg.with_state(block, changes) if not changes.is_empty() else block
 
 
-static func attack(actor: Node3D, node: Node3D) -> void:
-	actor.model.do_swing()
+## stage: etap serii ataków (1, 2, 3); trzecie uderzenie (z góry) jest o połowę mocniejsze.
+static func attack(actor: Node3D, node: Node3D, stage := 1) -> void:
+	stage = clampi(stage, 1, 3)
+	actor.model.play_action("attack%d" % stage)
 	if node is Creature:
 		var it := str(actor.current_item().get("item", ""))
 		var dmg := float(Blocks.reg.items.get(it, {}).get("data", {}).get("damage", 1.0)) if it != "" else 1.0
-		node.hit(dmg, actor.global_position, "player")
+		node.hit(dmg * (1.5 if stage == 3 else 1.0), actor.global_position, "player")
 
 
 static func kick(actor: Node3D, node: Node3D, dir: Vector3) -> void:

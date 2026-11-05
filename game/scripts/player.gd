@@ -24,6 +24,22 @@ var touch_jump := false
 var selected := 0
 var target: Dictionary = {}
 var mount_id := -1       # stworzenie, na którym jedziemy (-1: pieszo)
+## Postawa: stand, crouch (Shift – wolniej, nie spada z krawędzi), crawl (X – przejście przez szczelinę
+## wysoką na 1 blok), sit (Z – siedzenie na ziemi). Ctrl – bieg.
+var pose := "stand"
+var sprinting := false
+var crawl_toggle := false
+var sit_toggle := false
+var touch_crouch := false
+var combo := 0           # etap serii ataków (1..3)
+var combo_time := -10.0
+var act_n := 0           # licznik akcji wysyłany innym graczom (machnięcia, ataki)
+var act_name := ""
+var _eye := 0.0
+var body_shape: BoxShape3D
+var body_cs: CollisionShape3D
+const POSE_HEIGHT := {"stand": 1.8, "crouch": 1.5, "sit": 1.2, "crawl": 0.6}
+const POSE_EYE := {"stand": 0.0, "crouch": -0.32, "sit": -0.75, "crawl": -1.2}
 var mount_seat := 0.0    # wysokość siodła: postać i kamera są wyżej
 var frozen := true
 var ui_blocked := false  # otwarte okno moda: gracz nie reaguje na mysz
@@ -65,12 +81,17 @@ func _ready() -> void:
 	cs.shape = shape
 	cs.position.y = 0.9
 	add_child(cs)
+	body_shape = shape
+	body_cs = cs
 	floor_snap_length = 0.3
 	collision_layer = 8          # gracz
 	collision_mask = 1 | 4       # świat i obiekty luźne (stworzenia przechodzą obok)
 
 	model = CharacterModel.new()
 	add_child(model)
+	model.acted.connect(func(n: String):
+		act_n += 1
+		act_name = n)
 
 	pivot = Node3D.new()
 	pivot.position.y = 1.55
@@ -175,6 +196,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		look(event.relative * mouse_sensitivity)
 	elif event.is_action_pressed("dismount") and mount_id >= 0 and not ui_blocked:
 		request_dismount()
+	elif event.is_action_pressed("crawl"):
+		crawl_toggle = not crawl_toggle
+		sit_toggle = false
+	elif event.is_action_pressed("sit"):
+		sit_toggle = not sit_toggle
+		crawl_toggle = false
 	elif event.is_action_pressed("toggle_view"):
 		toggle_view()
 	else:
@@ -267,6 +294,8 @@ func _update_camera(delta: float) -> void:
 	pivot.position = Vector3(0, float(cam.height) + mount_seat, 0) + Vector3(cos(yaw), 0, -sin(yaw)) * float(cam.side)
 	model.position.y = mount_seat
 	model.sitting = mount_id >= 0
+	_eye = lerpf(_eye, float(POSE_EYE.get(pose, 0.0)) if mount_id < 0 else 0.0, minf(1.0, delta * 10.0))
+	pivot.position.y += _eye
 	model.set_held(str(current_item().get("item", "")))
 	pivot.rotation = Vector3(float(cam.pitch), float(cam.yaw), 0)
 	spring.spring_length = lerpf(spring.spring_length, float(cam.distance), minf(1.0, delta * 10.0))
@@ -293,7 +322,14 @@ func _physics_process(delta: float) -> void:
 	if dir.length() > 1.0:
 		dir = dir.normalized()
 
+	_update_pose(input)
 	var speed := float(stat("speed"))
+	match pose:
+		"crouch": speed *= 0.35
+		"crawl": speed *= 0.3
+		"sit": speed = 0.0
+	if sprinting:
+		speed *= 1.45
 	var reg := Blocks.reg
 	var feet := Vector3i(floori(global_position.x), floori(global_position.y + 0.3), floori(global_position.z))
 	var body_cell := Vector3i(feet.x, floori(global_position.y + 0.9), feet.z)
@@ -323,6 +359,8 @@ func _physics_process(delta: float) -> void:
 			velocity.y = float(stat("jump"))
 	else:
 		velocity.y -= float(stat("gravity")) * delta
+	if pose == "crouch" and is_on_floor() and not in_liquid:
+		_edge_guard(delta)
 	var fall_speed := -velocity.y
 	move_and_slide()
 	_track_fall(fall_speed)
@@ -350,6 +388,11 @@ func _physics_process(delta: float) -> void:
 		model.rotation.y = lerp_angle(model.rotation.y, target_yaw, minf(1.0, delta * 10.0))
 	elif camera_mode() == "first":
 		model.rotation.y = yaw
+	model.pose = pose
+	model.sprinting = sprinting
+	model.swimming = in_liquid and not is_on_floor()
+	model.vertical = velocity.y
+	model.digging = digging and not target.is_empty() and dig_time >= 0.0 and entity_target().is_empty()
 	model.animate(delta, hspeed, is_on_floor() or in_liquid, pitch)
 	light_timer -= delta
 	if light_timer <= 0.0:
@@ -409,6 +452,8 @@ func _track_fall(speed: float) -> void:
 
 func set_health(v: float) -> void:
 	var mx := float(stat("max_health"))
+	if v < health - 0.01 and model:
+		model.play_action("hurt")
 	health = clampf(v, 0.0, mx)
 	health_changed.emit(health, mx)
 
@@ -504,14 +549,17 @@ func start_digging() -> void:
 	var e := entity_target()
 	if not e.is_empty():
 		var node: Node3D = e.node
+		var stage := next_combo() if not node is Prop else 1
 		if Net.is_client():
-			model.do_swing()
-			Net.c_action.rpc_id(1, "kick" if node is Prop else "attack", {"id": node.id, "dir": -camera.global_basis.z})
+			Net.c_action.rpc_id(1, "kick" if node is Prop else "attack", {"id": node.id, "dir": -camera.global_basis.z, "stage": stage})
 		elif node is Prop:
 			Actions.kick(self, node, -camera.global_basis.z)
 		else:
-			Actions.attack(self, node)
+			Actions.attack(self, node, stage)
+		play_action("attack%d" % stage if not node is Prop else "swing")
 		return
+	if target.is_empty():   # w powietrze: zamach (seria ataków też bez celu)
+		play_action("attack%d" % next_combo())
 	digging = true
 	dig_pos = Vector3i(0, -99999, 0)
 
@@ -521,6 +569,85 @@ func stop_digging() -> void:
 	dig_progress = 0.0
 	dig_pos = Vector3i(0, -99999, 0)
 	crack.visible = false
+
+
+## Kolejny etap serii ataków: szybkie kliknięcia dają cięcie, cięcie odwrotne i uderzenie z góry.
+func next_combo() -> int:
+	var now := Time.get_ticks_msec() / 1000.0
+	combo = combo % 3 + 1 if now - combo_time < 0.9 else 1
+	combo_time = now
+	return combo
+
+
+## Akcja postaci widoczna też u innych graczy (licznik w stanie wysyłanym na serwer).
+func play_action(name: String) -> void:
+	model.play_action(name)
+
+
+## Postawa z klawiszy: Shift kucanie (przytrzymanie), X pełzanie, Z siedzenie, Ctrl bieg. Pełzanie zostaje,
+## dopóki nad głową nie ma miejsca, żeby wstać.
+func _update_pose(input: Vector2) -> void:
+	var want := "stand"
+	var shift := (Input.is_action_pressed("dismount") and not ui_blocked) or touch_crouch
+	if mount_id >= 0:
+		want = "stand"
+		crawl_toggle = false
+		sit_toggle = false
+	elif crawl_toggle:
+		want = "crawl"
+	elif sit_toggle:
+		want = "sit"
+		if input.length() > 0.2 or Input.is_action_pressed("jump") or touch_jump:
+			sit_toggle = false
+			want = "stand"
+	elif shift:
+		want = "crouch"
+	if want != "crawl" and pose == "crawl" and not _fits(want):
+		want = "crawl"   # za nisko, żeby wstać
+	elif want == "stand" and pose == "crouch" and not _fits("stand"):
+		want = "crouch"
+	sprinting = want == "stand" and Input.is_action_pressed("sprint") and not ui_blocked and input.y < -0.3 and not in_liquid
+	if want != pose:
+		pose = want
+		var h: float = POSE_HEIGHT[pose]
+		body_shape.size = Vector3(0.6, h, 0.6)
+		body_cs.position.y = h * 0.5
+		Mods.emit_event("player.pose", {"pose": pose})
+
+
+## Czy postać zmieści się w danej postawie (bloki nad głową).
+func _fits(p: String) -> bool:
+	var h: float = POSE_HEIGHT.get(p, 1.8)
+	for dx in [-0.28, 0.28]:
+		for dz in [-0.28, 0.28]:
+			for y in range(1, int(ceil(h))):
+				var b := world.get_block(Vector3i(floori(global_position.x + dx), floori(global_position.y + 0.05 + y), floori(global_position.z + dz)))
+				if b != Blocks.AIR and (Blocks.props(b) & Blocks.SOLID) != 0:
+					return false
+			var top := world.get_block(Vector3i(floori(global_position.x + dx), floori(global_position.y + h - 0.05), floori(global_position.z + dz)))
+			if top != Blocks.AIR and (Blocks.props(top) & Blocks.SOLID) != 0:
+				return false
+	return true
+
+
+## Kucanie: nie schodzimy z krawędzi (jak w MC) – ruch w stronę przepaści się zatrzymuje.
+func _edge_guard(delta: float) -> void:
+	for axis in [0, 2]:
+		var v: float = velocity[axis]
+		if absf(v) < 0.001:
+			continue
+		var p := global_position
+		p[axis] += v * delta + signf(v) * 0.32
+		var has_floor := false
+		for o in [-0.25, 0.25]:
+			var q := p
+			q[2 - axis] += o
+			var below := Vector3i(floori(q.x), floori(q.y - 0.3), floori(q.z))
+			var b := world.get_block(below)
+			if b != Blocks.AIR and (Blocks.props(b) & Blocks.SOLID) != 0:
+				has_floor = true
+		if not has_floor:
+			velocity[axis] = 0.0
 
 
 ## Czas kopania bloku (twardość, szybkość kopania, hak „block.dig” np. dla narzędzi). W grze
@@ -554,7 +681,6 @@ func _update_digging(delta: float) -> void:
 	swing_timer -= delta
 	if swing_timer <= 0.0:
 		swing_timer = 0.3
-		model.do_swing()
 		Sfx.block_local(world.get_block(dig_pos), "dig", Vector3(dig_pos) + Vector3(0.5, 0.5, 0.5))
 	dig_progress += delta / maxf(dig_time, 0.0001)
 	if dig_progress >= 1.0 or dig_time <= 0.05:
@@ -574,7 +700,6 @@ func break_block() -> void:
 	if target.is_empty():
 		return
 	if Net.is_client():
-		model.do_swing()
 		Net.c_action.rpc_id(1, "dig", {"pos": target.pos})
 		return
 	Actions.break_at(self, world, target.pos)
@@ -587,7 +712,7 @@ func use_item() -> void:
 		request_dismount()   # na telefonie: dotknięcie w powietrze zsiada
 		return
 	if Net.is_client():
-		model.do_swing()
+		play_action("swing")
 		if not e.is_empty():
 			Net.c_action.rpc_id(1, "interact", {"id": e.node.id})
 		else:

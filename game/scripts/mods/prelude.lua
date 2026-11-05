@@ -1222,6 +1222,8 @@ local function make_api(mod_id)
 		stop_animation = function() host.player_animate("") end,
 		-- kolory części postaci: {tunic = "#aa3333", scarf = Color(...)} (klucze w docs/MODDING.md)
 		colors = function(t) host.player_colors(to_godot(t)) end,
+		-- postawa: "stand" | "crouch" | "crawl" | "sit" (zdarzenie player.pose przy zmianie)
+		pose = function() return host.player_get_pose() end,
 		-- rzecz założona na postać (widzą wszyscy): wear(id, {part = "head", boxes = {{size, pos, color, rot}}}),
 		-- wear(id, nil) zdejmuje; części: body, head, arm_left, arm_right, leg_left, leg_right
 		wear = function(id, spec) host.player_wear(tostring(id), spec and to_godot(spec) or nil) end,
