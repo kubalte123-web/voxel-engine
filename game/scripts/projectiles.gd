@@ -224,12 +224,9 @@ func _make_node(id: int, p: Dictionary) -> void:
 			mi.position = Vector3(-size, -size, -size) * 0.5
 			root.add_child(mi)
 	elif vis.type == "item" and str(vis.item) != "":
-		var sp := Sprite3D.new()
-		sp.texture = _reg().icon(str(vis.item))
-		sp.pixel_size = size / 16.0
-		sp.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-		sp.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-		root.add_child(sp)
+		var m := ItemModel.build(_reg(), str(vis.item))   # lecący przedmiot: model 3D
+		m.scale = Vector3.ONE * size * 1.2
+		root.add_child(m)
 	if str(vis.trail) != "":
 		var tr := Fx.build(str(vis.trail), {}, false)
 		if tr:

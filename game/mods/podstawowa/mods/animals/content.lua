@@ -26,16 +26,16 @@ end
 ---------------------------------------------------------------------------
 -- Przedmioty
 ---------------------------------------------------------------------------
-engine.items.register("wool", { name = "Wełna", icon = { pattern = "noise", color = "#efeee8", color2 = "#d8d6cc" } })
-engine.items.register("mutton", { name = "Surowa baranina", icon = { pattern = "food", color = "#d06a5a", color2 = "#a04a3a" }, food = 3 })
-engine.items.register("beef", { name = "Surowa wołowina", icon = { pattern = "food", color = "#c04a3a", color2 = "#8a2a20" }, food = 3 })
-engine.items.register("chicken_meat", { name = "Surowy kurczak", icon = { pattern = "food", color = "#f0c0a8", color2 = "#d09a80" }, food = 2 })
-engine.items.register("leather", { name = "Skóra", icon = { pattern = "ingot", color = "#8a5a32", color2 = "#6a4022" } })
-engine.items.register("feather", { name = "Pióro", icon = { pattern = "plant", color = "#f4f4f0", color2 = "#d0d0c8" } })
-engine.items.register("egg", { name = "Jajko", icon = { pattern = "food", color = "#efe2c8", color2 = "#d8c8a8" }, food = 2, max_stack = 16 })
+engine.items.register("wool", { model = "wool", name = "Wełna", icon = { pattern = "noise", color = "#efeee8", color2 = "#d8d6cc" } })
+engine.items.register("mutton", { model = "steak", name = "Surowa baranina", icon = { pattern = "food", color = "#d06a5a", color2 = "#a04a3a" }, food = 3 })
+engine.items.register("beef", { model = "steak", name = "Surowa wołowina", icon = { pattern = "food", color = "#c04a3a", color2 = "#8a2a20" }, food = 3 })
+engine.items.register("chicken_meat", { model = "drumstick", name = "Surowy kurczak", icon = { pattern = "food", color = "#f0c0a8", color2 = "#d09a80" }, food = 2 })
+engine.items.register("leather", { model = "leather", name = "Skóra", icon = { pattern = "ingot", color = "#8a5a32", color2 = "#6a4022" } })
+engine.items.register("feather", { model = "feather", name = "Pióro", icon = { pattern = "plant", color = "#f4f4f0", color2 = "#d0d0c8" } })
+engine.items.register("egg", { model = "egg", name = "Jajko", icon = { pattern = "food", color = "#efe2c8", color2 = "#d8c8a8" }, food = 2, max_stack = 16 })
 engine.items.register("wheat", { name = "Pszenica", icon = { pattern = "plant", color = "#d8b450", color2 = "#b8943a" } })
-engine.items.register("shears", { name = "Nożyce", icon = { pattern = "ingot", color = "#c8c8d0", color2 = "#8a8a94" }, max_stack = 1 })
-engine.items.register("milk_bucket", { name = "Wiadro mleka", icon = { pattern = "ingot", color = "#f4f4f4", color2 = "#78787f" }, max_stack = 1, food = 6 })
+engine.items.register("shears", { model = "shears", name = "Nożyce", icon = { pattern = "ingot", color = "#c8c8d0", color2 = "#8a8a94" }, max_stack = 1 })
+engine.items.register("milk_bucket", { model = "bucket", name = "Wiadro mleka", icon = { pattern = "ingot", color = "#f4f4f4", color2 = "#78787f" }, max_stack = 1, food = 6 })
 
 -- pszenica wypada czasem z wysokiej trawy (zmiana bloku moda base)
 engine.blocks.get("tall_grass").drops = { { item = "wheat", count = 1, chance = 0.12 } }

@@ -46,9 +46,9 @@ static func export(reg: Registry, dir: String) -> Dictionary:
 	for key in reg.items:
 		if int(reg.items[key].get("block", -1)) > 0:
 			continue
-		var tex := reg.icon(str(key))
-		if tex:
-			_png(tex.get_image(), dir.path_join("items/%s.png" % key))
+		var img2d := reg.icon_image(str(key))   # obrazek ikony (nie render 3D), do podmiany w paczce
+		if img2d:
+			_png(img2d, dir.path_join("items/%s.png" % key))
 			counts.items += 1
 	# dźwięki: pierwszy plik każdego dźwięku (gdy da się go odczytać)
 	for name in reg.sounds:

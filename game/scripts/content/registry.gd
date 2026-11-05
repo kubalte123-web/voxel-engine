@@ -519,10 +519,21 @@ func max_stack(item_key: String) -> int:
 	return int(items.get(item_key, {}).get("max_stack", 64))
 
 
-## Ikona przedmiotu: sześcian dla bloków, kafelek dla roślin, obrazek dla zwykłych przedmiotów.
+## Ikona przedmiotu: sześcian dla bloków, kafelek dla roślin, dla zwykłych przedmiotów najpierw obrazek,
+## który zaraz potem zastępuje mała figura 3D wyrenderowana z modelu przedmiotu (ItemModel, IconRenderer);
+## tekstura zmienia się w miejscu, więc sloty, które już ją pokazują, odświeżają się same.
 func icon(item_key: String) -> Texture2D:
 	if _icons.has(item_key):
 		return _icons[item_key]
+	var t := ImageTexture.create_from_image(icon_image(item_key))
+	_icons[item_key] = t
+	if IconRenderer.wants(self, item_key):
+		IconRenderer.request(self, item_key, t)
+	return t
+
+
+## Obrazek ikony 2D (z bloku albo z definicji przedmiotu), bez renderowania 3D.
+func icon_image(item_key: String) -> Image:
 	var it: Dictionary = items.get(item_key, {})
 	var img: Image
 	var b := int(it.get("block", -1))
@@ -545,9 +556,7 @@ func icon(item_key: String) -> Texture2D:
 		img = TexGen.load_spec(it.icon, _mod_path(str(it.mod)))
 	else:
 		img = TexGen.pattern({"pattern": "gem", "color": "#888888"})
-	var t := ImageTexture.create_from_image(img)
-	_icons[item_key] = t
-	return t
+	return img
 
 
 ## Tablica przeliczenia id z palety zapisanej w świecie na bieżące id (brakujące bloki stają się powietrzem).

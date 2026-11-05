@@ -103,8 +103,8 @@ engine.blocks.register("water", {
 ---------------------------------------------------------------------------
 -- Wiadra (używane w scripts/main.lua przez hak item.use)
 ---------------------------------------------------------------------------
-engine.items.register("bucket", { name = "Wiadro", icon = { pattern = "ingot", color = "#a8a8b0", color2 = "#78787f" }, max_stack = 16, bucket = "empty" })
-engine.items.register("water_bucket", { name = "Wiadro z wodą", icon = { pattern = "ingot", color = "#3a80d0", color2 = "#78787f" }, max_stack = 1, bucket = "water" })
+engine.items.register("bucket", { model = "bucket", name = "Wiadro", icon = { pattern = "ingot", color = "#a8a8b0", color2 = "#78787f" }, max_stack = 16, bucket = "empty" })
+engine.items.register("water_bucket", { model = "bucket", name = "Wiadro z wodą", icon = { pattern = "ingot", color = "#3a80d0", color2 = "#78787f" }, max_stack = 1, bucket = "water" })
 
 ---------------------------------------------------------------------------
 -- Świat

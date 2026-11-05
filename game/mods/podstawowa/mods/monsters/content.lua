@@ -1,5 +1,6 @@
 -- Zombie: model z pliku GLB (tools/make_zombie.gd), animacje z pliku według stanu stworzenia.
 engine.items.register("rotten_flesh", {
+	model = "steak",
 	name = "Zgniłe mięso", food = 2,
 	icon = { pattern = "food", color = "#7a8a4a", color2 = "#5a6a32" },
 })

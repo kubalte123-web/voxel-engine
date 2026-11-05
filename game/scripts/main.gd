@@ -2492,6 +2492,53 @@ func _test_creatures(dir: String) -> void:
 
 
 ## Kształty z prostopadłościanów (mod building): stawianie schodów i półbloków, celowanie, chodzenie po nich.
+## Test przedmiotów 3D: pasek z ikonami, postać z kilofem (z boku), pierwsza osoba przy kopaniu,
+## przedmioty leżące na ziemi. Zrzuty i1–i5.
+func _test_items(dir: String) -> void:
+	await _wait_loaded()
+	await _wait(0.5)
+	time_of_day = 11.0
+	var hb := Mods.cid("hotbar")
+	var items := ["iron_pickaxe", "stone_sword", "beef", "planks", "potion_heal", "bread", "water_bucket", "torch"]
+	for i in items.size():
+		Mods.set_slot(hb, i, {"item": items[i], "count": 1})
+	player.select(0)
+	var o := Vector3i(player.global_position.floor())
+	await _wait(1.5)   # ikony 3D renderują się w tle
+	await _shot(dir, "i1_hotbar")
+	# z boku: kamera z góry na postać
+	Mods.camera_stats["mode"] = "third"
+	player.first_person = false
+	player.yaw = 0.6
+	player.pitch = -0.2
+	Mods.camera_stats["distance"] = 2.6
+	await _wait(0.6)
+	await _shot(dir, "i2_third_pickaxe")
+	player.select(1)
+	await _wait(0.4)
+	await _shot(dir, "i3_third_sword")
+	Mods.camera_stats.erase("distance")
+	# pierwsza osoba: kopanie
+	Mods.camera_stats.erase("mode")
+	player.first_person = true
+	player.select(0)
+	player.pitch = -0.6
+	await _wait(0.4)
+	player.start_digging()
+	await _wait(0.15)
+	await _shot(dir, "i4_first_dig")
+	player.stop_digging()
+	# przedmioty na ziemi przed graczem
+	var fwd := Vector3(-sin(player.yaw), 0, -cos(player.yaw))
+	for i in items.size():
+		entities.drop_item(items[i], 1, player.global_position + fwd * 2.2 + Vector3(-1.4 + i * 0.4, 0.6, 0) + fwd.cross(Vector3.UP) * 0.0)
+	player.pitch = -0.55
+	await _wait(1.5)
+	await _shot(dir, "i5_drops")
+	print("PRZEDMIOTY 3D w ręce=", player.model.held_key, " rodzaj=", player.model.held_node.get_meta("kind") if player.model.held_node else "-", " ręka 1. os.=", player.fp_hand.visible if player.fp_hand else false)
+	get_tree().quit()
+
+
 ## Test wchodzenia po schodach: 6 stopni schodów (po pół bloku), gracz idzie do przodu przez 4 s.
 ## Liczy skoki (prędkość w górę jak przy skoku) i największy przyrost wysokości kamery w jednej klatce.
 func _test_stairs(dir: String) -> void:
@@ -2833,6 +2880,9 @@ func _autotest(dir: String) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--seams-only"):
 		await _test_seams(dir)
+		return
+	if OS.get_cmdline_user_args().has("--items-only"):
+		await _test_items(dir)
 		return
 	if OS.get_cmdline_user_args().has("--stairs-only"):
 		await _test_stairs(dir)

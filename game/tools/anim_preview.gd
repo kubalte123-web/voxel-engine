@@ -15,11 +15,17 @@ func _run() -> void:
 	var args := OS.get_cmdline_user_args()
 	var out := "/tmp/anim.png"
 	var poses: PackedStringArray = ["stand"]
+	var held := ""
 	for a in args:
 		if a.begins_with("--out="):
 			out = a.trim_prefix("--out=")
 		if a.begins_with("--poses="):
 			poses = a.trim_prefix("--poses=").split(",")
+		if a.begins_with("--held="):
+			held = a.trim_prefix("--held=")   # przedmiot w ręce (wczytuje mody)
+	if held != "":
+		ModManager.scan()
+		Mods.start_content("")
 	vp = SubViewport.new()
 	vp.size = Vector2i(220, 260)
 	vp.own_world_3d = true
@@ -51,6 +57,13 @@ func _run() -> void:
 	for pi in poses.size():
 		var spec := poses[pi].split(":")
 		var pose := spec[0]
+		if held != "":
+			# pozy z przedmiotem: "dig@iron_pickaxe" albo dla wszystkich --held=
+			var item := held
+			if "@" in pose:
+				item = pose.get_slice("@", 1)
+				pose = pose.get_slice("@", 0)
+			model.set_held(item)
 		var speed := float(spec[1]) if spec.size() > 1 else 0.0
 		var step_t := float(spec[2]) if spec.size() > 2 else 0.12
 		for side in 2:

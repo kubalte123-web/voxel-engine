@@ -386,7 +386,7 @@ func _autotest(dir: String) -> void:
 				if ModManager.manifests.has(id):
 					ModManager.enabled[id] = true
 	# testy wybranych funkcji: od razu świat testowy, bez zrzutów menu
-	if args.has("--craft-only") or args.has("--light-only") or args.has("--blocks-only") or args.has("--perf-only") or args.has("--render-bench") or args.has("--seams-only") or args.has("--farview-only") or args.has("--stairs-only") or args.has("--alchemy-only") or args.has("--fishing-only") or args.has("--gun-only") or args.has("--api-only") or args.has("--console-only") or args.has("--shapes-only") or args.has("--creatures-only") or args.has("--chat-only") or args.has("--ui-only") or args.has("--worldgen-only") or args.has("--extras-only") or args.has("--hires-only") or args.has("--anim-only"):
+	if args.has("--craft-only") or args.has("--light-only") or args.has("--blocks-only") or args.has("--perf-only") or args.has("--render-bench") or args.has("--seams-only") or args.has("--farview-only") or args.has("--stairs-only") or args.has("--items-only") or args.has("--alchemy-only") or args.has("--fishing-only") or args.has("--gun-only") or args.has("--api-only") or args.has("--console-only") or args.has("--shapes-only") or args.has("--creatures-only") or args.has("--chat-only") or args.has("--ui-only") or args.has("--worldgen-only") or args.has("--extras-only") or args.has("--hires-only") or args.has("--anim-only"):
 		GameState.start(GameState.create_world("Test", "42"))
 		return
 	await _shot(dir, "m1_menu")

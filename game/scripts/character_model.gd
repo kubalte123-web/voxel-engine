@@ -56,38 +56,51 @@ var light_value := Vector2(-1, 0)
 func set_light(l: Vector2) -> void:
 	light_value = l
 	EntityLight.apply(mats.values(), l)
-	if held_sprite:
-		var f := EntityLight.factors(l)
-		var v := clampf(f.x + f.y, 0.0, 1.0)
-		held_sprite.modulate = Color(v, v, v)
+	EntityLight.apply(held_mats, l)
 
 
 # ---------- przedmiot w ręce i rzeczy założone przez mody ----------
 
-var held_sprite: Sprite3D
+var held_node: Node3D
+var held_mats: Array = []
 var held_key := ""
 var wear_nodes: Array = []
 
 
-## Przedmiot trzymany w prawej ręce (ikona). Pusty klucz chowa.
+## Przedmiot trzymany w prawej ręce: model 3D (ItemModel), narzędzia za rękojeść, ostrzem do przodu.
+## Pusty klucz chowa.
 func set_held(key: String) -> void:
 	if key == held_key or arms.size() < 2:
 		return
 	held_key = key
-	if held_sprite:
-		held_sprite.queue_free()
-		held_sprite = null
+	if held_node:
+		held_node.queue_free()
+		held_node = null
+	held_mats = []
 	if key == "" or Mods.registry == null or not Mods.registry.items.has(key):
 		return
-	held_sprite = Sprite3D.new()
-	held_sprite.texture = Mods.registry.icon(key)
-	held_sprite.pixel_size = 0.36 / maxf(1.0, float(held_sprite.texture.get_width()))
-	held_sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-	held_sprite.shaded = false
-	held_sprite.position = Vector3(0, -0.62, -0.14)
-	held_sprite.rotation_degrees = Vector3(-60, 90, 0)
-	arms[1].add_child(held_sprite)
+	held_node = ItemModel.build(Mods.registry, key, held_mats)
+	place_held(held_node)
+	arms[1].add_child(held_node)
 	set_light(light_value if light_value.x >= 0.0 else Vector2(1, 0))
+
+
+## Położenie przedmiotu w dłoni (w układzie ręki: ręka zwisa w dół, -Y; przód postaci to -Z).
+static func place_held(n: Node3D) -> void:
+	match str(n.get_meta("kind", "")):
+		"tool":
+			# rękojeść w pięści, przedmiot do przodu i lekko w górę; głowica (oś X modelu) w pionie
+			n.basis = Basis(Vector3.RIGHT, deg_to_rad(-72)) * Basis(Vector3.UP, deg_to_rad(90))
+			n.scale = Vector3.ONE * 0.62
+			n.position = Vector3(0, -0.56, -0.03)
+		"block":
+			n.basis = Basis(Vector3.UP, deg_to_rad(45))
+			n.scale = Vector3.ONE * 0.62
+			n.position = Vector3(0, -0.7, -0.1)
+		_:
+			n.basis = Basis(Vector3.RIGHT, deg_to_rad(-25))
+			n.scale = Vector3.ONE * 0.6
+			n.position = Vector3(0, -0.66, -0.12)
 
 
 ## Rzeczy założone przez mody (hełm, plecak, peleryna): id -> {part, boxes = {{size, pos, color, rot}}}.
@@ -216,6 +229,8 @@ var _land := 0.0
 var _land_power := 0.0
 var _dig_t := 0.0
 var _dig_hold := 0.0         # kopanie trwa jeszcze chwilę po przerwie (bez restartu ruchu)
+var _grip_dig := 0.0         # 0..1: narzędzie trzymane jak do kopania
+var _grip_w := 0.0
 const DIG_CYCLE := 0.42      # jeden zamach przy kopaniu (s)
 const DIG_HOLD := 0.3
 
@@ -404,12 +419,20 @@ func animate(delta: float, speed: float, on_floor: bool, look_pitch: float) -> v
 		# zamach w górę (60% cyklu), szybkie uderzenie w dół (25%), chwila w dole
 		var raise := _ease(cyc / 0.6) if cyc < 0.6 else 1.0 - _ease((cyc - 0.6) / 0.25)
 		var fade := clampf(_dig_hold / DIG_HOLD, 0.0, 1.0) if not digging else 1.0
-		A[1] = A[1].lerp(Vector3(lerpf(0.85, 1.75, raise), 0.3, 0.05), fade)
+		A[1] = A[1].lerp(Vector3(lerpf(0.7, 1.55, raise), 0.3, 0.05), fade)
 		A[0].x = lerpf(A[0].x, 0.3, 0.5 * fade)
 		T_rot.y += -0.1 * fade
 		T_rot.x += -0.04 * fade
+		_grip_dig = fade
 	else:
 		_dig_t = 0.0
+		_grip_dig = 0.0
+	# narzędzie w dłoni: przy kopaniu bardziej w stronę bloku (uderza ostrzem w dół, nie za głowę)
+	if held_node and str(held_node.get_meta("kind", "")) == "tool":
+		_grip_w = lerpf(_grip_w, _grip_dig, _k(14.0, delta))
+		var sc := held_node.scale
+		held_node.basis = Basis(Vector3.RIGHT, deg_to_rad(lerpf(-72.0, -118.0, _grip_w))) * Basis(Vector3.UP, deg_to_rad(90))
+		held_node.scale = sc
 	if swing > 0.0:   # stary wywołujący: do_swing() = machnięcie
 		action = {"name": "swing", "time": 0.0, "length": float(ACTIONS.swing)}
 		swing = 0.0

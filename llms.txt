@@ -69,6 +69,8 @@ a mody mogą udostępniać sobie biblioteki przez `engine.export` i `engine.requ
 - Celowanie: `engine.player.eye_position()`, `look_direction()`, `raycast(zasięg)`; `engine.world.raycast(...)`.
 - Opis przedmiotu: pola `description` i `tooltip = {category, lines}`; dynamiczny: `engine.items.tooltip(klucz, fn)`.
   Dane egzemplarza: `data` w miejscu kontenera, `engine.items.data/set_data`.
+- Model 3D przedmiotu (slot, ręka, ziemia): `model = "steak"` (wbudowane: pickaxe, sword, steak, fish, bucket…)
+  albo `model = {kind = "tool", grip, boxes = {{size, pos, color, rot, glow}}}`.
 - Dźwięki: `engine.sounds.register` (content), `engine.sound.play(nazwa, {pos = pos})`; pole bloku `sound` = grupa.
 - Pozycje jako `{x =, y =, z =}` albo wektor. Mod opcjonalny: `"after"` w mod.json i `engine.optional(id)`.
 - Przedmioty modów tools i crafting: stick, wooden_/stone_/iron_ + pickaxe/axe/shovel/sword, crafting_table, workbench.

@@ -305,6 +305,78 @@ func _update_camera(delta: float) -> void:
 	spring.spring_length = lerpf(spring.spring_length, float(cam.distance), minf(1.0, delta * 10.0))
 	camera.fov = Settings.fov + float(cam.fov_offset)
 	model.visible = mode != "first"
+	_update_fp_hand(delta, mode == "first")
+
+
+# ---------- ręka i przedmiot w pierwszej osobie ----------
+
+var fp_hand: Node3D       # ramię z przedmiotem w prawym dolnym rogu ekranu (tylko widok z pierwszej osoby)
+var fp_item: Node3D
+var fp_key := "-"
+var fp_mats: Array = []
+var _fp_swing := 0.0
+
+const FP_BASE := Vector3(0.33, -0.3, -0.52)
+
+
+func _update_fp_hand(delta: float, show: bool) -> void:
+	if fp_hand == null:
+		fp_hand = Node3D.new()
+		fp_hand.name = "FirstPersonHand"
+		camera.add_child(fp_hand)
+		# rękaw i dłoń: te same materiały co postać (kolory z modów, oświetlenie)
+		for part in [[Vector3(0.085, 0.085, 0.4), Vector3(0, 0, 0.06), "tunic"], [Vector3(0.092, 0.092, 0.04), Vector3(0, 0, -0.14), "tunic_dark"],
+				[Vector3(0.075, 0.075, 0.08), Vector3(0, 0, -0.2), "skin"]]:
+			var mi := MeshInstance3D.new()
+			var bm := BoxMesh.new()
+			bm.size = part[0]
+			mi.mesh = bm
+			mi.position = part[1]
+			mi.material_override = model._mat(part[2])
+			mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			fp_hand.add_child(mi)
+	fp_hand.visible = show
+	if not show:
+		return
+	var key := str(current_item().get("item", ""))
+	if key != fp_key:
+		fp_key = key
+		if fp_item:
+			fp_item.queue_free()
+			fp_item = null
+		fp_mats = []
+		if key != "" and Mods.registry and Mods.registry.items.has(key):
+			fp_item = ItemModel.build(Mods.registry, key, fp_mats)
+			match str(fp_item.get_meta("kind", "")):
+				"tool":   # rękojeść w dłoni, głowica w górę i lekko do przodu
+					fp_item.basis = Basis(Vector3.RIGHT, deg_to_rad(-25)) * Basis(Vector3.UP, deg_to_rad(90))
+					fp_item.scale = Vector3.ONE * 0.36
+					fp_item.position = Vector3(0, 0.01, -0.21)
+				"block":
+					fp_item.basis = Basis(Vector3.UP, deg_to_rad(40))
+					fp_item.scale = Vector3.ONE * 0.4
+					fp_item.position = Vector3(0, 0.08, -0.26)
+				_:
+					fp_item.scale = Vector3.ONE * 0.36
+					fp_item.position = Vector3(0, 0.07, -0.26)
+			for mi in fp_item.find_children("*", "MeshInstance3D", true, false):
+				(mi as MeshInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			fp_hand.add_child(fp_item)
+		if model.light_value.x >= 0.0:
+			EntityLight.apply(fp_mats, model.light_value)
+	# zamach: kopanie (ten sam rytm co postać) i akcje (ataki, użycie)
+	var swing := 0.0
+	if model._dig_hold > 0.0:
+		swing = sin(fmod(model._dig_t / CharacterModel.DIG_CYCLE, 1.0) * PI)
+	if not model.action.is_empty():
+		swing = maxf(swing, sin(clampf(float(model.action.time) / float(model.action.length), 0.0, 1.0) * PI))
+	_fp_swing = lerpf(_fp_swing, swing, minf(1.0, delta * 30.0))
+	var hs := Vector2(velocity.x, velocity.z).length()
+	var bob := sin(model.walk_phase) * 0.012 * clampf(hs / 4.5, 0.0, 1.0)
+	fp_hand.position = FP_BASE + Vector3(-0.1 * _fp_swing, 0.05 * _fp_swing + bob, -0.08 * _fp_swing)
+	fp_hand.rotation = Vector3(0.12 - 0.85 * _fp_swing, -0.18 + 0.3 * _fp_swing, 0.1 * _fp_swing)
+	if model.light_value.x >= 0.0:
+		EntityLight.apply(fp_mats, model.light_value)
 
 
 func _physics_process(delta: float) -> void:

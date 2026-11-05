@@ -1,5 +1,6 @@
 -- Przedmioty i jedzenie: surowa ryba, pieczona ryba, wędka
 engine.items.register("raw_fish", {
+	model = "fish",
 	name = "Surowa ryba",
 	icon = { pattern = "food", color = "#3a78d8", color2 = "#2a5c9e" },
 	max_stack = 64,
@@ -7,6 +8,7 @@ engine.items.register("raw_fish", {
 })
 
 engine.items.register("cooked_fish", {
+	model = "fish",
 	name = "Pieczona ryba",
 	icon = { pattern = "food", color = "#c8642a", color2 = "#a04a1a" },
 	max_stack = 64,
@@ -14,6 +16,7 @@ engine.items.register("cooked_fish", {
 })
 
 engine.items.register("fishing_rod", {
+	model = "fishing_rod",
 	name = "Wędka",
 	icon = { pattern = "stick", color = "#8a5a2e", color2 = "#d0d0d0" },
 	max_stack = 1,

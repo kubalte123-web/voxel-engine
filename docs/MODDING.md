@@ -481,6 +481,34 @@ engine.items.register("apple", {
 })
 ```
 
+### Model 3D przedmiotu
+
+Przedmiot w slocie, w ręce postaci (także w pierwszej osobie) i leżący na ziemi to mała figura 3D.
+Ikona w slocie jest renderowana z tego modelu (na serwerze bez okna zostaje obrazek `icon`).
+Model wybiera pole `model`:
+
+```lua
+engine.items.register("beef", { name = "Wołowina", icon = { pattern = "food", color = "#c04a3a" }, model = "steak" })
+-- własny model z klocków (1 = jeden blok); grip = punkt chwytu w dłoni, oś długa przedmiotu to +Y
+engine.items.register("mace", {
+	name = "Buława", max_stack = 1,
+	model = { kind = "tool", grip = { 0, 0, 0 }, boxes = {
+		{ size = { 0.1, 0.8, 0.1 }, pos = { 0, 0.2, 0 }, color = "#7a5230" },
+		{ size = { 0.24, 0.24, 0.24 }, pos = { 0, 0.66, 0 }, color = "#9a9aa0", rot = { 0, 45, 0 } },
+		{ size = { 0.06, 0.06, 0.06 }, pos = { 0, 0.82, 0 }, color = "#ffd040", glow = true },
+	} },
+})
+```
+
+- Wbudowane modele: `pickaxe`, `axe`, `shovel`, `sword`, `hoe`, `stick`, `torch`, `fishing_rod`, `apple`,
+  `steak`, `drumstick`, `fish`, `bread`, `egg`, `ingot`, `nugget`, `gem`, `lump`, `bucket`, `potion`,
+  `shears`, `leather`, `feather`, `wool`, `seeds`, `wheat`. Kolory biorą z `icon.color` i `icon.color2`
+  albo z `model_colors = { "#rrggbb", "#rrggbb" }`.
+- `kind = "tool"`: trzymany za rękojeść (punkt `grip`), głowicą do przodu; inne przedmioty trzymane w dłoni.
+- Bez pola `model` model dobiera się do wzoru ikony (`pickaxe`, `sword`, `food`, `potion`…); przedmiot-blok
+  to mały blok z jego teksturami; przedmiot z ikoną z pliku PNG: ikona wyciągnięta w 3D (piksel = klocek).
+- Ikona z paczki zasobów ma pierwszeństwo przed renderem modelu (chyba że przedmiot ma pole `model`).
+
 Miejsce w kontenerze to `{ item = "apple", count = 3 }` albo pusta tabela `{}`. Może mieć też
 `data` – dane tego egzemplarza (np. amunicja w broni) – i `info` – linie opisu policzone przez mod.
 
