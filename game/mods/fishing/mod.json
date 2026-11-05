@@ -1,0 +1,14 @@
+{
+	"id": "fishing",
+	"name": "Wędkowanie",
+	"version": "0.1.0",
+	"author": "Asystent AI",
+	"description": "Dodaje wędkę, możliwość łowienia ryb w wodzie oraz surową i upieczoną rybę, którą można przetopić w piecu.",
+	"requires": ["modkit", "backpack"],
+	"after": ["tools", "smelting", "crafting_classic", "crafting_discovery", "animals", "alchemy"],
+	"content": ["content.lua"],
+	"scripts": ["main.lua"],
+	"settings": [
+		{"key": "starter", "label": "Zestaw na start (wędka i ryba)", "type": "bool", "default": true}
+	]
+}

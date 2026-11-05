@@ -1257,6 +1257,76 @@ func _test_cauldron_server() -> void:
 	print("SERWER kocioł w ", c)
 
 
+## Test moda wędkarskiego (napisanego przez inne AI na podstawie docs/AI_MOD_SPEC.md).
+func _test_fishing(dir: String) -> void:
+	await _wait_loaded()
+	await _wait(0.5)
+	var me := Net.my_id()
+	var hb := Mods.cid("hotbar")
+	var reg := Mods.registry
+	print("RYBY wczytany=", Mods.loaded.has("fishing"), " błędy wczytania=", Mods.load_errors.get("fishing", "brak"))
+	print("RYBY przedmioty: ", ["raw_fish", "cooked_fish", "fishing_rod"].map(func(k): return k + "=" + str(reg.items.has(k))))
+	print("RYBY zestaw: wędka=", _count_item("fishing_rod"), " ryba=", _count_item("raw_fish"))
+	# brzeg: blok stały obok wody
+	var shore := Vector3i(0, -999, 0)
+	var origin := Vector3i(player.global_position.floor())
+	for r in range(1, 60):
+		for dx in range(-r, r + 1):
+			for dz in [-r, r]:
+				for p in [origin + Vector3i(dx, 0, dz), origin + Vector3i(dz, 0, dx)]:
+					for y in range(4, 16):
+						var q := Vector3i(p.x, y, p.z)
+						if reg.block_key(world.get_block(q)).begins_with("water") and (reg.props[world.get_block(q + Vector3i(1, 0, 0))] & Registry.SOLID) != 0:
+							shore = q + Vector3i(1, 0, 0)
+							break
+					if shore.y != -999: break
+				if shore.y != -999: break
+			if shore.y != -999: break
+		if shore.y != -999: break
+	print("RYBY brzeg=", shore)
+	var fish := func(pos: Variant) -> void:
+		Mods.set_slot(hb, 0, {"item": "fishing_rod", "count": 1})
+		var c := {"item": "fishing_rod", "slot": 1}
+		if pos != null:
+			c["pos"] = pos
+			c["normal"] = Vector3i.UP
+			c["block"] = world.get_block(pos)
+		Mods.as_player(me, func(): return Mods.before("item.use", c))
+	var before := _count_item("raw_fish")
+	for i in 40:
+		fish.call(shore)
+		await _wait(0.06)
+	print("RYBY 40 rzutów przy wodzie (bez czekania): złowiono ", _count_item("raw_fish") - before)
+	before = _count_item("raw_fish")
+	fish.call(Vector3i(origin.x + 200, 30, origin.z + 200))
+	fish.call(null)
+	print("RYBY z dala od wody i bez celu: ryb +", _count_item("raw_fish") - before)
+	# piec
+	var f := shore + Vector3i(0, 1, 2)
+	world.set_block(f, reg.id_of("furnace"))
+	Mods.as_player(me, func(): return Mods.before("block.use", {"pos": f, "normal": Vector3i.UP, "block": world.get_block(f), "item": "", "slot": 1}))
+	var fc := "@%d,%d,%d" % [f.x, f.y, f.z]
+	Mods.set_slot(fc, 0, {"item": "raw_fish", "count": 3})
+	Mods.set_slot(fc, 1, {"item": "coal", "count": 1})
+	Mods.as_player(me, func(): Mods.after("slot.click", {"container": fc, "index": 1, "right": false, "held": {}}))
+	await _wait(17.0)
+	print("RYBY piec po 17 s: wynik=", Mods.slot(fc, 2), " surowiec=", Mods.slot(fc, 0))
+	_close_mod_window("furnace")
+	# rzemiosło
+	var g3 := Mods.cid("craft3")
+	var out3 := Mods.cid("craft3_out")
+	for i in 9:
+		Mods.set_slot(g3, i, {})
+	for i in [2, 4, 6]:
+		Mods.set_slot(g3, i, {"item": "stick", "count": 1})
+	for i in [5, 8]:
+		Mods.set_slot(g3, i, {"item": "wool", "count": 1})
+	Mods.as_player(me, func(): Mods.after("slot.click", {"container": "craft3", "index": 1}))
+	print("RYBY stół: patyki + wełna -> ", Mods.slot(out3, 0), " (przepis wymaga przedmiotu 'string': istnieje=", reg.items.has("string"), ")")
+	print("RYBY błędy modów: ", Mods.logs.filter(func(l): return str(l).contains("fishing")))
+	get_tree().quit()
+
+
 func _count_item(item: String) -> int:
 	var n := 0
 	for cn in ["hotbar", "backpack"]:
@@ -1500,6 +1570,9 @@ func _autotest(dir: String) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--craft-only"):
 		await _test_craft(dir)
+		return
+	if OS.get_cmdline_user_args().has("--fishing-only"):
+		await _test_fishing(dir)
 		return
 	if OS.get_cmdline_user_args().has("--alchemy-only"):
 		await _test_alchemy(dir)
