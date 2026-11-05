@@ -312,6 +312,8 @@ func _physics_process(delta: float) -> void:
 			frozen = false
 		else:
 			return
+	if not world.physics_ready(global_position):
+		return   # np. po teleporcie: kolizja terenu jeszcze się buduje, czekamy zamiast spadać
 
 	var input := Vector2.ZERO if ui_blocked else Input.get_vector("move_left", "move_right", "move_forward", "move_back")
 	if touch_move.length() > 0.05:

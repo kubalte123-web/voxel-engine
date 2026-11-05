@@ -109,7 +109,7 @@ func _physics_process(delta: float) -> void:
 		return
 	var cell := Vector3i(global_position.floor())
 	# chunk pod spodem niegotowy albo usunięty: zamrażamy, żeby nie spaść przez świat
-	var ready := world.is_loaded(cell) and world.is_loaded(cell + Vector3i(0, -1, 0))
+	var ready := world.is_loaded(cell) and world.is_loaded(cell + Vector3i(0, -1, 0)) and world.physics_ready(global_position)
 	if freeze != (not ready):
 		freeze = not ready
 	if freeze:

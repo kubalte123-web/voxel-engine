@@ -668,6 +668,8 @@ func _process(delta: float) -> void:
 
 func _process_inner(delta: float) -> void:
 	world.update_center(player.global_position)
+	# przy wczytywaniu (gracz jeszcze czeka) wstawiamy chunki szybciej, w grze najwyżej 4 ms na klatkę
+	world.apply_budget_ms = 40.0 if player.frozen else 4.0
 	if Net.online() and Net.is_server():
 		var extra: Array[Vector3] = []
 		for p in players:
@@ -694,7 +696,7 @@ func _process_inner(delta: float) -> void:
 	autosave_timer -= delta
 	if autosave_timer <= 0.0 and not GameState.current_dir.is_empty() and not Net.is_client():
 		autosave_timer = 60.0
-		save_game()
+		save_game(false)   # chunki zapisuje wątek w tle
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -931,12 +933,20 @@ func close_pause() -> void:
 	get_tree().paused = false
 
 
-func save_game() -> void:
+var last_save := {}   # czasy części ostatniego zapisu (pomiar)
+
+## blocking = false (autozapis): pliki chunków zapisuje wątek w tle; przy wyjściu zawsze czekamy na zapis.
+func save_game(blocking := true) -> void:
 	if GameState.current_dir.is_empty() or Net.is_client():
 		return
-	world.save_all()
+	var ts := Time.get_ticks_usec()
+	var nch := world.save_all(blocking)
+	var t1 := Time.get_ticks_usec()
 	Mods.save_data(GameState.current_dir)
+	var t2 := Time.get_ticks_usec()
 	entities.save(GameState.current_dir)
+	var t3 := Time.get_ticks_usec()
+	last_save = {"chunks": nch, "world_ms": (t1 - ts) / 1000.0, "mods_ms": (t2 - t1) / 1000.0, "entities_ms": (t3 - t2) / 1000.0}
 	for q in Mods.sessions:
 		var s: Session = Mods.sessions[q]
 		if s.logged_in and players.has(q):
@@ -2036,6 +2046,7 @@ func _bench_walk(r: int, fv: int, v: float, pct: Callable) -> Dictionary:
 	var dist := 0.0
 	var last := Time.get_ticks_usec()
 	var t_end := Time.get_ticks_msec() + 15000
+	var s0: Dictionary = world.apply_stats.duplicate()
 	player.pitch = -0.12
 	player.yaw = -PI / 2.0   # patrzy w +x
 	while Time.get_ticks_msec() < t_end:
@@ -2059,6 +2070,15 @@ func _bench_walk(r: int, fv: int, v: float, pct: Callable) -> Dictionary:
 			worst_parts["physics"] = Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
 			worst_parts["applied_chunks"] = applied[-1]
 	var slow := frame.filter(func(x): return x > 33.3).size()
+	var tsv := Time.get_ticks_usec()
+	save_game(false)   # zapis po przejściu (jak autozapis): ile trwa w wątku głównym
+	last_save["total_ms"] = (Time.get_ticks_usec() - tsv) / 1000.0
+	# średni koszt jednego wstawionego chunka w wątku głównym, w częściach (ms)
+	var s1: Dictionary = world.apply_stats
+	var nch := maxi(1, int(s1.full) + int(s1.light) - int(s0.full) - int(s0.light))
+	var split := {"chunks": nch}
+	for k in ["pre_us", "mesh_us", "coll_us", "gen_us", "light_us", "us"]:
+		split[k.trim_suffix("_us")] = snappedf((int(s1.get(k, 0)) - int(s0.get(k, 0))) / 1000.0 / nch, 0.01)
 	var med: float = pct.call(frame, 0.5)
 	return {
 		"walk_speed": v, "radius": r, "far_view": fv, "shadows": true, "frames": frame.size(),
@@ -2068,7 +2088,7 @@ func _bench_walk(r: int, fv: int, v: float, pct: Callable) -> Dictionary:
 		"collect_ms_median": snappedf(pct.call(collect, 0.5), 0.01), "collect_ms_p95": snappedf(pct.call(collect, 0.95), 0.01),
 		"chunks_applied_per_frame_p95": pct.call(applied, 0.95), "chunks_applied_max": pct.call(applied, 1.0),
 		"apply_ms_p95": snappedf(pct.call(apply_ms, 0.95), 0.01),
-		"queued_end": world.queued.size(), "worst_frame_parts": worst_parts,
+		"queued_end": world.queued.size(), "worst_frame_parts": worst_parts, "apply_ms_per_chunk": split, "last_save": last_save,
 	}
 
 

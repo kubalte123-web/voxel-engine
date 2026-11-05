@@ -521,8 +521,8 @@ func _physics_process(delta: float) -> void:
 	if puppet:
 		_animate(delta, Vector2(_puppet_vel.x, _puppet_vel.z).length())   # pozycja i obrót w _process
 		return
-	if not world.is_loaded(Vector3i(global_position.floor())):
-		return  # chunk jeszcze niegotowy: stoimy w miejscu
+	if not world.physics_ready(global_position):
+		return  # chunk niegotowy albo daleko od graczy (bez kolizji): stoimy w miejscu
 	_brain(delta)
 	var feet := Vector3i(floori(global_position.x), floori(global_position.y + 0.2), floori(global_position.z))
 	var mid := Vector3i(feet.x, floori(global_position.y + 0.6 * scale_factor), feet.z)
