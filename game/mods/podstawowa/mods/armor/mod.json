@@ -1,0 +1,15 @@
+{
+	"id": "armor",
+	"name": "Zbroja",
+	"version": "0.1.0",
+	"author": "Jakub Lewicki",
+	"description": "Zbroja skórzana i żelazna (hełm, napierśnik, nogawice, buty) oraz drewniana tarcza na lewą rękę. Zakłada się ją w oknie ekwipunku (każda część na swoje miejsce) albo prawym przyciskiem z przedmiotem w ręce. Widać ją na postaci, zmniejsza obrażenia (4% za punkt, najwyżej 80%). Inne mody mogą dodawać własne części: pole armor = { slot, points, look } w przedmiocie.",
+	"requires": ["modkit", "backpack"],
+	"after": ["crafting_classic", "animals", "smelting"],
+	"content": ["content.lua"],
+	"scripts": ["main.lua"],
+	"settings": [
+		{"key": "reduction", "label": "Ochrona za punkt zbroi (%)", "type": "int", "default": 4, "min": 1, "max": 8, "step": 1},
+		{"key": "bar", "label": "Pasek zbroi na ekranie", "type": "bool", "default": true}
+	]
+}

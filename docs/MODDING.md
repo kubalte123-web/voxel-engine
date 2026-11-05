@@ -508,6 +508,23 @@ engine.items.register("mace", {
 - Bez pola `model` model dobiera się do wzoru ikony (`pickaxe`, `sword`, `food`, `potion`…); przedmiot-blok
   to mały blok z jego teksturami; przedmiot z ikoną z pliku PNG: ikona wyciągnięta w 3D (piksel = klocek).
 - Ikona z paczki zasobów ma pierwszeństwo przed renderem modelu (chyba że przedmiot ma pole `model`).
+- Wbudowane modele zbroi: `helmet`, `chestplate`, `leggings`, `boots`, `shield`.
+
+### Zbroja
+
+Moduł `armor` (paczka podstawowa) obsługuje przedmioty z polem `armor`:
+
+```lua
+engine.items.register("ruby_helmet", {
+	name = "Hełm rubinowy", model = "helmet", model_colors = { "#e0304a", "#a01828" }, max_stack = 1,
+	armor = { slot = "head", points = 3, look = { color = "#e0304a", trim = "#a01828", tex = "metal" } },
+})
+```
+
+`slot`: `head`, `chest`, `legs`, `feet` albo `offhand` (miejsca okna ekwipunku); `points`: punkty ochrony
+(4% mniej obrażeń za punkt, najwyżej 80%; głód, topienie i pustka bez ochrony); `look`: kolor, wykończenie
+i faktura części widocznej na postaci. Część zakłada się w oknie ekwipunku (tylko na swoje miejsce) albo
+prawym przyciskiem z przedmiotem w ręce. Biblioteka: `engine.optional("armor").points()`.
 
 Miejsce w kontenerze to `{ item = "apple", count = 3 }` albo pusta tabela `{}`. Może mieć też
 `data` – dane tego egzemplarza (np. amunicja w broni) – i `info` – linie opisu policzone przez mod.

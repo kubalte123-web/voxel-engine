@@ -2588,6 +2588,57 @@ func _test_inventory(dir: String) -> void:
 	get_tree().quit()
 
 
+## Test zbroi: zakładanie prawym przyciskiem, zła część w złym miejscu, obrażenia ze zbroją i bez, wygląd.
+func _test_armor(dir: String) -> void:
+	await _wait_loaded()
+	await _wait(0.5)
+	var me := Net.my_id()
+	var hb := Mods.cid("hotbar")
+	var eq := Mods.cid("equipment")
+	var pieces := ["iron_helmet", "iron_chestplate", "iron_leggings", "iron_boots", "wooden_shield"]
+	for i in pieces.size():
+		Mods.set_slot(hb, i, {"item": pieces[i], "count": 1})
+	# obrażenia bez zbroi
+	player.set_health(20.0)
+	player.damage(10.0, "mob")
+	var bare := 20.0 - player.health
+	player.set_health(20.0)
+	# zła część w złym miejscu: nogawice na głowę
+	var s: Session = Mods.sessions.get(me)
+	s.held = {"item": "iron_leggings", "count": 1}
+	Mods.window_click(me, eq, 0, false)
+	print("ZBROJA nogawice na głowę: miejsce=", Mods.slot(eq, 0), " w kursorze=", s.held)
+	s.held = {}
+	# zakładanie prawym przyciskiem (item.use) z paska
+	for i in pieces.size():
+		Mods.as_player(me, func(): return Mods.before("item.use", {"item": pieces[i], "slot": i + 1}))
+	var worn := []
+	for i in 5:
+		worn.append(str(Mods.slot(eq, i).get("item", "-")))
+	print("ZBROJA założone: ", worn, " pasek[0]=", Mods.slot(hb, 0))
+	player.damage(10.0, "mob")
+	var armored := 20.0 - player.health
+	player.set_health(20.0)
+	player.damage(4.0, "hunger")
+	print("ZBROJA obrażenia 10: bez zbroi=%.1f, w żelaznej zbroi z tarczą=%.1f; głód 4 w zbroi=%.1f" % [bare, armored, 20.0 - player.health])
+	player.set_health(20.0)
+	# wygląd: postać od przodu
+	Mods.camera_stats["mode"] = "third"
+	player.first_person = false
+	Mods.camera_stats["distance"] = 2.6
+	player.yaw = PI
+	player.pitch = -0.1
+	await _wait(0.4)
+	player.model.rotation.y = 0.0
+	await _wait(0.5)
+	await _shot(dir, "z1_armor_front")
+	player.model.rotation.y = 1.2
+	await _wait(0.3)
+	await _shot(dir, "z2_armor_side")
+	print("ZBROJA części na postaci: ", player.model.wear_nodes.size())
+	get_tree().quit()
+
+
 ## Test wyglądu zwierząt (faktury, modele): zwierzęta w rzędzie przed kamerą, gracz z boku. Zrzut a1_animals.
 func _test_animals(dir: String) -> void:
 	await _wait_loaded()
@@ -2953,6 +3004,9 @@ func _test_craft(dir: String) -> void:
 
 
 func _autotest(dir: String) -> void:
+	if OS.get_cmdline_user_args().has("--armor-only"):
+		await _test_armor(dir)
+		return
 	if OS.get_cmdline_user_args().has("--light-only"):
 		await _test_light(dir)
 		return

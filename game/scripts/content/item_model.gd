@@ -25,7 +25,7 @@ const BY_PATTERN := {
 
 const NAMES := ["pickaxe", "axe", "shovel", "sword", "hoe", "stick", "torch", "fishing_rod", "apple", "steak",
 	"drumstick", "fish", "bread", "egg", "ingot", "nugget", "gem", "lump", "bucket", "potion", "shears",
-	"leather", "feather", "wool", "seeds", "wheat"]
+	"leather", "feather", "wool", "seeds", "wheat", "helmet", "chestplate", "leggings", "boots", "shield"]
 
 
 static func _c(v: Variant, fallback: Color) -> Color:
@@ -231,6 +231,39 @@ static func _builtin(name: String, c1: Color, c2: Color, key: String) -> Diction
 				b.append(_bx(Vector3(0.022, 0.38, 0.022), Vector3(x, 0, 0), c2, Vector3(0, 0, (i - 2) * 6)))
 				b.append(_bx(Vector3(0.05, 0.12, 0.05), Vector3(x + (i - 2) * 0.02, 0.22, 0), c1, Vector3(0, 0, (i - 2) * 6)))
 			b.append(_bx(Vector3(0.2, 0.04, 0.06), Vector3(0, -0.05, 0), WOOD))
+		# ---------- zbroja (c1 materiał, c2 wykończenie) ----------
+		"helmet":
+			b.append(_bx(Vector3(0.5, 0.2, 0.5), Vector3(0, 0.12, 0), c1))
+			b.append(_bx(Vector3(0.08, 0.24, 0.5), Vector3(-0.21, -0.06, 0), c1))
+			b.append(_bx(Vector3(0.08, 0.24, 0.5), Vector3(0.21, -0.06, 0), c1))
+			b.append(_bx(Vector3(0.5, 0.24, 0.08), Vector3(0, -0.06, 0.21), c1))
+			b.append(_bx(Vector3(0.52, 0.05, 0.52), Vector3(0, 0.0, 0), c2))
+			b.append(_bx(Vector3(0.08, 0.05, 0.1), Vector3(0, 0.25, -0.18), c2))
+		"chestplate":
+			b.append(_bx(Vector3(0.5, 0.52, 0.22), Vector3(0, 0, 0), c1))
+			b.append(_bx(Vector3(0.17, 0.2, 0.26), Vector3(-0.32, 0.16, 0), c1))
+			b.append(_bx(Vector3(0.17, 0.2, 0.26), Vector3(0.32, 0.16, 0), c1))
+			b.append(_bx(Vector3(0.2, 0.08, 0.23), Vector3(0, 0.23, 0), c2))
+			b.append(_bx(Vector3(0.52, 0.06, 0.24), Vector3(0, -0.22, 0), c2))
+			b.append(_bx(Vector3(0.04, 0.36, 0.225), Vector3(0, -0.02, 0), c2))
+		"leggings":
+			b.append(_bx(Vector3(0.48, 0.13, 0.22), Vector3(0, 0.22, 0), c2))
+			b.append(_bx(Vector3(0.2, 0.46, 0.22), Vector3(-0.13, -0.05, 0), c1))
+			b.append(_bx(Vector3(0.2, 0.46, 0.22), Vector3(0.13, -0.05, 0), c1))
+			b.append(_bx(Vector3(0.21, 0.06, 0.23), Vector3(-0.13, 0.02, 0), c2))
+			b.append(_bx(Vector3(0.21, 0.06, 0.23), Vector3(0.13, 0.02, 0), c2))
+		"boots":
+			for sx in [-1.0, 1.0]:
+				b.append(_bx(Vector3(0.18, 0.2, 0.22), Vector3(0.12 * sx, 0.04, 0.03), c1))
+				b.append(_bx(Vector3(0.18, 0.09, 0.12), Vector3(0.12 * sx, -0.02, -0.13), c1))
+				b.append(_bx(Vector3(0.19, 0.04, 0.32), Vector3(0.12 * sx, -0.07, -0.02), c2))
+		"shield":
+			b.append(_bx(Vector3(0.44, 0.54, 0.06), Vector3(0, 0, 0), c1))
+			b.append(_bx(Vector3(0.48, 0.05, 0.07), Vector3(0, 0.27, 0), c2))
+			b.append(_bx(Vector3(0.48, 0.05, 0.07), Vector3(0, -0.27, 0), c2))
+			b.append(_bx(Vector3(0.05, 0.56, 0.07), Vector3(-0.22, 0, 0), c2))
+			b.append(_bx(Vector3(0.05, 0.56, 0.07), Vector3(0.22, 0, 0), c2))
+			b.append(_bx(Vector3(0.12, 0.12, 0.05), Vector3(0, 0, -0.05), c2.lightened(0.2)))
 	return {"kind": k, "boxes": b, "grip": Vector3.ZERO}
 
 
