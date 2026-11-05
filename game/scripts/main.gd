@@ -2492,6 +2492,60 @@ func _test_creatures(dir: String) -> void:
 
 
 ## Kształty z prostopadłościanów (mod building): stawianie schodów i półbloków, celowanie, chodzenie po nich.
+## Test wchodzenia po schodach: 6 stopni schodów (po pół bloku), gracz idzie do przodu przez 4 s.
+## Liczy skoki (prędkość w górę jak przy skoku) i największy przyrost wysokości kamery w jednej klatce.
+func _test_stairs(dir: String) -> void:
+	await _wait_loaded()
+	await _wait(0.5)
+	var reg := Mods.registry
+	var o := Vector3i(floori(player.global_position.x), floori(player.global_position.y) - 1, floori(player.global_position.z))
+	for x in range(-3, 4):
+		for z in range(-14, 4):
+			world.set_block(o + Vector3i(x, 0, z), reg.id_of("stone"))
+			for y in range(1, 10):
+				world.set_block(o + Vector3i(x, y, z), Blocks.AIR)
+	var stair := Actions.oriented(reg.id_of("planks_stairs"), 0.0, Vector3i.UP)
+	for i in 6:
+		for x in range(-1, 2):
+			for y in range(1, i + 1):
+				world.set_block(o + Vector3i(x, y, -2 - i), reg.id_of("stone"))
+			world.set_block(o + Vector3i(x, i + 1, -2 - i), stair)
+	await _wait(1.0)
+	Mods.camera_stats.erase("mode")
+	player.first_person = true
+	player.global_position = Vector3(o) + Vector3(0.5, 1.0, 1.5)
+	player.velocity = Vector3.ZERO
+	player.yaw = 0.0
+	player.pitch = 0.0
+	await _wait(0.5)
+	var y0 := player.global_position.y
+	var cam_last := player.camera.global_position.y
+	var jumps := 0
+	var max_cam_step := 0.0
+	var trace := []
+	Input.action_press("move_forward")
+	var until := Time.get_ticks_msec() + 4000
+	var n := 0
+	while Time.get_ticks_msec() < until:
+		await get_tree().physics_frame
+		n += 1
+		if player.velocity.y > float(player.stat("jump")) * 0.8:
+			jumps += 1
+		var cy := player.camera.global_position.y
+		if player.is_on_floor() and player.global_position.y - y0 > 0.2 and player.global_position.y - y0 < 5.9:   # tylko wchodzenie
+			max_cam_step = maxf(max_cam_step, absf(cy - cam_last))
+		cam_last = cy
+		if n % 10 == 0:
+			trace.append(snappedf(player.global_position.y - y0, 0.01))
+		if n == 70:
+			await _shot(dir, "stairs_mid")
+	Input.action_release("move_forward")
+	await _wait(0.5)
+	print("SCHODY wysokość po wejściu=%.2f (6 stopni = 3.0) skoki=%d największy skok kamery w klatce=%.3f ślad=%s" %
+		[player.global_position.y - y0, jumps, max_cam_step, str(trace)])
+	get_tree().quit()
+
+
 func _test_shapes(dir: String) -> void:
 	await _wait_loaded()
 	await _wait(0.5)
@@ -2779,6 +2833,9 @@ func _autotest(dir: String) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--seams-only"):
 		await _test_seams(dir)
+		return
+	if OS.get_cmdline_user_args().has("--stairs-only"):
+		await _test_stairs(dir)
 		return
 	if OS.get_cmdline_user_args().has("--farview-only"):
 		await _test_farview(dir)

@@ -83,7 +83,7 @@ func _ready() -> void:
 	add_child(cs)
 	body_shape = shape
 	body_cs = cs
-	floor_snap_length = 0.3
+	floor_snap_length = 0.6   # schodzenie po schodach i półblokach bez podskoków
 	collision_layer = 8          # gracz
 	collision_mask = 1 | 4       # świat i obiekty luźne (stworzenia przechodzą obok)
 
@@ -292,10 +292,14 @@ func _update_camera(delta: float) -> void:
 	if Mods.has_hook("after", "camera.update"):
 		cam = Mods.after("camera.update", cam)
 	pivot.position = Vector3(0, float(cam.height) + mount_seat, 0) + Vector3(cos(yaw), 0, -sin(yaw)) * float(cam.side)
-	model.position.y = mount_seat
+	# po wejściu na stopień ciało jest już wyżej, a kamera i model dochodzą płynnie (bez skoku obrazu)
+	_step_smooth *= exp(-14.0 * delta)
+	if absf(_step_smooth) < 0.002:
+		_step_smooth = 0.0
+	model.position.y = mount_seat + _step_smooth
 	model.sitting = mount_id >= 0
 	_eye = lerpf(_eye, float(POSE_EYE.get(pose, 0.0)) if mount_id < 0 else 0.0, minf(1.0, delta * 10.0))
-	pivot.position.y += _eye
+	pivot.position.y += _eye + _step_smooth
 	model.set_held(str(current_item().get("item", "")))
 	pivot.rotation = Vector3(float(cam.pitch), float(cam.yaw), 0)
 	spring.spring_length = lerpf(spring.spring_length, float(cam.distance), minf(1.0, delta * 10.0))
@@ -354,8 +358,9 @@ func _physics_process(delta: float) -> void:
 		reset_fall()
 	elif is_on_floor():
 		var want_jump := (Input.is_action_pressed("jump") and not ui_blocked) or touch_jump
-		# automatyczny skok na stopień o wysokości jednego bloku
-		if dir.length() > 0.3 and is_on_wall() and bool(stat("auto_jump")):
+		# niski stopień (schody, półbloki) wchodzimy krokiem; na pełny blok automatyczny skok
+		var stepped := not want_jump and dir.length() > 0.3 and _try_step(dir, speed, delta)
+		if not stepped and dir.length() > 0.3 and is_on_wall() and bool(stat("auto_jump")):
 			want_jump = true
 		if want_jump:
 			velocity.y = float(stat("jump"))
@@ -629,6 +634,40 @@ func _fits(p: String) -> bool:
 			var top := world.get_block(Vector3i(floori(global_position.x + dx), floori(global_position.y + h - 0.05), floori(global_position.z + dz)))
 			if top != Blocks.AIR and (Blocks.props(top) & Blocks.SOLID) != 0:
 				return false
+	return true
+
+
+const STEP_HEIGHT := 0.55   # najwyższy stopień, na który wchodzi się bez skoku (schody, półbloki)
+var _step_smooth := 0.0      # o ile kamera i model są jeszcze niżej po wejściu na stopień
+
+## Wejście na stopień: przed nami przeszkoda, ale o STEP_HEIGHT wyżej jest wolne miejsce i podłoga
+## → podnosimy postać na wysokość stopnia (kamera dojdzie płynnie). true = weszliśmy.
+func _try_step(dir: Vector3, speed: float, delta: float) -> bool:
+	var h := Vector3(dir.x, 0.0, dir.z)
+	if h.length() < 0.3 or speed <= 0.0:
+		return false
+	# kierunek z klawiszy (przy ścianie prędkość jest wyhamowana), odległość: ruch w tej klatce
+	var motion := h.normalized() * clampf(speed * delta, 0.03, 0.15)
+	if not test_move(global_transform, motion):
+		return false   # nic nie blokuje
+	var up := Vector3(0, STEP_HEIGHT, 0)
+	if test_move(global_transform, up):
+		return false   # nisko nad głową
+	var raised := global_transform.translated(up)
+	if test_move(raised, motion):
+		return false   # wyżej też przeszkoda: to ściana albo pełny blok
+	var col := KinematicCollision3D.new()
+	if not test_move(raised.translated(motion), -up, col):
+		return false   # za przeszkodą nie ma podłogi na tej wysokości
+	var dy := STEP_HEIGHT - col.get_travel().length()
+	if dy < 0.02 or dy > STEP_HEIGHT:
+		return false
+	# od razu na stopień (inaczej przyciąganie do podłoża ściągnęłoby postać z powrotem w dół)
+	global_position += motion + Vector3(0, dy + 0.002, 0)
+	_step_smooth -= dy
+	# kamera i model zostają w tej klatce na starej wysokości, potem dochodzą płynnie
+	pivot.position.y -= dy
+	model.position.y -= dy
 	return true
 
 

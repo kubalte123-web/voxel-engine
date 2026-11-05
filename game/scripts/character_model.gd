@@ -215,6 +215,9 @@ var _was_floor := true
 var _land := 0.0
 var _land_power := 0.0
 var _dig_t := 0.0
+var _dig_hold := 0.0         # kopanie trwa jeszcze chwilę po przerwie (bez restartu ruchu)
+const DIG_CYCLE := 0.42      # jeden zamach przy kopaniu (s)
+const DIG_HOLD := 0.3
 
 const ACTIONS := {"swing": 0.28, "attack1": 0.34, "attack2": 0.34, "attack3": 0.55, "hurt": 0.3, "dig": 0.3}
 
@@ -389,14 +392,22 @@ func animate(delta: float, speed: float, on_floor: bool, look_pitch: float) -> v
 		L[1].x += 0.25 * k
 
 	# ---------- akcje: kopanie, machnięcie, ataki w serii, zranienie ----------
+	# kopanie: ręka uderza przed sobą (od poziomu w skos w dół), tułów i głowa stoją spokojnie;
+	# krótka przerwa (np. między wykopanymi blokami) nie zaczyna ruchu od nowa
 	if digging and pose != "crawl":
+		_dig_hold = DIG_HOLD
+	else:
+		_dig_hold = maxf(0.0, _dig_hold - delta)
+	if _dig_hold > 0.0:
 		_dig_t += delta
-		var cyc := fmod(_dig_t / float(ACTIONS.dig), 1.0)
-		var raise := _ease(cyc / 0.55) if cyc < 0.55 else 1.0 - _ease((cyc - 0.55) / 0.3)
-		A[1] = Vector3(lerpf(0.55, 2.35, raise), 0.15, 0.12)
-		A[0].x = lerpf(A[0].x, 0.45, 0.6)
-		T_rot.x += -0.12 * (1.0 - raise)
-		T_rot.y += -0.15
+		var cyc := fmod(_dig_t / DIG_CYCLE, 1.0)
+		# zamach w górę (60% cyklu), szybkie uderzenie w dół (25%), chwila w dole
+		var raise := _ease(cyc / 0.6) if cyc < 0.6 else 1.0 - _ease((cyc - 0.6) / 0.25)
+		var fade := clampf(_dig_hold / DIG_HOLD, 0.0, 1.0) if not digging else 1.0
+		A[1] = A[1].lerp(Vector3(lerpf(0.85, 1.75, raise), 0.3, 0.05), fade)
+		A[0].x = lerpf(A[0].x, 0.3, 0.5 * fade)
+		T_rot.y += -0.1 * fade
+		T_rot.x += -0.04 * fade
 	else:
 		_dig_t = 0.0
 	if swing > 0.0:   # stary wywołujący: do_swing() = machnięcie
@@ -427,7 +438,7 @@ func animate(delta: float, speed: float, on_floor: bool, look_pitch: float) -> v
 	# ---------- stawy dochodzą do celu ----------
 	var r := _k(16.0, delta)
 	var rf := _k(26.0, delta)   # akcje szybciej
-	var ra := rf if not action.is_empty() or digging else r
+	var ra := rf if not action.is_empty() or _dig_hold > 0.0 else r
 	legs[0].rotation = legs[0].rotation.lerp(L[0], r)
 	legs[1].rotation = legs[1].rotation.lerp(L[1], r)
 	arms[0].rotation = arms[0].rotation.lerp(A[0], ra)
