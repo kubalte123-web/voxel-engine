@@ -12,6 +12,8 @@ a mody mogą udostępniać sobie biblioteki przez `engine.export` i `engine.requ
 
 ## Dokumentacja
 
+- [Pełna specyfikacja w jednym pliku](docs/AI_MOD_SPEC.md): skrót, instrukcja, lista kluczy i mody wzorcowe
+
 - [Tworzenie modów](docs/MODDING.md): mod.json, fazy, bloki, przedmioty, świat, haki, zdarzenia, pełne API `engine`
 - [Prelude API](game/scripts/mods/prelude.lua): implementacja obiektu `engine` po stronie Lua
 
