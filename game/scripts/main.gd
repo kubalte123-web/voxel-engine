@@ -1878,9 +1878,13 @@ func _test_render_bench(dir: String) -> void:
 				_apply_settings()
 				var t0 := Time.get_ticks_msec()
 				var calm := 0
-				while calm < 10 and Time.get_ticks_msec() - t0 < 240000:
+				# świat gotowy: nic w budowie ani w kolejce do wstawienia, wszystko w zasięgu zbudowane,
+				# daleki widok policzony – i tak przez 2 s (szukanie brakujących chunków idzie co 1 s)
+				while calm < 20 and Time.get_ticks_msec() - t0 < 240000:
 					await _wait(0.1)
-					calm = calm + 1 if world.queued.size() == 0 and world.dirty.size() == 0 else 0
+					var idle := world.queued.is_empty() and world.dirty.is_empty() and world.results.is_empty() \
+							and not world._scan_missing and far.pending.is_empty()
+					calm = calm + 1 if idle else 0
 				var load_ms := Time.get_ticks_msec() - t0
 				player.pitch = -0.12
 				for i in 30:
