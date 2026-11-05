@@ -4,16 +4,24 @@ extends Node3D
 ## (siatka wysokości co 4 bloki, kolor z wierzchniego bloku, woda jako płaska tafla, lasy jako
 ## ciemniejszy, lekko podniesiony kolor koron). Kafle liczą się w tle; wysokości daje rdzeń C++.
 ## Shader odrzuca piksele w zasięgu prawdziwych chunków, więc kafle nie zasłaniają świata.
+## Kafle tworzą drzewo czwórkowe: dalej od gracza są większe (64, 128, 256… bloków) przy tej samej
+## liczbie wierzchołków, więc przy dużym zasięgu jest ich kilkaset zamiast tysięcy (mniej wywołań rysowania).
+## Krawędzie kafli mają opuszczone „spódniczki”, które zasłaniają szczeliny między kaflami różnej wielkości.
 
-const TILE := 64
-const STEP := 4
+const TILE := 64        # najmniejszy kafel (poziom 0)
+const STEP := 4         # odstęp wierzchołków na poziomie 0
 const N := TILE / STEP + 1
+const MAX_LEVEL := 6    # największy kafel: 64 * 2^6 = 4096 bloków
+const SPLIT := 3.0      # kafel dzielimy na 4, gdy gracz jest bliżej niż SPLIT * jego rozmiar
 
 var world: World
 var radius_blocks := 0.0
 var inner := 0.0
-var tiles := {}      # Vector2i -> MeshInstance3D
-var pending := {}    # Vector2i -> true (w trakcie liczenia)
+var tiles := {}      # Vector3i(poziom, x, z) -> MeshInstance3D
+var pending := {}    # Vector3i -> true (w trakcie liczenia)
+var want := {}       # kafle potrzebne przy obecnej pozycji gracza
+var doomed := {}     # kafle już niepotrzebne: znikają, gdy nowe w tym miejscu są gotowe (bez dziur)
+var _pos := Vector3.ZERO
 var results: Array = []
 var mutex := Mutex.new()
 var material: ShaderMaterial
@@ -60,7 +68,39 @@ func set_radius(near_chunks: int, factor: int) -> void:
 		for k in tiles.keys():
 			tiles[k].queue_free()
 		tiles.clear()
+		doomed.clear()
+		want.clear()
 	center = Vector2i(999999, 0)
+
+
+static func _size(k: Vector3i) -> int:
+	return TILE << k.x
+
+
+## Najmniejsza i największa odległość (w poziomie) od punktu do kwadratu kafla.
+static func _dist_range(k: Vector3i, p: Vector2) -> Vector2:
+	var s := float(_size(k))
+	var x0 := k.y * s
+	var z0 := k.z * s
+	var dx := maxf(maxf(x0 - p.x, 0.0), p.x - (x0 + s))
+	var dz := maxf(maxf(z0 - p.y, 0.0), p.y - (z0 + s))
+	var fx := maxf(absf(p.x - x0), absf(p.x - (x0 + s)))
+	var fz := maxf(absf(p.y - z0), absf(p.y - (z0 + s)))
+	return Vector2(Vector2(dx, dz).length(), Vector2(fx, fz).length())
+
+
+func _select(k: Vector3i, p: Vector2, out: Dictionary) -> void:
+	var dr := _dist_range(k, p)
+	if dr.x > radius_blocks:
+		return            # cały za zasięgiem dalekiego widoku
+	if dr.y < inner:
+		return            # cały w zasięgu prawdziwych chunków
+	if k.x > 0 and dr.x < SPLIT * _size(k):
+		for j in 2:
+			for i in 2:
+				_select(Vector3i(k.x - 1, k.y * 2 + i, k.z * 2 + j), p, out)
+		return
+	out[k] = dr.x
 
 
 func update_center(pos: Vector3) -> void:
@@ -71,22 +111,22 @@ func update_center(pos: Vector3) -> void:
 	if c == center:
 		return
 	center = c
-	var r := ceili(radius_blocks / TILE)
-	var want := {}
-	for tz in range(c.y - r, c.y + r + 1):
-		for tx in range(c.x - r, c.x + r + 1):
-			var k := Vector2i(tx, tz)
-			var mid := Vector2((tx + 0.5) * TILE, (tz + 0.5) * TILE)
-			var d := mid.distance_to(Vector2(pos.x, pos.z))
-			if d > radius_blocks + TILE:
-				continue
-			if d + TILE * 0.71 < inner:
-				continue  # kafel cały w zasięgu prawdziwych chunków
-			want[k] = d
+	_pos = pos
+	var p := Vector2(pos.x, pos.z)
+	var top := float(TILE << MAX_LEVEL)
+	var r := ceili(radius_blocks / top)
+	var cx := floori(pos.x / top)
+	var cz := floori(pos.z / top)
+	want = {}
+	for tz in range(cz - r, cz + r + 1):
+		for tx in range(cx - r, cx + r + 1):
+			_select(Vector3i(MAX_LEVEL, tx, tz), p, want)
 	for k in tiles.keys():
 		if not want.has(k):
-			tiles[k].queue_free()
-			tiles.erase(k)
+			doomed[k] = true
+	for k in doomed.keys():
+		if want.has(k):
+			doomed.erase(k)   # wrócił do użytku zanim zniknął
 	var order := want.keys()
 	order.sort_custom(func(a, b): return want[a] < want[b])
 	for k in order:
@@ -97,6 +137,29 @@ func update_center(pos: Vector3) -> void:
 			WorkerThreadPool.add_task(_job.bind(k))
 		else:
 			_job(k)
+	_retire()
+
+
+## Usuwa niepotrzebne kafle, których miejsce pokrywają już gotowe nowe kafle.
+func _retire() -> void:
+	if doomed.is_empty():
+		return
+	for k in doomed.keys():
+		var s := _size(k)
+		var r := Rect2i(k.y * s, k.z * s, s, s)
+		var covered := true
+		for w in want:
+			if tiles.has(w):
+				continue
+			var ws := _size(w)
+			if r.intersects(Rect2i(w.y * ws, w.z * ws, ws, ws)):
+				covered = false
+				break
+		if covered:
+			if tiles.has(k):
+				tiles[k].queue_free()
+				tiles.erase(k)
+			doomed.erase(k)
 
 
 func _process(_delta: float) -> void:
@@ -105,37 +168,43 @@ func _process(_delta: float) -> void:
 	results = []
 	mutex.unlock()
 	var budget := 6
+	var added := false
 	for r in ready:
-		var k: Vector2i = r[0]
-		pending.erase(k)
+		var k: Vector3i = r[0]
 		if budget <= 0:
 			mutex.lock()
 			results.append(r)
 			mutex.unlock()
 			continue
+		pending.erase(k)
 		budget -= 1
-		if tiles.has(k):
+		if tiles.has(k) or not want.has(k):
 			continue
 		var mi := MeshInstance3D.new()
 		mi.mesh = r[1]
 		mi.material_override = material
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		mi.position = Vector3(k.x * TILE, -0.35, k.y * TILE)
+		var s := _size(k)
+		mi.position = Vector3(k.y * s, -0.35, k.z * s)
 		add_child(mi)
 		tiles[k] = mi
+		added = true
+	if added:
+		_retire()
 
 
-func _job(k: Vector2i) -> void:
-	var x0 := k.x * TILE
-	var z0 := k.y * TILE
+func _job(k: Vector3i) -> void:
+	var step := STEP << k.x
+	var x0 := k.y * _size(k)
+	var z0 := k.z * _size(k)
 	var hb: PackedInt32Array
 	if world.native != null:
-		hb = world.native.call("heights", x0, z0, STEP, N)
+		hb = world.native.call("heights", x0, z0, step, N)
 	else:
 		hb.resize(N * N * 2)
 		for j in N:
 			for i in N:
-				var c := world.terrain.column(x0 + i * STEP, z0 + j * STEP)
+				var c := world.terrain.column(x0 + i * step, z0 + j * step)
 				hb[(i + N * j) * 2] = c.x
 				hb[(i + N * j) * 2 + 1] = c.y
 	var sea := world.terrain.sea
@@ -157,7 +226,7 @@ func _job(k: Vector2i) -> void:
 				y = float(sea) + 0.85
 			elif float(tc[2]) > 0.0 and h > world.terrain.beach:
 				# las z daleka: kolor koron i drzewa podnoszą teren
-				var hv := Terrain.hash01(x0 + i * STEP, z0 + j * STEP, 7, 9)
+				var hv := Terrain.hash01(x0 + i * step, z0 + j * step, 7, 9)
 				var cover: float = tc[2] * (0.6 + 0.8 * hv)
 				col = col.lerp((tc[1] as Color).darkened(0.1), clampf(cover, 0.0, 1.0))
 				y += cover * 4.5
@@ -170,17 +239,39 @@ func _job(k: Vector2i) -> void:
 	for j in N:
 		for i in N:
 			var y := hs[i + N * j]
-			v.append(Vector3(i * STEP, y, j * STEP))
+			v.append(Vector3(i * step, y, j * step))
 			var l := hs[maxi(i - 1, 0) + N * j]
 			var r := hs[mini(i + 1, N - 1) + N * j]
 			var d := hs[i + N * maxi(j - 1, 0)]
 			var u := hs[i + N * mini(j + 1, N - 1)]
-			n.append(Vector3(l - r, 2.0 * STEP, d - u).normalized())
+			n.append(Vector3(l - r, 2.0 * step, d - u).normalized())
 			cl.append(cols[i + N * j])
 	for j in N - 1:
 		for i in N - 1:
 			var a := i + N * j
 			idx.append_array([a, a + 1, a + N + 1, a, a + N + 1, a + N])
+	# spódniczka: obwód kafla powtórzony niżej i połączony z krawędzią (zasłania szczeliny przy sąsiadach innej wielkości)
+	var drop := 6.0 + float(step) * 2.0
+	var ring: Array[int] = []
+	for i in N:
+		ring.append(i)
+	for j in range(1, N):
+		ring.append(N - 1 + N * j)
+	for i in range(N - 2, -1, -1):
+		ring.append(i + N * (N - 1))
+	for j in range(N - 2, 0, -1):
+		ring.append(N * j)
+	var base := v.size()
+	for a in ring:
+		v.append(v[a] - Vector3(0, drop, 0))
+		n.append(n[a])
+		cl.append(cl[a].darkened(0.15))
+	for e in ring.size():
+		var a: int = ring[e]
+		var b: int = ring[(e + 1) % ring.size()]
+		var a2 := base + e
+		var b2 := base + (e + 1) % ring.size()
+		idx.append_array([a, b, b2, a, b2, a2])
 	var arr := []
 	arr.resize(Mesh.ARRAY_MAX)
 	arr[Mesh.ARRAY_VERTEX] = v

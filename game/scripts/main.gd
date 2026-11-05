@@ -1996,6 +1996,51 @@ func _test_seams(dir: String) -> void:
 	get_tree().quit()
 
 
+## Test dalekiego widoku: z wysokości 40 bloków nad terenem, 4 kierunki, zasięg 8 i 16 (daleki widok 4).
+## Zrzuty zwykłe i z purpurowym niebem; purpurowe piksele w pasie tuż pod horyzontem to prześwity.
+func _test_farview(dir: String) -> void:
+	time_of_day = 12.0
+	daynight = false
+	await _wait_loaded()
+	Mods.camera_stats.erase("mode")
+	player.first_person = true
+	var start := Vector3(0.5, world.terrain.height(0, 0) + 40.0, 0.5)
+	for r in [8, 16]:
+		Settings.render_distance = r
+		Settings.far_view = 4
+		_apply_settings()
+		var t0 := Time.get_ticks_msec()
+		while Time.get_ticks_msec() - t0 < 90000:
+			player.global_position = start
+			player.velocity = Vector3.ZERO
+			await _wait(0.5)
+			if world.queued.is_empty() and far.pending.is_empty() and Time.get_ticks_msec() - t0 > 4000:
+				break
+		var holes := []
+		for i in 4:
+			for magenta in [false, true]:
+				env.background_mode = Environment.BG_COLOR if magenta else Environment.BG_SKY
+				env.background_color = Color(1, 0, 1)
+				env.fog_enabled = not magenta
+				for k in 4:
+					player.global_position = start
+					player.velocity = Vector3.ZERO
+					player.yaw = TAU * i / 4.0 + 0.4
+					player.pitch = -0.12
+					await get_tree().process_frame
+				await RenderingServer.frame_post_draw
+				var img := get_viewport().get_texture().get_image()
+				if magenta:
+					# pas od ok. 3/4 drogi środek–horyzont do środka ekranu: tylko teren (daleki widok)
+					var h := img.get_height()
+					var band := img.get_region(Rect2i(0, int(h * 0.45), img.get_width(), int(h * 0.05)))
+					holes.append(_count_magenta(band, 0.0))
+				img.save_png(dir.path_join("far_r%d_%d%s.png" % [r, i, "_m" if magenta else ""]))
+		print("FARVIEW zasięg=%d kafle=%d wywołania=%d prześwity=%s" % [r, far.tiles.size(), Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME), str(holes)])
+	env.background_mode = Environment.BG_SKY
+	get_tree().quit()
+
+
 ## Liczba czysto purpurowych pikseli w dolnej części obrazu (od from_y * wysokość w dół).
 static func _count_magenta(img: Image, from_y: float) -> int:
 	img.convert(Image.FORMAT_RGBA8)
@@ -2730,6 +2775,9 @@ func _autotest(dir: String) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--seams-only"):
 		await _test_seams(dir)
+		return
+	if OS.get_cmdline_user_args().has("--farview-only"):
+		await _test_farview(dir)
 		return
 	if OS.get_cmdline_user_args().has("--blocks-only"):
 		await _test_blocks(dir)
