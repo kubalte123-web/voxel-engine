@@ -294,6 +294,7 @@ local R = {
 	sounds = {},
 	particles = {},
 	projectiles = {},
+	effects = {},
 }
 
 local function open_registry(what)
@@ -470,7 +471,7 @@ local function finalize()
 	for key, s in pairs(R.structures) do structures[key] = norm_structure(s) end
 	return to_godot({
 		blocks = blocks, items = items, animations = copy(R.animations), entities = copy(R.entities),
-		sounds = copy(R.sounds), particles = copy(R.particles), projectiles = copy(R.projectiles),
+		sounds = copy(R.sounds), particles = copy(R.particles), projectiles = copy(R.projectiles), effects = copy(R.effects),
 		worldgen = { config = copy(R.config), biomes = biomes, ores = ores, structures = structures },
 	})
 end
@@ -704,6 +705,22 @@ local function make_api(mod_id)
 		end,
 	}
 
+	-- efekty: opis w content.lua ({name, icon, color, stats = {speed = {mul = 1.5}}, negative}),
+	-- nakładanie w skryptach (czas liczy silnik, ikona i czas na ekranie, zapis z kontem gracza)
+	E.effects = {
+		register = function(name, def)
+			open_registry("effects.register")
+			local d = copy(def or {})
+			d.mod = mod_id
+			R.effects[name] = d
+		end,
+		def = function(name) return R.effects[name] end,
+		add = function(name, seconds, strength) return host.effect_add(tostring(name), tonumber(seconds) or 10, tonumber(strength) or 1) end,
+		remove = function(name) host.effect_remove(tostring(name)) end,
+		get = function(name) return to_lua(host.effect_get(tostring(name))) end,
+		list = function() return to_lua(host.effect_list()) or {} end,
+	}
+
 	E.animation = {
 		-- {length = 1.0, loop = false, tracks = {arm_right = {{0, {0,0,0}}, {0.5, {-90,0,0}}}, ...}}
 		register = function(name, def)
@@ -828,6 +845,13 @@ local function make_api(mod_id)
 		colors = function(t) host.player_colors(to_godot(t)) end,
 		-- blok, w który celuje gracz: {pos, normal, block}; with_liquids = true uwzględnia ciecze
 		target = function(with_liquids) return to_lua(host.player_target(with_liquids == true)) end,
+		-- statystyki: base = wartość bez modyfikatorów; modify dokłada modyfikator od źródła (add, mul)
+		base = function(stat) return host.player_base(stat) end,
+		modify = function(stat, source, m)
+			m = m or {}
+			host.player_modify(stat, tostring(source), tonumber(m.add) or 0, tonumber(m.mul) or 1)
+		end,
+		unmodify = function(stat, source) host.player_unmodify(stat, tostring(source)) end,
 		eye_position = function() return host.player_eye() end,
 		look_direction = function() return host.player_look() end,
 		raycast = function(dist, opts)

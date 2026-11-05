@@ -237,6 +237,7 @@ func accept_player(p: int, account: String) -> String:
 		node.set_account(account)
 		node.global_position = pos
 		node.net_pos = pos
+	Mods.restore_effects(p)
 	Mods.as_player(p, func(): Mods.emit_event("player.join", {"id": p, "name": account}))
 	var hp := float(saved.get("health", node.stat("max_health")))
 	if s.local:
@@ -403,6 +404,9 @@ func session_update(part: String, value: Variant) -> void:
 		"camera":
 			Mods.camera_stats.clear()
 			Mods.camera_stats.merge(value)
+		"effects":
+			Mods.client_effects = value if value is Dictionary else {}
+			Mods.effects_changed.emit()
 		"hud":
 			Mods.hud.clear()
 			Mods.hud.merge(value)
@@ -430,6 +434,7 @@ func flush_sessions() -> void:
 				"hud": Net.s_session.rpc_id(p, "hud", s.hud)
 				"hotbar": Net.s_session.rpc_id(p, "hotbar", s.hotbar)
 				"held": Net.s_session.rpc_id(p, "held", s.held)
+				"effects": Net.s_session.rpc_id(p, "effects", s.effects)
 		s.dirty.clear()
 		if Mods.dirty_containers.is_empty():
 			continue
@@ -579,6 +584,7 @@ func _process(delta: float) -> void:
 		Mods.emit_event("tick", {"dt": 0.1, "time": time_of_day})
 		if world.logic:
 			world.logic.tick(0.1)
+		Mods.tick_effects(0.1)
 	autosave_timer -= delta
 	if autosave_timer <= 0.0 and not GameState.current_dir.is_empty() and not Net.is_client():
 		autosave_timer = 60.0
@@ -1217,7 +1223,17 @@ func _test_alchemy(dir: String) -> void:
 	Mods.set_slot(hb, 1, {"item": "potion_speed_strong", "count": 1})
 	Mods.as_player(me, func(): return Mods.before("item.use", {"item": "potion_speed_strong", "slot": 2}))
 	await _wait(0.6)
-	print("ALCH wypita: szybkość ", speed_before, " -> ", player.stat("speed"), " napis=", hud.texts.keys() if hud.get("texts") != null else "?")
+	print("ALCH wypita: szybkość ", speed_before, " -> ", player.stat("speed"), " efekty=", Mods.shown_effects())
+	# drugi mod spowalnia gracza (np. ciężka zbroja): modyfikatory się mnożą, a po końcu efektu wraca tylko spowolnienie
+	Mods.as_player(me, func(): Mods._h_player_modify("speed", "test:zbroja", 0.0, 0.5))
+	print("ALCH mikstura + zbroja: ", snappedf(float(player.stat("speed")), 0.01))
+	Mods.as_player(me, func(): Mods._h_effect_remove("alchemy.speed"))
+	print("ALCH koniec mikstury, zostaje zbroja: ", snappedf(float(player.stat("speed")), 0.01))
+	Mods.as_player(me, func(): Mods._h_player_unmodify("speed", "test:zbroja"))
+	print("ALCH bez niczego: ", snappedf(float(player.stat("speed")), 0.01), " efekty=", Mods.shown_effects())
+	Mods.as_player(me, func(): Mods._h_effect_add("alchemy.jump", 3.0, 1.0))
+	await _wait(3.5)
+	print("ALCH efekt skoku po 3,5 s (trwał 3 s): ", Mods.shown_effects(), " skok=", player.stat("jump"))
 	# nieudana mikstura: węgiel i piasek
 	var c2 := c + Vector3i(2, 0, 0)
 	world.set_block(c2, reg.id_of("cauldron"))

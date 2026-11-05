@@ -271,6 +271,38 @@ Silnik sam gra:
 
 Gracz ustawia głośność w Opcjach.
 
+## Statystyki gracza i efekty
+
+Statystyki (`speed`, `jump`, `gravity`, `reach`, `max_health`, `break_speed`, `swim_speed`, `auto_jump`,
+`damage`, `defense` i własne) mają wartość bazową i modyfikatory. Kilka modów może zmieniać tę samą
+statystykę bez konfliktu: każdy dokłada modyfikator pod własną nazwą źródła, a silnik liczy
+`(baza + suma add) × iloczyn mul`.
+
+```lua
+engine.player.modify("speed", "zbroja:ciezka", { mul = 0.8 })   -- -20% szybkości od zbroi
+engine.player.unmodify("speed", "zbroja:ciezka")               -- zdjęcie modyfikatora
+engine.player.get("speed")    -- wartość po modyfikatorach
+engine.player.base("speed")   -- wartość bazowa; engine.player.set(stat, v) zmienia bazę (nil = domyślna)
+```
+
+Efekty (mikstury, trucizny, premie) to modyfikatory na czas z ikoną i odliczaniem na ekranie. Silnik
+sam je odlicza, zdejmuje i zapisuje z kontem gracza (efekt trwa dalej po ponownym wejściu).
+
+```lua
+-- content.lua
+engine.effects.register("alchemy.speed", {
+	name = "Szybkość", color = "#40c8f0", negative = false,
+	icon = { pattern = "potion", color = "#40c8f0" },
+	stats = { speed = { mul = 1.6 }, jump = { add = 1 } },
+})
+-- skrypt (w imieniu gracza)
+engine.effects.add("alchemy.speed", 45, 1.5)   -- sekundy, siła (mul: 1 + (1.6-1)×1.5, add × 1.5); ponowne dodanie odnawia
+engine.effects.get("alchemy.speed")            -- {left, strength} albo nil
+engine.effects.remove("alchemy.speed"); engine.effects.list()
+```
+
+Zdarzenia: `effect.start` (`name`, `strength`), `effect.end` (`name`).
+
 ## Celowanie i promień
 
 ```lua
@@ -550,7 +582,8 @@ Pozycje można podawać jako wektor albo tabelę `{x = 1, y = 2, z = 3}`.
 | `engine.items.data(c, i)`, `set_data(c, i, k, v)`, `tooltip(klucz, fn)` | Dane egzemplarza i opis dynamiczny |
 | `engine.world.biome(pos)`, `biome_key(pos)`, `height(x, z)`, `time()`, `set_time(h)` | Świat |
 | `engine.player.position()`, `teleport(pos)`, `velocity()`, `push(v)` | Ruch gracza |
-| `engine.player.set(stat, v)`, `get(stat)` | Statystyki: `speed`, `jump`, `gravity`, `reach`, `auto_jump`, `max_health`, `spawn`, `break_speed`, `swim_speed` |
+| `engine.player.set(stat, v)`, `get(stat)`, `base(stat)`, `modify(stat, źródło, {add, mul})`, `unmodify(stat, źródło)` | Statystyki: `speed`, `jump`, `gravity`, `reach`, `auto_jump`, `max_health`, `spawn`, `break_speed`, `swim_speed` (opis wyżej) |
+| `engine.effects.register/add/remove/get/list` | Efekty na czas |
 | `engine.player.health()`, `max_health()`, `set_health(v)`, `heal(n)`, `damage(n, przyczyna)` | Zdrowie |
 | `engine.player.target(z_cieczami)`, `selected_item()` | Blok, w który celuje gracz; przedmiot w ręce |
 | `engine.player.in_liquid()`, `eyes_in_liquid()` | Czy gracz pływa / ma głowę pod cieczą |

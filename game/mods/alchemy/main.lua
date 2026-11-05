@@ -161,25 +161,7 @@ end)
 ---------------------------------------------------------------------------
 -- Mikstury: picie i działanie (statystyki gracza na czas)
 ---------------------------------------------------------------------------
-local EFFECTS = {
-	speed = { stat = "speed", mult = 1.6, time = 45, name = "Szybkość" },
-	jump = { stat = "jump", mult = 1.5, time = 45, name = "Skok" },
-	feather = { stat = "gravity", mult = 0.4, time = 45, name = "Lekkość" },
-}
-local active = {}   -- id gracza -> efekt -> {base, left}
-
-local function hud(pid)
-	local parts = {}
-	for k, e in pairs(active[pid] or {}) do
-		parts[#parts + 1] = EFFECTS[k].name .. " " .. math.floor(e.left / 60) .. ":" .. string.format("%02d", math.floor(e.left % 60))
-	end
-	table.sort(parts)
-	if #parts > 0 then
-		engine.ui.text({ id = "alchemy", text = table.concat(parts, "   "), color = "#d0f0ff" })
-	else
-		engine.ui.remove("alchemy")
-	end
-end
+local EFFECT_TIME = 45   -- sekundy; mocna mikstura działa dwa razy dłużej i silniej
 
 engine.hooks.before("item.use", function(ctx)
 	local def = engine.items.def(ctx.item)
@@ -187,7 +169,6 @@ engine.hooks.before("item.use", function(ctx)
 	ctx.cancel = true
 	take_hand(ctx.slot)
 	backpack.give("glass_bottle", 1)
-	local pid = engine.player.id()
 	local ppos = engine.player.position()
 	engine.sound.play("alchemy.drink", { pos = ppos })
 	engine.particles.spawn("alchemy.drink", { x = ppos.x, y = ppos.y + 1.0, z = ppos.z }, { color = { COLORS[def.potion], "#ffffff" } })
@@ -196,40 +177,9 @@ engine.hooks.before("item.use", function(ctx)
 		engine.player.heal(def.strong and 16 or 8)
 		return
 	end
-	local fx = EFFECTS[def.potion]
-	active[pid] = active[pid] or {}
-	local cur = active[pid][def.potion]
-	if not cur then
-		cur = { base = engine.player.get(fx.stat) }
-		active[pid][def.potion] = cur
-		engine.player.set(fx.stat, cur.base * fx.mult * (def.strong and (fx.mult > 1 and 1.25 or 0.75) or 1))
-	end
-	cur.left = fx.time * (def.strong and 2 or 1)
-	hud(pid)
-end)
-
-kit.every(1, function()
-	engine.players.each(function()
-		local pid = engine.player.id()
-		local list = active[pid]
-		if not list then return end
-		for k, e in pairs(list) do
-			e.left = e.left - 1
-			if e.left <= 0 then
-				engine.player.set(EFFECTS[k].stat, e.base)
-				list[k] = nil
-			end
-		end
-		hud(pid)
-		if next(list) == nil then active[pid] = nil end
-	end)
-end)
-
-engine.on("player.leave", function(e)
-	if active[e.id] then
-		for k, eff in pairs(active[e.id]) do engine.as_player(e.id, function() engine.player.set(EFFECTS[k].stat, eff.base) end) end
-		active[e.id] = nil
-	end
+	-- efekt silnika: modyfikator statystyki (nie gryzie się z innymi modami), ikona i czas na ekranie
+	local strength = def.strong and ({ speed = 1.67, jump = 1.5, feather = 1.25 })[def.potion] or 1
+	engine.effects.add("alchemy." .. def.potion, EFFECT_TIME * (def.strong and 2 or 1), strength)
 end)
 
 ---------------------------------------------------------------------------

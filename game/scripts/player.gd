@@ -215,10 +215,15 @@ func _cam(key: String) -> float:
 
 
 ## Statystyki gracza: wartość domyślna albo nadpisana przez mod (engine.player.set).
-func stat(name: String) -> Variant:
+## Wartości domyślne statystyk gracza (mody je zmieniają: engine.player.set i modyfikatory).
+static func default_stat(name: String) -> Variant:
 	var defaults := {"speed": SPEED, "jump": JUMP, "gravity": GRAVITY, "reach": REACH, "auto_jump": true,
-		"max_health": MAX_HEALTH, "spawn": null, "break_speed": 1.0, "swim_speed": 1.0}
-	return Mods.player_stats.get(name, defaults.get(name))
+		"max_health": MAX_HEALTH, "spawn": null, "break_speed": 1.0, "swim_speed": 1.0, "damage": 1.0, "defense": 0.0}
+	return defaults.get(name)
+
+
+func stat(name: String) -> Variant:
+	return Mods.player_stats.get(name, default_stat(name))
 
 
 func hotbar_size() -> int:

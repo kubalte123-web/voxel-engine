@@ -67,6 +67,10 @@ func _ready() -> void:
 			flash = 0.45
 		_last_health = v)
 	player.died.connect(func(_c): notify("Zginąłeś. Odradzasz się w punkcie startu."))
+	effect_box = VBoxContainer.new()
+	effect_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(effect_box)
+	Mods.effects_changed.connect(_rebuild_effects)
 	Mods.hotbar_changed.connect(_rebuild_bar)
 	Mods.hud_changed.connect(_rebuild_mod_hud)
 	Mods.notified.connect(notify)
@@ -184,6 +188,33 @@ func _rebuild_mod_hud() -> void:
 			mod_texts.add_child(l)
 
 
+## Efekty gracza: ikona, nazwa i pozostały czas (prawy górny róg).
+var effect_box: VBoxContainer
+
+
+func _rebuild_effects() -> void:
+	for c in effect_box.get_children():
+		c.queue_free()
+	var eff: Dictionary = Mods.shown_effects()
+	for n in eff:
+		var d: Dictionary = Mods.registry.effects.get(n, {})
+		var row := HBoxContainer.new()
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var ic := TextureRect.new()
+		ic.texture = Mods.registry.effect_icon(n)
+		ic.custom_minimum_size = Vector2(28, 28)
+		ic.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		ic.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		row.add_child(ic)
+		var l := _outlined(15)
+		var left := int(ceil(float(eff[n].get("left", 0.0))))
+		l.text = "%s  %d:%02d" % [str(d.get("name", n)), left / 60, left % 60]
+		if bool(d.get("negative", false)):
+			l.add_theme_color_override("font_color", Color(1.0, 0.6, 0.55))
+		row.add_child(l)
+		effect_box.add_child(row)
+
+
 ## Po zmianie przedmiotu w ręce: nazwa i pierwsze linie opisu nad paskiem przez 2 s.
 var item_label: Label
 var _item_tw: Tween
@@ -240,6 +271,7 @@ func _process(delta: float) -> void:
 		help.size = Vector2(size.x - 40, 24)
 		help.position = Vector2(20, 10)
 	mod_box.position = Vector2(bar.position.x, bar.position.y - mod_box.size.y - 10)
+	effect_box.position = Vector2(size.x - effect_box.size.x - 14, 46)
 	item_label.size = Vector2(size.x - 40, 0)
 	item_label.position = Vector2(20, mod_box.position.y - item_label.size.y - 6)
 	mod_texts.position = Vector2(14, info.position.y + info.size.y + 8)

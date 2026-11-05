@@ -35,6 +35,7 @@ var item_keys: Array[String] = []
 var placeable: Array[String] = []  # przedmioty-bloki do stawiania (tryb kreatywny)
 var worldgen := {}
 var animations := {}
+var effects := {}                  # efekt -> {name, icon, color, stats, negative}
 var projectiles := {}              # rodzaj pocisku -> opis (fizyka, kolizje, wygląd)
 var particles := {}                # nazwa efektu cząsteczek -> opis
 var sounds := {}                   # nazwa dźwięku -> {file|files, volume, pitch, pitch_random, range, mod}
@@ -155,6 +156,7 @@ func build(content: Dictionary, paths: Dictionary = {}) -> void:
 	sounds = content.get("sounds", {}) if content.get("sounds") is Dictionary else {}
 	particles = content.get("particles", {}) if content.get("particles") is Dictionary else {}
 	projectiles = content.get("projectiles", {}) if content.get("projectiles") is Dictionary else {}
+	effects = content.get("effects", {}) if content.get("effects") is Dictionary else {}
 	_build_atlas()
 
 
@@ -338,6 +340,23 @@ func drops(id: int) -> Array:
 
 func item_block(item_key: String) -> int:
 	return int(items.get(item_key, {}).get("block", -1))
+
+
+var _effect_icons := {}
+
+
+func effect_icon(name: String) -> Texture2D:
+	if _effect_icons.has(name):
+		return _effect_icons[name]
+	var d: Dictionary = effects.get(name, {})
+	var img: Image
+	if d.has("icon"):
+		img = TexGen.load_spec(d.icon, _mod_path(str(d.get("mod", ""))))
+	else:
+		img = TexGen.pattern({"pattern": "gem", "color": str(d.get("color", "#a0a0ff"))})
+	var t := ImageTexture.create_from_image(img)
+	_effect_icons[name] = t
+	return t
 
 
 ## Opis przedmiotu (dymek): nazwa, kategoria, opis, stałe linie z definicji i linie policzone przez mod.

@@ -135,6 +135,16 @@ engine.blocks.register("cauldron", {
 })
 
 ---------------------------------------------------------------------------
+-- Efekty mikstur (silnik liczy czas, pokazuje ikonę i zdejmuje modyfikatory statystyk)
+---------------------------------------------------------------------------
+engine.effects.register("alchemy.speed", { name = "Szybkość", color = "#40c8f0",
+	icon = { pattern = "potion", color = "#40c8f0", color2 = "#c8e4f0" }, stats = { speed = { mul = 1.6 } } })
+engine.effects.register("alchemy.jump", { name = "Skok", color = "#70e060",
+	icon = { pattern = "potion", color = "#70e060", color2 = "#c8e4f0" }, stats = { jump = { mul = 1.5 } } })
+engine.effects.register("alchemy.feather", { name = "Lekkość", color = "#e8e8ff",
+	icon = { pattern = "potion", color = "#e8e8ff", color2 = "#c8e4f0" }, stats = { gravity = { mul = 0.4 } } })
+
+---------------------------------------------------------------------------
 -- Butelki i mikstury
 ---------------------------------------------------------------------------
 engine.items.register("glass_bottle", { name = "Pusta butelka", icon = { pattern = "potion", color = "#00000000", color2 = "#c8e4f0" } })

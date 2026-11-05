@@ -115,9 +115,7 @@ func aim() -> Array:
 
 
 func stat(name: String) -> Variant:
-	var defaults := {"speed": SPEED, "jump": JUMP, "gravity": GRAVITY, "reach": REACH, "auto_jump": true,
-		"max_health": MAX_HEALTH, "spawn": null, "break_speed": 1.0, "swim_speed": 1.0}
-	return session.player_stats.get(name, defaults.get(name)) if session else defaults.get(name)
+	return session.player_stats.get(name, Player.default_stat(name)) if session else Player.default_stat(name)
 
 
 func current_item() -> Dictionary:

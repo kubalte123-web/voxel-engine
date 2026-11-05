@@ -35,7 +35,17 @@ var storage := {}       # id moda -> Dictionary
 var binds: Array = []   # [{"id", "mod", "key", "label"}]
 var hotbar := {"container": "", "first": 0, "count": 0}
 var open_windows := {}  # id -> spec
-var player_stats := {}  # nadpisania statystyk gracza przez mody
+var player_stats := {}  # statystyki gracza lokalnego po modyfikatorach (interfejs i ruch czytają wprost)
+signal effects_changed
+var client_effects := {}  # klient: efekty od serwera (do wyświetlenia)
+
+
+## Efekty do pokazania na ekranie tego gracza.
+func shown_effects() -> Dictionary:
+	if Net.is_client():
+		return client_effects
+	var s: Session = sessions.get(local_peer)
+	return s.effects if s else {}
 var camera_stats := {}  # nadpisania kamery przez mody
 var anim_overrides := {}  # stan postaci ("idle", "walk", "jump") -> nazwa animacji
 var model_colors := {}    # część postaci -> Color
@@ -611,7 +621,8 @@ func _host_table() -> Dictionary:
 		"block_state", "block_set_state", "block_with_state", "block_base", "block_data", "block_set_data",
 		"block_clear_data", "block_container", "block_listen", "block_schedule", "sound_play", "sound_stop",
 		"particles_spawn", "block_look", "block_get_look", "block_animate",
-		"projectile_spawn", "projectile_remove", "player_eye", "player_look", "world_raycast", "item_tooltip_register"]
+		"projectile_spawn", "projectile_remove", "player_eye", "player_look", "world_raycast", "item_tooltip_register",
+		"player_base", "player_modify", "player_unmodify", "effect_add", "effect_remove", "effect_get", "effect_list"]
 	var t := {}
 	for n in names:
 		t[n] = Callable(self, "_h_" + n)
@@ -914,8 +925,160 @@ func _h_player_push(v) -> void:
 
 
 func _h_player_set(stat, v) -> void:
-	S().player_stats[str(stat)] = v
-	S().mark("stats")
+	var s := S()
+	if v == null:
+		s.stat_base.erase(str(stat))
+	else:
+		s.stat_base[str(stat)] = v
+	recompute_stats(s)
+
+
+func _h_player_base(stat) -> Variant:
+	return S().stat_base.get(str(stat), Player.default_stat(str(stat)))
+
+
+## Modyfikator statystyki od źródła (np. "alchemy:speed"): wartość = (baza + suma add) * iloczyn mul.
+func _h_player_modify(stat, source, add, mul) -> void:
+	var s := S()
+	var st := str(stat)
+	if not s.stat_mods.has(st):
+		s.stat_mods[st] = {}
+	s.stat_mods[st][str(source)] = [float(add), float(mul)]
+	recompute_stats(s)
+
+
+func _h_player_unmodify(stat, source) -> void:
+	var s := S()
+	var st := str(stat)
+	if s.stat_mods.has(st):
+		s.stat_mods[st].erase(str(source))
+		if s.stat_mods[st].is_empty():
+			s.stat_mods.erase(st)
+	recompute_stats(s)
+
+
+## Statystyki widziane przez grę = baza od modów z nałożonymi modyfikatorami.
+func recompute_stats(s: Session) -> void:
+	var keys := {}
+	for k in s.stat_base:
+		keys[k] = true
+	for k in s.stat_mods:
+		keys[k] = true
+	s.player_stats.clear()
+	for k in keys:
+		var v: Variant = s.stat_base.get(k, Player.default_stat(k))
+		if s.stat_mods.has(k) and (v is float or v is int):
+			var add := 0.0
+			var mul := 1.0
+			for src in s.stat_mods[k]:
+				add += float(s.stat_mods[k][src][0])
+				mul *= float(s.stat_mods[k][src][1])
+			v = (float(v) + add) * mul
+		s.player_stats[k] = v
+	s.mark("stats")
+
+
+# ---------- efekty (mikstury, trucizny, premie): czas, modyfikatory, ikona na ekranie ----------
+
+func _effect_mods(s: Session, name: String, on: bool) -> void:
+	var d: Dictionary = registry.effects.get(name, {}) if registry else {}
+	var stats: Variant = d.get("stats", {})
+	if not stats is Dictionary:
+		return
+	var strength := float(s.effects.get(name, {}).get("strength", 1.0))
+	var prev := ctx
+	ctx = s.peer
+	for st in stats:
+		var m: Dictionary = stats[st] if stats[st] is Dictionary else {}
+		if on:
+			var mul := 1.0 + (float(m.get("mul", 1.0)) - 1.0) * strength
+			_h_player_modify(st, "effect:" + name, float(m.get("add", 0.0)) * strength, mul)
+		else:
+			_h_player_unmodify(st, "effect:" + name)
+	ctx = prev
+
+
+func _h_effect_add(name, seconds, strength) -> bool:
+	var n := str(name)
+	if registry == null or not registry.effects.has(n):
+		return false
+	var s := S()
+	var had := s.effects.has(n)
+	if had:
+		_effect_mods(s, n, false)
+	s.effects[n] = {"left": float(seconds), "strength": float(strength)}
+	_effect_mods(s, n, true)
+	s.mark("effects")
+	if s.local:
+		effects_changed.emit()
+	if not had:
+		emit_event("effect.start", {"name": n, "strength": float(strength)})
+	return true
+
+
+func _h_effect_remove(name) -> void:
+	var s := S()
+	var n := str(name)
+	if not s.effects.has(n):
+		return
+	_effect_mods(s, n, false)
+	s.effects.erase(n)
+	s.mark("effects")
+	if s.local:
+		effects_changed.emit()
+	emit_event("effect.end", {"name": n})
+
+
+func _h_effect_get(name) -> Variant:
+	var e: Variant = S().effects.get(str(name))
+	return (e as Dictionary).duplicate() if e is Dictionary else null
+
+
+func _h_effect_list() -> Dictionary:
+	return S().effects.duplicate(true)
+
+
+## Co 0,1 s na serwerze: odliczanie efektów, koniec – zdjęcie modyfikatorów i zdarzenie effect.end.
+func tick_effects(dt: float) -> void:
+	for p in sessions:
+		var s: Session = sessions[p]
+		if s.effects.is_empty() or not s.logged_in:
+			continue
+		var prev := ctx
+		ctx = p
+		for n in s.effects.keys():
+			s.effects[n].left = float(s.effects[n].left) - dt
+			if float(s.effects[n].left) <= 0.0:
+				_h_effect_remove(n)
+		# czas na ekranie odświeżamy co sekundę
+		if int(Time.get_ticks_msec() / 1000) != int(s.get_meta("eff_sec", -1)):
+			s.set_meta("eff_sec", int(Time.get_ticks_msec() / 1000))
+			s.mark("effects")
+			if s.local:
+				effects_changed.emit()
+		ctx = prev
+
+
+## Gracz wszedł na konto: efekty z zapisu konta wracają razem z modyfikatorami.
+func restore_effects(p: int) -> void:
+	var s: Session = sessions.get(p)
+	if s == null:
+		return
+	var acc := s.account
+	if not pstorage.has(acc):
+		pstorage[acc] = {}
+	if not pstorage[acc].has("_engine"):
+		pstorage[acc]["_engine"] = {}
+	var eng: Dictionary = pstorage[acc]["_engine"]
+	if not eng.get("effects") is Dictionary:
+		eng["effects"] = {}
+	s.effects = eng.effects
+	for n in s.effects.keys():
+		if registry and registry.effects.has(n):
+			_effect_mods(s, n, true)
+		else:
+			s.effects.erase(n)
+	s.mark("effects")
 
 
 func _h_player_get(stat) -> Variant:

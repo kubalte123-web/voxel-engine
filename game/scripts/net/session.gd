@@ -12,7 +12,10 @@ var node: Node3D = null
 var local := false
 var logged_in := false
 
-var player_stats := {}
+var player_stats := {}   # statystyki po modyfikatorach (to czyta gra)
+var stat_base := {}      # wartości ustawione przez mody (engine.player.set)
+var stat_mods := {}      # statystyka -> {źródło: [dodaj, mnóż]}
+var effects := {}        # efekt -> {left, strength} (zapisywane z kontem)
 var camera_stats := {}
 var anim_overrides := {}
 var model_colors := {}
