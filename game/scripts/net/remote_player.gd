@@ -26,6 +26,8 @@ var selected := 0
 var on_floor := true
 var speed := 0.0
 var health := 20.0
+var mount_id := -1
+var mount_seat := 0.0
 var net_pos := Vector3.ZERO
 var label_timer := 0.0
 var _step := 0.0
@@ -72,6 +74,9 @@ func apply_state(st: Dictionary) -> void:
 	pitch = float(st.get("pitch", pitch))
 	velocity = st.get("vel", velocity)
 	on_floor = bool(st.get("floor", on_floor))
+	if not is_server_side:
+		mount_id = int(st.get("mount", -1))
+		mount_seat = float(st.get("seat", 0.0))
 	if is_server_side:
 		target = _target(st.get("target", {}))
 		target_liq = _target(st.get("target_liq", {}))
@@ -93,6 +98,9 @@ func _process(delta: float) -> void:
 	speed = Vector2(velocity.x, velocity.z).length()
 	if speed > 0.3:
 		model.rotation.y = lerp_angle(model.rotation.y, atan2(-velocity.x, -velocity.z), minf(1.0, delta * 10.0))
+	model.position.y = mount_seat
+	model.sitting = mount_id >= 0
+	label.position.y = 2.25 + mount_seat
 	model.animate(delta, speed, on_floor or in_liquid, pitch)
 	# kroki innego gracza słyszymy u siebie (bez wysyłania przez sieć)
 	if on_floor and not in_liquid and world:

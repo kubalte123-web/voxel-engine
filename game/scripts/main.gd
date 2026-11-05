@@ -368,6 +368,8 @@ func _remote_action(p: int, node: RemotePlayer, kind: String, args: Dictionary) 
 		match kind:
 			"select":
 				node.selected = clampi(int(args.get("i", 0)), 0, 8)
+			"dismount":
+				entities.dismount(p)
 			"dig_start":
 				var pos := Vector3i(args.pos)
 				Net.s_dig_time.rpc_id(p, pos, Actions.dig_time(node, world, pos))
@@ -419,6 +421,9 @@ func session_update(part: String, value: Variant) -> void:
 			Mods.local_held.merge(value)
 		"push":
 			player.velocity += Vector3(value)
+		"mount":
+			player.mount_id = int(value[0])
+			player.mount_seat = float(value[1])
 
 
 ## Serwer: zmiany sesji graczy zdalnych i kontenerów, które oglądają, do ich klientów.
@@ -470,7 +475,8 @@ func players_snapshot() -> Array:
 			continue
 		var n: Node3D = players[p]
 		out.append({"peer": p, "name": s.account, "pos": n.global_position, "vel": n.velocity,
-			"yaw": n.yaw, "pitch": n.pitch, "floor": n.is_on_floor() if n is Player else n.on_floor})
+			"yaw": n.yaw, "pitch": n.pitch, "floor": n.is_on_floor() if n is Player else n.on_floor,
+			"mount": s.mount, "seat": s.mount_seat})
 	return out
 
 
@@ -811,7 +817,7 @@ func _setup_input() -> void:
 	var keys := {
 		"move_forward": [KEY_W, KEY_UP], "move_back": [KEY_S, KEY_DOWN],
 		"move_left": [KEY_A, KEY_LEFT], "move_right": [KEY_D, KEY_RIGHT],
-		"jump": [KEY_SPACE], "toggle_view": [KEY_V, KEY_F5],
+		"jump": [KEY_SPACE], "toggle_view": [KEY_V, KEY_F5], "dismount": [KEY_SHIFT],
 	}
 	for i in 9:
 		keys["slot_%d" % (i + 1)] = [KEY_1 + i]
@@ -1606,6 +1612,81 @@ func _test_perf() -> void:
 
 
 ## Test logiki bloków: skrzynia (kierunek, kontener), piec (dane, plan, świecenie), uprawy (losowe, sąsiad), dźwięki.
+## Stworzenia: jazda na koniu, wrogie zombie z modelem GLB, mózg w Lua (płonięcie w słońcu).
+func _test_creatures(dir: String) -> void:
+	await _wait_loaded()
+	await _wait(0.5)
+	var me := Mods.local_peer
+	print("STWORZENIA rodzaje=", Mods.registry.entities.keys(), " mózgi=", Mods.entity_brains.keys())
+	time_of_day = 10.0
+	# płaski teren wokół gracza
+	var reg := Mods.registry
+	var o := Vector3i(player.global_position.floor())
+	o.y -= 1
+	for x in range(-10, 11):
+		for z in range(-10, 11):
+			world.set_block(o + Vector3i(x, 0, z), reg.id_of("grass"))
+			for y in range(1, 5):
+				world.set_block(o + Vector3i(x, y, z), Blocks.AIR)
+	player.teleport(Vector3(o) + Vector3(0.5, 1.05, 0.5))
+	for id in entities.entities.keys():
+		if entities.entities[id] is Creature:
+			entities.remove(id)
+	await _wait(0.6)
+	# koń: oswojony (dane), wsiadanie przez kliknięcie, szybsza jazda, zsiadanie
+	var h := entities.spawn_creature("horse", Vector3(o) + Vector3(2.5, 1.1, 0.5))
+	entities.get_entity(h).data["tame"] = true
+	var speed0 := float(player.stat("speed"))
+	Actions.interact(player, entities, entities.get_entity(h))
+	await _wait(0.3)
+	print("JAZDA wsiadł=", player.mount_id == h, " jeździec=", (entities.get_entity(h) as Creature).rider, " prędkość ", speed0, " -> ", player.stat("speed"), " siodło=", player.mount_seat)
+	var start := player.global_position
+	player.yaw = PI / 2   # na zachód
+	Input.action_press("move_forward")
+	await _wait(1.5)
+	Input.action_release("move_forward")
+	var horse_node := entities.get_entity(h)
+	print("JAZDA przejechał=", snappedf(start.distance_to(player.global_position), 0.1), " m w 1.5 s, koń przy graczu=", snappedf(horse_node.global_position.distance_to(player.global_position), 0.01))
+	Mods.camera_stats["side"] = 2.6
+	Mods.camera_stats["distance"] = 4.5
+	player.pitch = -0.3
+	await _wait(0.8)
+	await _shot(dir, "c1_horse_ride")
+	Mods.camera_stats.erase("side")
+	Mods.camera_stats.erase("distance")
+	player.request_dismount()
+	await _wait(0.3)
+	print("JAZDA zsiadł=", player.mount_id == -1, " prędkość=", player.stat("speed"), " koń wolny=", (horse_node as Creature).rider == -1)
+	# zombie: noc, gonienie i atak, animacje z pliku GLB
+	time_of_day = 23.0
+	player.teleport(Vector3(o) + Vector3(4.5, 1.05, 0.5))
+	await _wait(0.3)
+	var z := entities.spawn_creature("zombie", Vector3(o) + Vector3(-3.5, 1.2, 0.5))
+	var zn := entities.get_entity(z) as Creature
+	print("ZOMBIE model GLB: animacje=", zn.anim_player.get_animation_list() if zn.anim_player else "brak", " części=", zn.parts.size())
+	var hp0 := float(player.health)
+	player.yaw = PI / 2
+	player.pitch = -0.1
+	await _wait(1.5)
+	print("ZOMBIE stan=", zn.state, " cel=", zn.target_peer, " animacja=", zn.anim_player.current_animation if zn.anim_player else "")
+	await _shot(dir, "c2_zombie_chase")
+	await _wait(3.5)
+	print("ZOMBIE zdrowie gracza ", hp0, " -> ", player.health, " animacja=", zn.anim_player.current_animation if zn.anim_player else "")
+	print("ZOMBIE odległość=", snappedf(zn.global_position.distance_to(player.global_position), 0.01), " pozycje ", zn.global_position, player.global_position, " cd=", zn.attack_cd, " stan=", zn.state, " has_target=", zn.has_target)
+	Mods.camera_stats["side"] = 2.5
+	await _wait(0.5)
+	await _shot(dir, "c3_zombie_attack")
+	Mods.camera_stats.erase("side")
+	# mózg w Lua: w dzień zombie płonie
+	player.set_health(20.0)
+	player.teleport(player.global_position + Vector3(30, 0, 0))
+	time_of_day = 12.0
+	var hz0 := zn.health
+	await _wait(3.0)
+	print("ZOMBIE w słońcu: zdrowie ", hz0, " -> ", zn.health if is_instance_valid(zn) else -1.0)
+	get_tree().quit()
+
+
 ## Kształty z prostopadłościanów (mod building): stawianie schodów i półbloków, celowanie, chodzenie po nich.
 func _test_shapes(dir: String) -> void:
 	await _wait_loaded()
@@ -1891,6 +1972,9 @@ func _autotest(dir: String) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--blocks-only"):
 		await _test_blocks(dir)
+		return
+	if OS.get_cmdline_user_args().has("--creatures-only"):
+		await _test_creatures(dir)
 		return
 	if OS.get_cmdline_user_args().has("--shapes-only"):
 		await _test_shapes(dir)

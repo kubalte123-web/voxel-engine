@@ -48,6 +48,16 @@ func nearest_player(pos: Vector3) -> Node3D:
 	return best
 
 
+## Postać gracza o danym id (peer), jeśli jest w świecie i zalogowany.
+func player_node(peer: int) -> Node3D:
+	if peer < 0:
+		return null
+	for pl in players():
+		if peer_of(pl) == peer:
+			return pl
+	return null
+
+
 static func peer_of(node: Node3D) -> int:
 	if node is RemotePlayer:
 		return node.peer
@@ -113,6 +123,8 @@ func drop_item(item: String, count: int, pos: Vector3) -> int:
 
 func remove(id: int) -> void:
 	var e: Node = entities.get(id)
+	if e is Creature and e.rider >= 0:
+		dismount(e.rider)
 	if e:
 		entities.erase(id)
 		e.queue_free()
@@ -159,6 +171,83 @@ func pickup_prop(p: Prop) -> bool:
 	return false
 
 
+# ---------- jazda ----------
+
+## Gracz `peer` wsiada na stworzenie (pole ride w definicji): {seat = {x, y, z}, speed = mnożnik prędkości,
+## jump = mnożnik skoku}. Hak "entity.mount" może anulować. Zwraca true, gdy się udało.
+func mount(peer: int, id: int) -> bool:
+	var c := get_entity(id) as Creature
+	var s: Session = Mods.sessions.get(peer)
+	var node := player_node(peer)
+	if c == null or s == null or node == null or c.dying > 0.0 or not c.def.get("ride") is Dictionary:
+		return false
+	if c.rider >= 0 and c.rider != peer:
+		return false
+	var ctx: Dictionary = Mods.as_player(peer, func(): return Mods.before("entity.mount", {"id": id, "type": c.type, "player": peer}))
+	if ctx.get("cancel", false):
+		return false
+	if s.mount >= 0 and s.mount != id:
+		dismount(peer)
+	var rd: Dictionary = c.def.ride
+	var seat := Creature.vec(rd.get("seat"), Vector3(0, 0.9, 0)).y * c.scale_factor
+	c.rider = peer
+	c.collision_layer = 0
+	c.set_state("ridden", 1e9)
+	c.has_target = false
+	c.global_position = node.global_position
+	s.mount = id
+	s.mount_seat = seat
+	s.stat_mods["speed"] = s.stat_mods.get("speed", {})
+	s.stat_mods["speed"]["mount"] = [0.0, float(rd.get("speed", 1.8))]
+	s.stat_mods["jump"] = s.stat_mods.get("jump", {})
+	s.stat_mods["jump"]["mount"] = [0.0, float(rd.get("jump", 1.0))]
+	Mods.recompute_stats(s)
+	_mount_visual(peer, id, seat)
+	Mods.as_player(peer, func(): Mods.emit_event("entity.mount", {"id": id, "type": c.type, "player": peer}))
+	return true
+
+
+func dismount(peer: int) -> void:
+	var s: Session = Mods.sessions.get(peer)
+	if s == null or s.mount < 0:
+		return
+	var id := s.mount
+	s.mount = -1
+	s.mount_seat = 0.0
+	for st in ["speed", "jump"]:
+		if s.stat_mods.has(st):
+			s.stat_mods[st].erase("mount")
+			if s.stat_mods[st].is_empty():
+				s.stat_mods.erase(st)
+	Mods.recompute_stats(s)
+	var c := get_entity(id) as Creature
+	var node := player_node(peer)
+	if c:
+		c.rider = -1
+		c.collision_layer = Creature.LAYER
+		c.set_state("idle", 2.0)
+		if node:   # jeździec zsiada obok stworzenia
+			var side := Vector3(cos(c.rotation.y), 0, -sin(c.rotation.y)) * 1.1
+			node.teleport(c.global_position + side + Vector3(0, 0.2, 0))
+	_mount_visual(peer, -1, 0.0)
+	Mods.as_player(peer, func(): Mods.emit_event("entity.dismount", {"id": id, "type": c.type if c else "", "player": peer}))
+
+
+func _mount_visual(peer: int, id: int, seat: float) -> void:
+	var node := player_node(peer)
+	if node:
+		node.mount_id = id
+		node.mount_seat = seat
+	if node is RemotePlayer:
+		Net.s_session.rpc_id(peer, "mount", [id, seat])
+
+
+func is_night() -> bool:
+	var m := get_parent()
+	var t := float(m.time_of_day) if m and "time_of_day" in m else 12.0
+	return t < 5.5 or t > 19.5
+
+
 # ---------- pojawianie się i usypianie ----------
 
 func _process(delta: float) -> void:
@@ -187,7 +276,7 @@ func _sleep_and_wake() -> void:
 	var far := _near_radius() + 24.0
 	for id in entities.keys():
 		var e: Node3D = entities[id]
-		if e is Creature and _hdist_to_players(e.global_position) > far:
+		if e is Creature and e.rider < 0 and _hdist_to_players(e.global_position) > far:
 			dormant.append(e.save_state())
 			remove(id)
 		elif e is ItemDrop and _hdist_to_players(e.global_position) > far:
@@ -221,6 +310,10 @@ func _spawn_cycle() -> void:
 		var sp: Dictionary = d.get("spawn") if d.get("spawn") is Dictionary else {}
 		if sp.is_empty():
 			continue
+		if bool(sp.get("night", false)) and not is_night():
+			continue
+		if bool(sp.get("day", false)) and is_night():
+			continue
 		var count := list(type, pp, _near_radius()).size()
 		if count >= int(sp.get("max", 6)):
 			continue
@@ -239,6 +332,11 @@ func _spawn_cycle() -> void:
 				continue
 			if not on.is_empty() and not on.has(Blocks.key(world.get_block(Vector3i(x, gy, z)))):
 				continue
+			if sp.has("max_light"):   # np. potwory nie pojawiają się przy pochodniach
+				var l := world.light_at(Vector3(x + 0.5, gy + 1.5, z + 0.5))
+				var sky := l.x * (0.0 if is_night() else 1.0)
+				if maxf(sky, l.y) * 15.0 > float(sp.max_light) + 0.01:
+					continue
 			var g: Array = Registry.arr(sp.get("group"))
 			var n := rng.randi_range(int(g[0]) if g.size() > 0 else 1, int(g[1]) if g.size() > 1 else 3)
 			for k in n:

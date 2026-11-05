@@ -139,10 +139,20 @@ static func kick(actor: Node3D, node: Node3D, dir: Vector3) -> void:
 
 static func interact(actor: Node3D, entities: EntityManager, node: Node3D) -> void:
 	if node is Creature:
+		var peer := EntityManager.peer_of(actor)
+		if node.rider == peer:   # użycie własnego wierzchowca: zsiadanie
+			entities.dismount(peer)
+			return
 		var ctx := Mods.before("entity.interact", {"id": node.id, "type": node.type,
 			"item": str(actor.current_item().get("item", "")), "slot": actor.selected + 1})
 		if not ctx.get("cancel", false):
 			Mods.after("entity.interact", ctx)
+			# stworzenie z polem ride: wsiadanie (opcjonalnie z wymaganym przedmiotem w ręce, ride.item)
+			var rd: Variant = node.def.get("ride")
+			if rd is Dictionary and node.rider < 0 and not ctx.get("handled", false):
+				var need := str(rd.get("item", ""))
+				if need == "" or need == str(actor.current_item().get("item", "")) or bool(node.data.get("saddled", false)):
+					entities.mount(peer, node.id)
 		actor.model.do_swing()
 	elif node is Prop:
 		if entities.pickup_prop(node):

@@ -23,6 +23,8 @@ var hud := {}
 var hotbar := {"container": "", "first": 0, "count": 0}
 var windows := {}
 var held := {}
+var mount := -1          # stworzenie, na którym gracz jedzie
+var mount_seat := 0.0
 var dirty := {}   # "stats", "camera", "hud", "hotbar", "held", "look" -> true
 
 

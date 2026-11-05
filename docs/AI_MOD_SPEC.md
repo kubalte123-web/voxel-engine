@@ -638,6 +638,66 @@ AI: stanie, wędrówka, skubanie (`graze` zmienia blok pod spodem i wysyła zdar
 ucieczka po zranieniu, podążanie za graczem z przedmiotem `follow`, pływanie i omijanie urwisk.
 Dalekie stworzenia są usypiane i wracają, gdy gracz się zbliży; wszystko zapisuje się w świecie.
 
+### Model z pliku GLB
+
+Zamiast `parts` można podać model z Blendera (eksport glTF binarny `.glb`). Każdy nazwany węzeł pliku jest
+częścią (animacje klatkowe modów, `show`/`color` po nazwie siatki), animacje z pliku grają według stanu:
+
+```lua
+model = {
+	file = "models/zombie.glb",          -- albo "inny_mod:models/x.glb"
+	scale = 1.0, offset = { 0, 0, 0 }, rotation = { 0, 180, 0 },
+	animations = { idle = "Idle", walk = "Walk", run = "Run", attack = "Attack", hurt = "Hurt" },
+	-- bez animacji w pliku: proceduralny ruch węzłów jak przy klockach
+	swing = { LegL = 1, LegR = -1 }, wings = { WingL = 1 }, head = "Head", body = "Body",
+},
+```
+
+`engine.entities.animate(id, "attack")` gra animację z pliku (rola albo nazwa klipu), a gdy jej nie ma –
+animację klatkową moda. Przykład: mod `monsters` (model generuje `tools/make_zombie.gd`).
+
+### Wrogowie i mózg w Lua
+
+```lua
+ai = {
+	hostile = { damage = 3, range = 1.5, sight = 18, cooldown = 1.1, speed = 2.4, knockback = 4 },  -- albo true
+	retaliate = true,   -- neutralne: atakuje dopiero zranione
+	think = 0.5,        -- co ile sekund wołany jest mózg z Lua (domyślnie 1)
+},
+spawn = { night = true, max_light = 7, group = { 1, 2 }, max = 6 },  -- też day = true
+```
+
+Wrogie stworzenie widzi najbliższego gracza w promieniu `sight`, goni go (stan `chase`) i bije, gdy jest
+w zasięgu `range`. Hak `entity.attack` (`ctx.player`, `ctx.amount`, `ctx.cancel`) zmienia albo blokuje cios,
+a obrażenia przechodzą jeszcze przez `player.damage` (np. zbroja).
+
+Mózg w Lua dostaje stan stworzenia co `ai.think` sekund (tylko na serwerze):
+
+```lua
+engine.entities.on_think("zombie", function(z)
+	-- z.id, z.type, z.state, z.pos, z.health, z.max_health, z.data, z.target (gracz albo nil), z.rider,
+	-- z.player (najbliższy gracz), z.player_distance, z.in_liquid, z.on_floor
+	local l = engine.world.light(z.pos + Vector3(0, 1.7, 0))   -- {sky, block, day}
+	if l.day > 0.5 and l.sky >= 14 then engine.entities.damage(z.id, 1, "sun") end
+end)
+```
+
+Sterowanie: `engine.entities.set_state(id, stan, sekundy)` (`idle`, `wander`, `flee`, `follow`, `chase` albo
+własna nazwa – stworzenie wtedy stoi), `attack(id, gracz)`, `target(id)`, `move_to(id, pos)`, `look_at(id, pos)`,
+`push(id, wektor)`, `velocity(id)`, `nearest_player(pos, promień)` → `{id, distance, position}`.
+
+### Jazda
+
+```lua
+ride = { seat = { 0, 0.95, 0 }, speed = 2.3, jump = 1.3, item = nil },
+```
+
+Kliknięcie stworzenia z polem `ride` sadza gracza (o ile hak `entity.interact` nie ustawił `ctx.cancel`;
+`item` – wymagany przedmiot w ręce). Gracz steruje jak zwykle, tylko szybciej (`speed`, `jump` to mnożniki),
+a stworzenie idzie z nim. Shift albo dotknięcie w powietrze zsiada. Z Lua: `engine.entities.mount(id[, gracz])`,
+`dismount([gracz])`, `rider(id)`; zdarzenia `entity.mount` i `entity.dismount`, hak `entity.mount` może anulować.
+Przykład: mod `horses` (oswajanie jabłkiem, siodło jako ukryty tag).
+
 ## Haki: zmiana zachowania silnika
 
 Haki działają jak prefix i postfix w Harmony:
@@ -661,6 +721,8 @@ Wyższy priorytet działa wcześniej. Po `cancel` kolejne haki „before” się
 | `player.respawn` | `pos` (Vector3, można zmienić) |
 | `entity.damage` | `id`, `type`, `amount` (można zmienić), `cause` |
 | `entity.interact` | prawy przycisk na stworzeniu: `id`, `type`, `item`, `slot` |
+| `entity.attack` | wróg uderza gracza: `id`, `type`, `player`, `amount` (można zmienić albo anulować) |
+| `entity.mount` | gracz wsiada na stworzenie: `id`, `type`, `player` (można anulować) |
 | `item.pickup` | gracz podchodzi do przedmiotu: `item`, `count`; ustaw `ctx.taken` (ile zabrano) |
 | `camera.update` | co klatkę (tylko `after`, tylko gracz lokalny): `mode`, `yaw`, `pitch`, `distance`, `height`, `side`, `fov_offset` |
 
@@ -679,6 +741,7 @@ Wyższy priorytet działa wcześniej. Po `cancel` kolejne haki „before” się
 | `entity.death` | `id`, `type`, `pos`, `cause`, `data` |
 | `entity.tick` | raz na sekundę dla każdego stworzenia: `id`, `type`, `state`, `pos`, `data` |
 | `entity.graze` | `id`, `type`, `pos` (blok, który stworzenie skubało) |
+| `entity.mount`, `entity.dismount` | `id`, `type`, `player` – gracz wsiadł albo zsiadł |
 | `block.removed` | `pos`, `block`, `key`, `data` – zniknął blok z danymi albo kontenerem |
 | `player.join` | `id`, `name` (konto) – gracz wszedł do gry (po zalogowaniu); tu twórz kontenery gracza |
 | `player.leave` | `id`, `name` – gracz wyszedł z serwera |
@@ -874,6 +937,8 @@ Mod „Plecak i postać” udostępnia `engine.require("backpack").give(przedmio
 | `farming` | stany (wiek uprawy, wilgotność), losowe aktualizacje, aktualizacja od sąsiada, `item.use` z pozycją |
 | `storage` | skrzynia: kontener bloku, stan `facing`, mody opcjonalne (`after`, `engine.optional`) |
 | `alchemy` | kocioł: blok z modelem GLB i klocków, animacje, emitery cząsteczek, wygląd z gry, mikstury na czas |
+| `monsters` | zombie: wróg (`ai.hostile`), model GLB z animacjami z pliku, mózg w Lua, pojawianie się nocą |
+| `horses` | konie: jazda (`ride`), oswajanie przez hak `entity.interact`, ukryte siodło (tag) |
 | `building` | kształty z prostopadłościanów: półbloki, schody, płot, murek, szyba, własny kształt (stolik) |
 | `smelting` | piec: dane bloku, zaplanowane aktualizacje, wariant świecący, okno odświeżane wszystkim patrzącym |
 

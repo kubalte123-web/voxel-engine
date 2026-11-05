@@ -135,7 +135,7 @@ func _open_lua() -> bool:
 		push_error(load_errors["_"])
 		lua = null
 		return false
-	for k in ["dispatch", "make_env", "input", "window_action", "finalize", "run_chunk", "block_update", "projectile_hit", "item_tooltip", "console"]:
+	for k in ["dispatch", "make_env", "input", "window_action", "finalize", "run_chunk", "block_update", "projectile_hit", "item_tooltip", "console", "entity_think"]:
 		_api[k] = res.get(k)
 	return true
 
@@ -159,6 +159,7 @@ func stop() -> void:
 	model_colors.clear()
 	hud.clear()
 	_hooks.clear()
+	entity_brains.clear()
 	hotbar.container = ""
 	hotbar.first = 0
 	hotbar.count = 0
@@ -289,6 +290,11 @@ func projectile_hit(type: String, ctx: Dictionary) -> void:
 		_api.projectile_hit.invoke(type, ctx)
 
 
+func entity_think(type: String, ctx: Dictionary) -> void:
+	if _api.has("entity_think"):
+		_api.entity_think.invoke(type, ctx)
+
+
 func block_update(key: String, ctx: Dictionary) -> void:
 	if _api.has("block_update"):
 		_api.block_update.invoke(key, ctx)
@@ -339,6 +345,7 @@ func _mod_name(id: String) -> String:
 # data – dane egzemplarza (np. amunicja w broni); stosy z różnymi danymi się nie łączą.
 # info – linie opisu policzone przez mod (engine.items.tooltip), wysyłane do graczy razem z miejscem.
 
+var entity_brains := {}   # rodzaj stworzenia -> true (mod ma mózg engine.entities.on_think)
 var tooltip_items := {}   # klucz przedmiotu -> true (mod liczy opis dynamiczny)
 
 func container_slots(id: String) -> Array:
@@ -631,7 +638,8 @@ func _host_table() -> Dictionary:
 		"hotbar_bind", "hotbar_selected", "ui_window", "ui_close", "ui_is_open", "notify", "hud_bar",
 		"hud_text", "hud_remove", "ui_held", "ui_set_held", "input_bind", "randf", "randi",
 		"entity_spawn", "entity_remove", "entity_exists", "entity_get", "entity_list", "entity_set",
-		"entity_damage", "entity_tag", "entity_data", "item_drop",
+		"entity_damage", "entity_tag", "entity_data", "item_drop", "entity_brain", "entity_mount", "entity_dismount",
+		"entity_nearest_player", "world_light",
 		"player_id", "player_name", "player_is_host", "players_list", "set_ctx", "get_ctx",
 		"pstorage_get", "pstorage_set", "players_accept", "players_kick", "is_multiplayer", "hash",
 		"block_state", "block_set_state", "block_with_state", "block_base", "block_data", "block_set_data",
@@ -883,6 +891,16 @@ func _h_biome_key(pos) -> String:
 
 func _h_height(x, z) -> int: return main.world.terrain.height(int(x), int(z)) if main else 0
 func _h_time_of_day() -> float: return main.time_of_day if main else 12.0
+
+
+## Światło w punkcie: {sky = 0..15 (niebo, bez pory dnia), block = 0..15 (pochodnie), day = 0..1 (jasność dnia)}.
+func _h_world_light(pos) -> Dictionary:
+	if main == null:
+		return {"sky": 15, "block": 0, "day": 1.0}
+	var l: Vector2 = main.world.light_at(Vector3(pos))
+	var t := float(main.time_of_day)
+	var day := clampf(minf((t - 5.0) / 2.0, (20.0 - t) / 2.0), 0.0, 1.0)
+	return {"sky": int(round(l.x * 15.0)), "block": int(round(l.y * 15.0)), "day": day}
 
 
 func _h_set_time(h) -> void:
@@ -1345,6 +1363,11 @@ func _h_entity_get(id, key) -> Variant:
 		"state": return e.state if e is Creature else ""
 		"scale": return e.scale_factor if e is Creature else 1.0
 		"data": return e.data if e is Creature else {}
+		"target": return e.target_peer if e is Creature and e.target_peer >= 0 else null
+		"rider": return e.rider if e is Creature and e.rider >= 0 else null
+		"velocity": return e.velocity if e is Creature else Vector3.ZERO
+		"yaw": return e.rotation.y
+		"hostile": return e.is_hostile() if e is Creature else false
 	return null
 
 
@@ -1373,6 +1396,51 @@ func _h_entity_set(id, key, v) -> void:
 			if e is Creature:
 				e.play(str(v))
 				Net.entity_anim(e.id, str(v))
+		"state":
+			if e is Creature and v is Array and v.size() >= 1:
+				e.set_state(str(v[0]), float(v[1]) if v.size() > 1 else 5.0)
+				if str(v[0]) != "chase":
+					e.target_peer = -1
+		"attack":
+			if e is Creature:
+				e.chase(int(v), 30.0)
+		"look_at":
+			if e is Creature:
+				e.look_point = Vector3(v)
+				e.look_time = 2.0
+				var to := Vector3(v) - e.global_position
+				e.rotation.y = atan2(-to.x, -to.z)
+		"push":
+			if e is Creature:
+				e.velocity += Vector3(v)
+			elif e is RigidBody3D:
+				(e as RigidBody3D).apply_central_impulse(Vector3(v) * (e as RigidBody3D).mass)
+
+
+func _h_entity_brain(type) -> void:
+	entity_brains[str(type)] = true
+
+
+## Gracz (domyślnie bieżący) wsiada na stworzenie.
+func _h_entity_mount(id, peer) -> bool:
+	if main == null:
+		return false
+	var p := int(peer) if peer != null and int(peer) >= 0 else ctx
+	return main.entities.mount(p, int(id))
+
+
+func _h_entity_dismount(peer) -> void:
+	if main:
+		main.entities.dismount(int(peer) if peer != null and int(peer) >= 0 else ctx)
+
+
+func _h_entity_nearest_player(pos, radius) -> Variant:
+	if main == null:
+		return null
+	var pl: Node3D = main.entities.nearest_player(Vector3(pos))
+	if pl == null or pl.global_position.distance_to(Vector3(pos)) > float(radius):
+		return null
+	return {"id": EntityManager.peer_of(pl), "distance": pl.global_position.distance_to(Vector3(pos)), "position": pl.global_position}
 
 
 func _h_entity_damage(id, amount, cause) -> void:

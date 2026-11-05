@@ -1,0 +1,15 @@
+{
+	"id": "monsters",
+	"name": "Potwory",
+	"version": "0.1.0",
+	"author": "Jakub Lewicki",
+	"description": "Nocą w ciemnych miejscach pojawiają się zombie: gonią gracza i biją. Światło pochodni odstrasza nowe, a w słońcu zombie płoną. Przykład wrogiego stworzenia (ai.hostile), modelu GLB z animacjami z pliku (Idle, Walk, Attack, Hurt), mózgu w Lua (engine.entities.on_think) i pojawiania się nocą przy słabym świetle.",
+	"requires": [],
+	"after": ["base", "survival", "animals"],
+	"content": ["content.lua"],
+	"scripts": ["main.lua"],
+	"settings": [
+		{"key": "amount", "label": "Ile zombie naraz", "type": "int", "default": 5, "min": 0, "max": 20, "step": 1},
+		{"key": "burn", "label": "Zombie płoną w słońcu", "type": "bool", "default": true}
+	]
+}

@@ -23,6 +23,8 @@ var touch_move := Vector2.ZERO   # z joysticka dotykowego
 var touch_jump := false
 var selected := 0
 var target: Dictionary = {}
+var mount_id := -1       # stworzenie, na którym jedziemy (-1: pieszo)
+var mount_seat := 0.0    # wysokość siodła: postać i kamera są wyżej
 var frozen := true
 var ui_blocked := false  # otwarte okno moda: gracz nie reaguje na mysz
 var waiting_login := false  # gra wieloosobowa: czekamy na przyjęcie przez serwer (logowanie)
@@ -171,6 +173,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		stop_digging()
 	elif event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		look(event.relative * mouse_sensitivity)
+	elif event.is_action_pressed("dismount") and mount_id >= 0 and not ui_blocked:
+		request_dismount()
 	elif event.is_action_pressed("toggle_view"):
 		toggle_view()
 	else:
@@ -260,7 +264,9 @@ func _update_camera(delta: float) -> void:
 		cam.pitch = float(Mods.camera_stats.pitch)
 	if Mods.has_hook("after", "camera.update"):
 		cam = Mods.after("camera.update", cam)
-	pivot.position = Vector3(0, float(cam.height), 0) + Vector3(cos(yaw), 0, -sin(yaw)) * float(cam.side)
+	pivot.position = Vector3(0, float(cam.height) + mount_seat, 0) + Vector3(cos(yaw), 0, -sin(yaw)) * float(cam.side)
+	model.position.y = mount_seat
+	model.sitting = mount_id >= 0
 	pivot.rotation = Vector3(float(cam.pitch), float(cam.yaw), 0)
 	spring.spring_length = lerpf(spring.spring_length, float(cam.distance), minf(1.0, delta * 10.0))
 	camera.fov = Settings.fov + float(cam.fov_offset)
@@ -576,6 +582,9 @@ func break_block() -> void:
 ## Prawy przycisk: stworzenie (interakcja), obiekt luźny (podniesienie), blok (block.use), przedmiot.
 func use_item() -> void:
 	var e := entity_target()
+	if mount_id >= 0 and e.is_empty() and target.is_empty():
+		request_dismount()   # na telefonie: dotknięcie w powietrze zsiada
+		return
 	if Net.is_client():
 		model.do_swing()
 		if not e.is_empty():
@@ -600,6 +609,14 @@ static func _net_target(t: Dictionary) -> Dictionary:
 	if t.is_empty():
 		return {}
 	return {"pos": t.pos, "normal": t.normal}
+
+
+## Zsiadanie ze stworzenia (Shift albo ponowne użycie stworzenia).
+func request_dismount() -> void:
+	if Net.is_client():
+		Net.c_action.rpc_id(1, "dismount", {})
+	elif Net.main and Net.main.entities:
+		Net.main.entities.dismount(Mods.local_peer)
 
 
 func teleport(p: Vector3) -> void:

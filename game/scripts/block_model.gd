@@ -82,11 +82,19 @@ func _box_mat(tint: Color) -> ShaderMaterial:
 # ---------- plik GLB/glTF ----------
 
 func _load_file(rel: String) -> void:
-	var mod := str(world.reg.def_of(world.reg.base_of(block)).get("mod", ""))
+	var inst := instance_glb(world.reg, str(world.reg.def_of(world.reg.base_of(block)).get("mod", "")), rel)
+	if inst == null:
+		return
+	root.add_child(inst)
+	_collect(inst)
+
+
+## Kopia sceny z pliku GLB moda (ścieżka względna albo "mod:ścieżka"); wzór jest wczytywany raz.
+static func instance_glb(reg: Registry, mod: String, rel: String) -> Node3D:
 	if rel.find(":") > 0 and not rel.begins_with("res:") and not rel.begins_with("user:"):
 		mod = rel.substr(0, rel.find(":"))
 		rel = rel.substr(rel.find(":") + 1)
-	var path := world.reg._mod_path(mod).path_join(rel)
+	var path := reg._mod_path(mod).path_join(rel)
 	var tpl: Node3D = _glb_cache.get(path)
 	if tpl == null:
 		if FileAccess.file_exists(path):
@@ -100,11 +108,9 @@ func _load_file(rel: String) -> void:
 				tpl = ps.instantiate() as Node3D
 		if tpl == null:
 			push_warning("Nie można wczytać modelu: " + path)
-			return
+			return null
 		_glb_cache[path] = tpl
-	var inst := tpl.duplicate() as Node3D
-	root.add_child(inst)
-	_collect(inst)
+	return tpl.duplicate() as Node3D
 
 
 ## Węzły pliku: każdy nazwany węzeł jest częścią (do animacji), siatki dostają własne kopie materiałów.

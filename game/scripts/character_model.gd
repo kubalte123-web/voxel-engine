@@ -13,6 +13,7 @@ var head: Node3D
 var scarf_tail: Node3D
 
 var walk_phase := 0.0
+var sitting := false  # jazda na stworzeniu: nogi do przodu
 var swing := 0.0  # 1.0 = początek machnięcia ręką (kopanie / stawianie)
 var t := 0.0
 var parts := {}       # nazwa części -> Node3D
@@ -137,7 +138,16 @@ func animate(delta: float, speed: float, on_floor: bool, look_pitch: float) -> v
 	var s := sin(walk_phase)
 	var leg_amp := 0.75 * moving
 	var arm_amp := 0.6 * moving
-	if not on_floor:
+	if sitting:
+		state = "sit"
+		moving = 0.0
+		legs[0].rotation.x = lerpf(legs[0].rotation.x, -1.35, delta * 10.0)
+		legs[1].rotation.x = lerpf(legs[1].rotation.x, -1.35, delta * 10.0)
+		legs[0].rotation.z = lerpf(legs[0].rotation.z, 0.25, delta * 10.0)
+		legs[1].rotation.z = lerpf(legs[1].rotation.z, -0.25, delta * 10.0)
+		arms[0].rotation.x = lerpf(arms[0].rotation.x, -0.6, delta * 8.0)
+		arms[1].rotation.x = lerpf(arms[1].rotation.x, -0.6, delta * 8.0)
+	elif not on_floor:
 		legs[0].rotation.x = lerpf(legs[0].rotation.x, -0.5, delta * 8.0)
 		legs[1].rotation.x = lerpf(legs[1].rotation.x, 0.35, delta * 8.0)
 		arms[0].rotation.x = lerpf(arms[0].rotation.x, -1.0, delta * 8.0)
@@ -145,6 +155,8 @@ func animate(delta: float, speed: float, on_floor: bool, look_pitch: float) -> v
 		arms[0].rotation.z = lerpf(arms[0].rotation.z, -0.35, delta * 8.0)
 		arms[1].rotation.z = lerpf(arms[1].rotation.z, 0.35, delta * 8.0)
 	else:
+		legs[0].rotation.z = lerpf(legs[0].rotation.z, 0.0, delta * 10.0)
+		legs[1].rotation.z = lerpf(legs[1].rotation.z, 0.0, delta * 10.0)
 		legs[0].rotation.x = lerpf(legs[0].rotation.x, s * leg_amp, delta * 14.0)
 		legs[1].rotation.x = lerpf(legs[1].rotation.x, -s * leg_amp, delta * 14.0)
 		var idle := sin(t * 1.8) * 0.04 * (1.0 - moving)

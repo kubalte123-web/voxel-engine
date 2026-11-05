@@ -225,6 +225,22 @@ local function block_update(key, ctx)
 	end
 end
 
+-- mózgi stworzeń: rodzaj -> lista {fn, owner}
+local entity_handlers = {}
+
+local function entity_think(type, ctx)
+	local list = entity_handlers[type]
+	if not list then return end
+	if guard.depth == 0 then guard.tripped = false end
+	local c = to_lua(ctx)
+	if c.target == -1 then c.target = nil end
+	if c.rider == -1 then c.rider = nil end
+	for _, h in ipairs(list) do
+		local ok, err = guarded(h.owner, LIMIT_CALL, h.fn, c)
+		if not ok and err ~= nil then host.report_error(h.owner, "stworzenie " .. type .. ": " .. tostring(err)) end
+	end
+end
+
 -- pociski: rodzaj -> lista {fn, owner}; opisy przedmiotów: klucz -> {fn, owner}
 local projectile_handlers = {}
 local tooltip_fns = {}
@@ -857,6 +873,31 @@ local function make_api(mod_id)
 		color = function(id, tag, color) host.entity_tag(id, tag, true, color) end,
 		data = function(id) return to_lua(host.entity_get(id, "data")) or {} end,
 		set_data = function(id, key, value) host.entity_data(id, key, to_godot(value)) end,
+		-- mózg: fn(ctx) co ai.think sekund (domyślnie 1) dla każdego stworzenia tego rodzaju na serwerze;
+		-- ctx: id, type, state, pos, health, max_health, data, target, rider, player, player_distance, on_floor
+		on_think = function(types, fn)
+			if type(types) == "string" then types = { types } end
+			assert(type(fn) == "function", "entities.on_think: drugi argument musi być funkcją")
+			for _, k in ipairs(types) do
+				entity_handlers[k] = entity_handlers[k] or {}
+				local l = entity_handlers[k]
+				l[#l + 1] = { fn = fn, owner = mod_id }
+				host.entity_brain(k)
+			end
+		end,
+		-- stan: "idle", "wander", "flee", "follow", "chase" albo własna nazwa (stoi przez `seconds`)
+		set_state = function(id, state, seconds) host.entity_set(id, "state", { state, seconds or 5 }) end,
+		attack = function(id, player) host.entity_set(id, "attack", player) end,
+		target = function(id) return host.entity_get(id, "target") end,
+		look_at = function(id, pos) host.entity_set(id, "look_at", VF(pos)) end,
+		push = function(id, v) host.entity_set(id, "push", VF(v)) end,
+		velocity = function(id) return host.entity_get(id, "velocity") end,
+		-- jazda (pole ride w definicji): gracz domyślnie bieżący
+		mount = function(id, player) return host.entity_mount(id, player or -1) end,
+		dismount = function(player) host.entity_dismount(player or -1) end,
+		rider = function(id) return host.entity_get(id, "rider") end,
+		-- najbliższy gracz w promieniu: {id, distance, position} albo nil
+		nearest_player = function(pos, radius) return to_lua(host.entity_nearest_player(VF(pos), radius or 16)) end,
 		-- przedmiot leżący na ziemi; gracz podnosi go, podchodząc (hak item.pickup)
 		drop = function(item, count, pos) return host.item_drop(item, count or 1, VF(pos)) end,
 	}
@@ -876,6 +917,8 @@ local function make_api(mod_id)
 		biome_key = function(pos) return host.biome_key(VI(pos)) end,
 		height = function(x, z) return host.height(x, z) end,
 		time = function() return host.time_of_day() end,
+		-- światło: {sky, block} w skali 0..15 i day (0 noc .. 1 dzień)
+		light = function(pos) return to_lua(host.world_light(VF(pos))) end,
 		set_time = function(h) host.set_time(h) end,
 	}
 
@@ -1046,4 +1089,4 @@ local function make_env(mod_id)
 end
 make_env_ref = make_env
 
-return { dispatch = dispatch, make_env = make_env, input = input, window_action = window_action, finalize = finalize, run_chunk = run_chunk, block_update = block_update, projectile_hit = projectile_hit, item_tooltip = item_tooltip, console = console }
+return { dispatch = dispatch, make_env = make_env, input = input, window_action = window_action, finalize = finalize, run_chunk = run_chunk, block_update = block_update, entity_think = entity_think, projectile_hit = projectile_hit, item_tooltip = item_tooltip, console = console }

@@ -399,6 +399,52 @@ function engine.entities.data(id) end
 ---@param value any
 function engine.entities.set_data(id, key, value) end
 
+--- mózg: fn(ctx) co ai.think sekund (domyślnie 1) dla każdego stworzenia tego rodzaju na serwerze;
+--- ctx: id, type, state, pos, health, max_health, data, target, rider, player, player_distance, on_floor
+---@param types any
+---@param fn any
+function engine.entities.on_think(types, fn) end
+
+--- stan: "idle", "wander", "flee", "follow", "chase" albo własna nazwa (stoi przez `seconds`)
+---@param id any
+---@param state any
+---@param seconds any
+function engine.entities.set_state(id, state, seconds) end
+
+---@param id any
+---@param player any
+function engine.entities.attack(id, player) end
+
+---@param id any
+function engine.entities.target(id) end
+
+---@param id any
+---@param pos any
+function engine.entities.look_at(id, pos) end
+
+---@param id any
+---@param v any
+function engine.entities.push(id, v) end
+
+---@param id any
+function engine.entities.velocity(id) end
+
+--- jazda (pole ride w definicji): gracz domyślnie bieżący
+---@param id any
+---@param player any
+function engine.entities.mount(id, player) end
+
+---@param player any
+function engine.entities.dismount(player) end
+
+---@param id any
+function engine.entities.rider(id) end
+
+--- najbliższy gracz w promieniu: {id, distance, position} albo nil
+---@param pos any
+---@param radius any
+function engine.entities.nearest_player(pos, radius) end
+
 --- przedmiot leżący na ziemi; gracz podnosi go, podchodząc (hak item.pickup)
 ---@param item any
 ---@param count any
@@ -433,6 +479,10 @@ function engine.world.biome_key(pos) end
 function engine.world.height(x, z) end
 
 function engine.world.time() end
+
+--- światło: {sky, block} w skali 0..15 i day (0 noc .. 1 dzień)
+---@param pos any
+function engine.world.light(pos) end
 
 ---@param h any
 function engine.world.set_time(h) end
