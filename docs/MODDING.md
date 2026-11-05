@@ -504,6 +504,32 @@ Inne funkcje: `engine.worldgen.get_biome(klucz)` (tabela do zmiany), `remove_bio
 `add_plant(biom, {block, chance})`. Generator liczy się w C++ (na PC) z tych danych, więc
 własne biomy i struktury nie spowalniają gry.
 
+
+### Generator w Lua
+
+Oprócz opisu danymi (biomy, drzewa, rudy, struktury) mod może dorzucić własne generowanie w skryptach.
+Funkcja dostaje każdy nowy chunk (32 × 32 × 32, nie wczytany z dysku) na serwerze, przed pokazaniem go graczom:
+
+```lua
+engine.worldgen.on_generate(function(ch)
+	-- ch.x, ch.y, ch.z – chunk; ch.min, ch.max – narożniki w świecie; ch.seed
+	local rng = ch.random("glazy")                       -- los zależny tylko od ziarna świata i chunka
+	if rng:chance(0.3) then
+		local x, z = ch.min.x + rng:int(2, 29), ch.min.z + rng:int(2, 29)
+		local y = ch.height(x, z)                         -- powierzchnia z generatora
+		if ch.biome(x, z) == "meadow" and ch.contains(x, y, z) then ch.set(x, y + 1, z, "cobblestone") end
+	end
+	if engine.worldgen.noise3(ch.min.x, ch.min.y, ch.min.z, 40, "jaskinie") > 0.5 then ... end
+end)
+```
+
+`ch.get(x, y, z)` i `ch.set(x, y, z, blok)` (albo z pozycją: `ch.set(pos, "stone")`) działają na
+współrzędnych świata. Bloki poza chunkiem też można stawiać: jeśli sąsiedni chunk już istnieje, zmienia się
+od razu, a jeśli nie – zapis czeka, aż powstanie. `engine.worldgen.noise(x, z, skala, salt)` i
+`noise3(x, y, z, skala, salt)` to szum -1..1 zależny od ziarna, `engine.worldgen.random(seed)` – los
+z metodami `rng:next()`, `rng:int(a, b)`, `rng:chance(p)`, `rng:pick(lista)`. Gracze w grze sieciowej dostają
+zmienione chunki z serwera. Przykład: mod `ruins` (głazy, ruiny, kryształowe żyły).
+
 ## Stworzenia
 
 Stworzenie to model z klockowych części (jak postać gracza), zachowanie i łup. Silnik sam animuje nogi,
@@ -909,6 +935,7 @@ Mod „Plecak i postać” udostępnia `engine.require("backpack").give(przedmio
 | `monsters` | zombie: wróg (`ai.hostile`), model GLB z animacjami z pliku, mózg w Lua, pojawianie się nocą |
 | `horses` | konie: jazda (`ride`), oswajanie przez hak `entity.interact`, ukryte siodło (tag) |
 | `handbook` | bogatsze okna: zakładki, lista z ikonami, obrazek, suwak, przełącznik, lista rozwijana; kompas z `anchor` |
+| `ruins` | generator w Lua: głazy, ruiny i kryształy z deterministycznego losu i szumu 3D |
 | `building` | kształty z prostopadłościanów: półbloki, schody, płot, murek, szyba, własny kształt (stolik) |
 | `smelting` | piec: dane bloku, zaplanowane aktualizacje, wariant świecący, okno odświeżane wszystkim patrzącym |
 

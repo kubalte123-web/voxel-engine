@@ -225,6 +225,63 @@ local function block_update(key, ctx)
 	end
 end
 
+-- generatory świata: lista {fn, owner}; deterministyczny los (xorshift) zależny tylko od ziarna
+local worldgen_fns = {}
+
+local function make_rng(seed)
+	local s = (math.tointeger(seed) or 1) ~ 0x2545F4914F6CDD1D
+	if s == 0 then s = 1 end
+	local r = {}
+	function r:next()
+		s = s ~ (s << 13)
+		s = s ~ (s >> 7)
+		s = s ~ (s << 17)
+		return ((s >> 11) & 0x1FFFFFFFFFFFFF) / 9007199254740992.0
+	end
+	function r:int(a, b) return a + math.floor(self:next() * (b - a + 1)) end
+	function r:chance(p) return self:next() < p end
+	function r:pick(list) return list[self:int(1, #list)] end
+	return r
+end
+
+local function str_hash(t)
+	local h = 5381
+	for i = 1, #t do h = ((h * 33) ~ t:byte(i)) & 0x7FFFFFFF end
+	return h
+end
+
+local function worldgen(cx, cy, cz, world_seed)
+	if #worldgen_fns == 0 then return end
+	if guard.depth == 0 then guard.tripped = false end
+	local S = 32
+	local seed = (world_seed * 73856093) ~ (cx * 19349663) ~ (cy * 83492791) ~ (cz * 2654435761)
+	local function P(x, y, z)
+		if type(x) ~= "number" then return VI(x), y end
+		return Vector3i(math.floor(x), math.floor(y), math.floor(z)), nil
+	end
+	local ch = { x = cx, y = cy, z = cz, size = S, seed = seed,
+		min = Vector3i(cx * S, cy * S, cz * S), max = Vector3i(cx * S + S - 1, cy * S + S - 1, cz * S + S - 1) }
+	function ch.get(x, y, z) local p = P(x, y, z) return host.gen_get(p) end
+	-- set(x, y, z, blok) albo set(pozycja, blok); blok: klucz albo id
+	function ch.set(x, y, z, b)
+		local p, b2 = P(x, y, z)
+		if b2 ~= nil then b = b2 end
+		if type(b) == "string" then b = host.block_id(b) end
+		if b and b >= 0 then host.gen_set(p, b) end
+	end
+	function ch.height(x, z) return host.gen_height(math.floor(x), math.floor(z)) end
+	function ch.biome(x, z) return host.gen_biome(math.floor(x), math.floor(z)) end
+	function ch.random(salt) return make_rng(seed ~ str_hash(tostring(salt or ""))) end
+	function ch.contains(x, y, z)
+		local p = P(x, y, z)
+		return p.x >= ch.min.x and p.x <= ch.max.x and p.y >= ch.min.y and p.y <= ch.max.y and p.z >= ch.min.z and p.z <= ch.max.z
+	end
+	for _, h in ipairs(worldgen_fns) do
+		local ok, err = guarded(h.owner, LIMIT_CALL, h.fn, ch)
+		if not ok and err ~= nil then host.report_error(h.owner, "generator świata: " .. tostring(err)) end
+	end
+end
+
 -- polecenia modów: nazwa -> {fn, owner}
 local command_fns = {}
 
@@ -741,6 +798,18 @@ local function make_api(mod_id)
 	}
 
 	E.worldgen = {
+		-- generator w Lua (skrypty, serwer): fn(ch) dla każdego nowego chunka (nie wczytanego z dysku);
+		-- ch.x/y/z (chunk), ch.min/max (narożniki w świecie), ch.get/set/height/biome/contains, ch.random(salt)
+		on_generate = function(fn)
+			assert(type(fn) == "function", "worldgen.on_generate potrzebuje funkcji")
+			worldgen_fns[#worldgen_fns + 1] = { fn = fn, owner = mod_id }
+			host.worldgen_on(mod_id)
+		end,
+		-- szum zależny od ziarna świata, -1..1; 2D: noise(x, z, skala, salt), 3D: noise3(x, y, z, skala, salt)
+		noise = function(x, z, scale, salt, octaves) return host.gen_noise(x, nil, z, scale or 32, tostring(salt or ""), octaves or 1) end,
+		noise3 = function(x, y, z, scale, salt, octaves) return host.gen_noise(x, y, z, scale or 32, tostring(salt or ""), octaves or 1) end,
+		-- los deterministyczny: rng:next() 0..1, rng:int(a, b), rng:chance(p), rng:pick(lista)
+		random = function(seed) return make_rng(type(seed) == "string" and str_hash(seed) or seed) end,
 		config = function(t)
 			open_registry("worldgen.config")
 			for k, v in pairs(t) do R.config[k] = v end
@@ -1145,4 +1214,4 @@ local function make_env(mod_id)
 end
 make_env_ref = make_env
 
-return { dispatch = dispatch, make_env = make_env, input = input, window_action = window_action, finalize = finalize, run_chunk = run_chunk, block_update = block_update, entity_think = entity_think, command = command, projectile_hit = projectile_hit, item_tooltip = item_tooltip, console = console }
+return { dispatch = dispatch, make_env = make_env, input = input, window_action = window_action, finalize = finalize, run_chunk = run_chunk, block_update = block_update, entity_think = entity_think, command = command, worldgen = worldgen, projectile_hit = projectile_hit, item_tooltip = item_tooltip, console = console }

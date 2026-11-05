@@ -1697,6 +1697,39 @@ func _test_perf() -> void:
 
 
 ## Test logiki bloków: skrzynia (kierunek, kontener), piec (dane, plan, świecenie), uprawy (losowe, sąsiad), dźwięki.
+## Generator świata w Lua (mod ruins): ruiny, głazy, kryształy; zapisy przez granice chunków.
+func _test_worldgen(dir: String) -> void:
+	await _wait_loaded()
+	await _wait(1.0)
+	var reg := Mods.registry
+	var bricks := reg.id_of("bricks")
+	var ruby := reg.id_of("ruby_ore")
+	var counts := {"bricks": 0, "ruby_ore": 0}
+	var ruin_at := Vector3i(0, -999, 0)
+	for c in world.data:
+		var d: PackedByteArray = world.data[c]
+		counts.bricks += d.count(bricks)
+		counts.ruby_ore += d.count(ruby)
+		var i := d.find(bricks)
+		if i >= 0 and ruin_at.y == -999:
+			ruin_at = c * World.S + Vector3i(i % World.S, (i / World.S) % World.S, i / (World.S * World.S))
+	for q in world.queued:
+		print("GEN w kolejce ", q, " built=", world.built.has(q), " data=", world.data.has(q), " pending=", world.gen_pending.has(q), " dirty=", world.dirty.has(q))
+	print("GEN generatory=", Mods.worldgen_mods.keys(), " chunki=", world.data.size(), " zmienione=", world.edited.size(), " zaległe=", world.gen_pending.size(), " bloki=", counts)
+	# los i szum zależą tylko od ziarna
+	print("GEN los: ", Mods.console_exec(Mods.local_peer, "local r = engine.worldgen.random('test') return r:int(1, 1000000) .. ' ' .. r:int(1, 1000000)"),
+		" / ", Mods.console_exec(Mods.local_peer, "local r = engine.worldgen.random('test') return r:int(1, 1000000) .. ' ' .. r:int(1, 1000000)"),
+		" szum: ", Mods.console_exec(Mods.local_peer, "return engine.worldgen.noise(10, 20, 16, 'a')"))
+	if ruin_at.y != -999:
+		player.teleport(Vector3(ruin_at) + Vector3(-6, 4, -6))
+		var to := Vector3(ruin_at) - player.global_position
+		player.yaw = atan2(-to.x, -to.z)
+		player.pitch = -0.35
+		await _wait(2.0)
+		await _shot(dir, "w1_ruin")
+	get_tree().quit()
+
+
 ## Bogatsze okna (mod handbook): zakładki, lista z ikonami, obrazek, suwak, przełącznik, lista rozwijana;
 ## element ekranu w wybranym miejscu (kompas u góry).
 func _test_ui(dir: String) -> void:
@@ -2116,6 +2149,9 @@ func _autotest(dir: String) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--creatures-only"):
 		await _test_creatures(dir)
+		return
+	if OS.get_cmdline_user_args().has("--worldgen-only"):
+		await _test_worldgen(dir)
 		return
 	if OS.get_cmdline_user_args().has("--ui-only"):
 		await _test_ui(dir)

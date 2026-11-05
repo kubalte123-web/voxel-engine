@@ -1,0 +1,15 @@
+{
+	"id": "ruins",
+	"name": "Głazy i ruiny",
+	"version": "0.1.0",
+	"author": "Jakub Lewicki",
+	"description": "Generator świata w Lua: głazy na łąkach i w lasach, rozsypujące się ruiny z cegieł oraz kryształowe żyły w skałach. Wszystko zależy tylko od ziarna świata (ten sam świat za każdym razem). Przykład engine.worldgen.on_generate, szumu i deterministycznego losu.",
+	"requires": [],
+	"after": ["base", "ores"],
+	"content": [],
+	"scripts": ["main.lua"],
+	"settings": [
+		{"key": "boulders", "label": "Głazy (szansa na chunk)", "type": "float", "default": 0.35, "min": 0, "max": 1, "step": 0.05},
+		{"key": "ruins", "label": "Ruiny (szansa na chunk)", "type": "float", "default": 0.06, "min": 0, "max": 1, "step": 0.01}
+	]
+}

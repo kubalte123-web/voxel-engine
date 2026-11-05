@@ -197,6 +197,31 @@ function engine.items.tooltip(key, fn) end
 ---@class engine.worldgen
 engine.worldgen = {}
 
+--- generator w Lua (skrypty, serwer): fn(ch) dla każdego nowego chunka (nie wczytanego z dysku);
+--- ch.x/y/z (chunk), ch.min/max (narożniki w świecie), ch.get/set/height/biome/contains, ch.random(salt)
+---@param fn any
+function engine.worldgen.on_generate(fn) end
+
+--- szum zależny od ziarna świata, -1..1; 2D: noise(x, z, skala, salt), 3D: noise3(x, y, z, skala, salt)
+---@param x any
+---@param z any
+---@param scale any
+---@param salt any
+---@param octaves any
+function engine.worldgen.noise(x, z, scale, salt, octaves) end
+
+---@param x any
+---@param y any
+---@param z any
+---@param scale any
+---@param salt any
+---@param octaves any
+function engine.worldgen.noise3(x, y, z, scale, salt, octaves) end
+
+--- los deterministyczny: rng:next() 0..1, rng:int(a, b), rng:chance(p), rng:pick(lista)
+---@param seed any
+function engine.worldgen.random(seed) end
+
 ---@param t any
 function engine.worldgen.config(t) end
 

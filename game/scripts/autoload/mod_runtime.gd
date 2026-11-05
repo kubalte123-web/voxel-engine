@@ -135,7 +135,7 @@ func _open_lua() -> bool:
 		push_error(load_errors["_"])
 		lua = null
 		return false
-	for k in ["dispatch", "make_env", "input", "window_action", "finalize", "run_chunk", "block_update", "projectile_hit", "item_tooltip", "console", "entity_think", "command"]:
+	for k in ["dispatch", "make_env", "input", "window_action", "finalize", "run_chunk", "block_update", "projectile_hit", "item_tooltip", "console", "entity_think", "command", "worldgen"]:
 		_api[k] = res.get(k)
 	return true
 
@@ -161,6 +161,8 @@ func stop() -> void:
 	_hooks.clear()
 	entity_brains.clear()
 	mod_commands.clear()
+	worldgen_mods.clear()
+	_gen_noises.clear()
 	hotbar.container = ""
 	hotbar.first = 0
 	hotbar.count = 0
@@ -291,6 +293,59 @@ func projectile_hit(type: String, ctx: Dictionary) -> void:
 		_api.projectile_hit.invoke(type, ctx)
 
 
+func worldgen_active() -> bool:
+	return not worldgen_mods.is_empty() and _api.has("worldgen") and not Net.is_client()
+
+
+## Generatory modów dla nowego chunka (współrzędne chunka).
+func worldgen_generate(c: Vector3i) -> void:
+	if _api.has("worldgen"):
+		_api.worldgen.invoke(c.x, c.y, c.z, main.world.terrain.seed_value if main else 0)
+
+
+func _h_worldgen_on(mod_id) -> void:
+	worldgen_mods[str(mod_id)] = true
+
+
+func _h_gen_get(pos) -> int:
+	return main.world.gen_get(Vector3i(pos)) if main else 0
+
+
+func _h_gen_set(pos, id) -> void:
+	if main and int(id) >= 0 and int(id) < registry.count():
+		main.world.gen_set(Vector3i(pos), int(id))
+
+
+func _h_gen_height(x, z) -> int:
+	return main.world.terrain.height(int(x), int(z)) if main else 0
+
+
+func _h_gen_biome(x, z) -> String:
+	if main == null:
+		return ""
+	var t: Terrain = main.world.terrain
+	var i: int = t.column(int(x), int(z)).y
+	return t.biome_keys[i] if i < t.biome_keys.size() else ""
+
+
+## Szum zależny od ziarna świata: -1..1. salt rozróżnia niezależne szumy (np. "rudy", "jeziora").
+func _h_gen_noise(x, y, z, scale, salt, octaves) -> float:
+	var key := str(salt) + "|" + str(octaves)
+	var n: FastNoiseLite = _gen_noises.get(key)
+	if n == null:
+		n = FastNoiseLite.new()
+		n.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+		n.seed = (main.world.terrain.seed_value if main else 0) + hash(str(salt))
+		n.frequency = 1.0
+		n.fractal_type = FastNoiseLite.FRACTAL_FBM if int(octaves) > 1 else FastNoiseLite.FRACTAL_NONE
+		n.fractal_octaves = maxi(1, int(octaves))
+		_gen_noises[key] = n
+	var sc := maxf(0.0001, float(scale))
+	if y == null:
+		return n.get_noise_2d(float(x) / sc, float(z) / sc)
+	return n.get_noise_3d(float(x) / sc, float(y) / sc, float(z) / sc)
+
+
 ## Polecenie moda: zwraca tekst odpowiedzi (albo null).
 func run_command(name: String, ctx: Dictionary) -> Variant:
 	if _api.has("command"):
@@ -353,6 +408,8 @@ func _mod_name(id: String) -> String:
 # data – dane egzemplarza (np. amunicja w broni); stosy z różnymi danymi się nie łączą.
 # info – linie opisu policzone przez mod (engine.items.tooltip), wysyłane do graczy razem z miejscem.
 
+var worldgen_mods := {}   # mod -> true (ma engine.worldgen.on_generate)
+var _gen_noises := {}
 var mod_commands := {}    # polecenie -> {description, permission, usage, mod} (engine.commands.register)
 var entity_brains := {}   # rodzaj stworzenia -> true (mod ma mózg engine.entities.on_think)
 var tooltip_items := {}   # klucz przedmiotu -> true (mod liczy opis dynamiczny)
@@ -646,6 +703,7 @@ func _host_table() -> Dictionary:
 		"entity_spawn", "entity_remove", "entity_exists", "entity_get", "entity_list", "entity_set",
 		"entity_damage", "entity_tag", "entity_data", "item_drop", "entity_brain", "entity_mount", "entity_dismount",
 		"entity_nearest_player", "world_light", "command_register", "chat_send", "role_get", "role_set", "hud_image",
+		"worldgen_on", "gen_get", "gen_set", "gen_height", "gen_biome", "gen_noise",
 		"player_id", "player_name", "player_is_host", "players_list", "set_ctx", "get_ctx",
 		"pstorage_get", "pstorage_set", "players_accept", "players_kick", "is_multiplayer", "hash",
 		"block_state", "block_set_state", "block_with_state", "block_base", "block_data", "block_set_data",

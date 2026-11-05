@@ -48,6 +48,10 @@ var remote := false                     # klient gry wieloosobowej: stan świata
 var logic: BlockLogic = null            # serwer: dane i aktualizacje bloków dla modów
 var models: BlockModels                 # modele bloków z polem `model`
 var apply_stats := {"full": 0, "light": 0, "us": 0}   # przebudowy z kolizją / tylko światło, czas w wątku głównym
+var gen_pending := {}                   # chunk -> {indeks: blok} – zapisy generatora Lua do chunków jeszcze niewygenerowanych
+var gen_chunk := Vector3i.ZERO          # chunk obrabiany teraz przez generator Lua
+var gen_blocks := PackedByteArray()
+var gen_changed := false
 var geo_ver := {}                       # chunk -> wersja kształtu (rośnie przy każdej zmianie bloków, które go dotyczą)
 var offsets: Array[Vector3i] = []
 var mesh_ms_total := 0.0
@@ -144,6 +148,8 @@ func _collect_results() -> void:
 	results = []
 	mutex.unlock()
 	for r in ready:
+		if r.size() > 8 and _worldgen(r[0], r[2], bool(r[8])):
+			continue   # generator Lua zmienił chunk: budujemy go jeszcze raz
 		_apply(r[0], r[1], r[2], r[3], r[7] if r.size() > 7 else -1)
 		if r.size() > 4:
 			_apply_light(r[0], r[4], r[5], r[6])
@@ -315,8 +321,70 @@ func _job(c: Vector3i, gv := -1) -> void:
 		arrays = GDMesher.build(padded, tiles, Registry.ATLAS_COLS, reg.atlas_rows, props, reg.liquid, lres[0])
 	var ms := (Time.get_ticks_usec() - t0) / 1000.0
 	mutex.lock()
-	results.append([c, arrays, blocks, ms, lres[1], lres[2], exact, gv])
+	results.append([c, arrays, blocks, ms, lres[1], lres[2], exact, gv, own == null])
 	mutex.unlock()
+
+
+## Serwer: nowy chunk (nie z dysku) przechodzi przez generatory modów (engine.worldgen.on_generate) i zaległe
+## zapisy z sąsiednich chunków. Zwraca true, gdy bloki się zmieniły – wtedy chunk idzie do ponownej budowy.
+func _worldgen(c: Vector3i, blocks: PackedByteArray, fresh: bool) -> bool:
+	if remote:
+		return false
+	var has_pending := gen_pending.has(c)
+	if not has_pending and not (fresh and Mods.worldgen_active()):
+		return false
+	if data.has(c):
+		blocks = data[c]
+	gen_chunk = c
+	gen_blocks = blocks
+	gen_changed = false
+	if has_pending:
+		var pend: Dictionary = gen_pending[c]
+		gen_pending.erase(c)
+		for i in pend:
+			if gen_blocks[int(i)] != int(pend[i]):
+				gen_blocks[int(i)] = int(pend[i])
+				gen_changed = true
+	if fresh:
+		Mods.worldgen_generate(c)
+	gen_chunk = Vector3i(0, -99999, 0)
+	if not gen_changed:
+		return false
+	mutex.lock()
+	data[c] = gen_blocks
+	mutex.unlock()
+	edited[c] = true
+	unsaved[c] = true
+	Net.block_changed(c * S, 0, c, true)
+	queued.erase(c)
+	_schedule(c)
+	return true
+
+
+## Generator Lua: blok w świecie podczas generowania (współrzędne świata).
+func gen_get(p: Vector3i) -> int:
+	if chunk_of(p) == gen_chunk:
+		var l := p - gen_chunk * S
+		return gen_blocks[l.x + S * (l.y + S * l.z)]
+	return get_block(p)
+
+
+## Zapis generatora: w bieżącym chunku od razu, w istniejącym sąsiednim przez set_block, a w jeszcze
+## niewygenerowanym – gdy powstanie.
+func gen_set(p: Vector3i, id: int) -> void:
+	var c := chunk_of(p)
+	var l := p - c * S
+	var i := l.x + S * (l.y + S * l.z)
+	if c == gen_chunk:
+		if gen_blocks[i] != id:
+			gen_blocks[i] = id
+			gen_changed = true
+	elif data.has(c) and not queued.has(c):
+		set_block(p, id)
+	else:
+		if not gen_pending.has(c):
+			gen_pending[c] = {}
+		gen_pending[c][i] = id
 
 
 ## Mapa wysokości nieba dla obszaru światła (N x N kolumn) z map 3 x 3 kolumn chunków.
