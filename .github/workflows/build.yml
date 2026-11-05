@@ -61,8 +61,9 @@ jobs:
         run: |
           mkdir -p build/web build/windows
           ./godot --headless --path game --import || true
-          ./godot --headless --path game --export-release "Web" ../build/web/index.html
-          ./godot --headless --path game --export-release "Windows" ../build/windows/VoxelEngine.exe
+          # Godot czasem pada przy zamykaniu już po zapisaniu eksportu: liczy się, czy plik powstał
+          ./godot --headless --path game --export-release "Web" ../build/web/index.html || test -s build/web/index.pck
+          ./godot --headless --path game --export-release "Windows" ../build/windows/VoxelEngine.exe || test -s build/windows/VoxelEngine.exe
           ls -la build/web build/windows
       - uses: actions/upload-artifact@v4
         with:
