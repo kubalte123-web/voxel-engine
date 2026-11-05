@@ -224,7 +224,28 @@ func _build_atlas() -> void:
 
 ## Skrót treści: ten sam zestaw bloków, przedmiotów, stworzeń i opisu świata u klienta i serwera.
 func content_hash() -> String:
-	return var_to_str([keys, item_keys, entities.keys(), worldgen, lprops, props]).sha256_text()
+	var ent := entities.keys()
+	ent.sort()
+	return var_to_str(_canon([keys, item_keys, ent, worldgen, lprops, props])).sha256_text()
+
+
+## Postać niezależna od kolejności kluczy w słownikach (tabele Lua mają losową kolejność iteracji).
+static func _canon(v: Variant) -> Variant:
+	if v is Dictionary:
+		var ks: Array = v.keys()
+		ks.sort_custom(func(a, b): return str(a) < str(b))
+		var out := []
+		for k in ks:
+			out.append([str(k), _canon(v[k])])
+		return out
+	if v is Array:
+		var out := []
+		for x in v:
+			out.append(_canon(x))
+		return out
+	if v is float:
+		return snappedf(v, 0.0001)
+	return v
 
 
 # ---------- zapytania ----------

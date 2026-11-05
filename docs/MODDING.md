@@ -375,6 +375,20 @@ Co trzeba wiedzieć, pisząc skrypty:
   przez hak `player.login` pyta o login i hasło i wpuszcza gracza na wybrane konto – ekwipunek, pozycja
   i dane modów należą do konta, więc można wejść na nie z innego urządzenia pod inną nazwą.
 
+### Pobieranie modów z serwera
+
+Gracz nie musi mieć modów serwera. Przy dołączaniu klient wysyła odciski (skróty zawartości) swoich modów;
+jeśli serwer używa modu, którego gracz nie ma albo ma w innej wersji, gra pokazuje listę (nazwa, wersja, autor,
+rozmiar, „nowy” albo „aktualizacja”) z przyciskami „Pobierz i dołącz” i „Anuluj”. Po zgodzie mody pobierają się
+od serwera kawałkami (pasek postępu), trafiają do `user://server_mods/<id>@<odcisk>` i działają tylko na czas
+gry na tym serwerze – własne mody gracza zostają nietknięte. Przy następnym wejściu (ten sam odcisk) nic się
+już nie pobiera. Tak samo działa serwer gracza i serwer bez okna.
+
+- W paczce są tylko pliki: `lua`, `json`, `png`, `txt`, `md`, `ogg`, `wav`, `mp3`, `glb`, `gltf`, `bin`, `cfg`
+  (limit 64 MB na serwer). Ścieżki są sprawdzane, a u klienta działa tylko faza `content`, w piaskownicy.
+- Odcisk liczy obrazy z pikseli, więc mod wbudowany w grę i ten sam mod z folderu mają ten sam odcisk.
+- Wersja w `mod.json` służy do opisu; o pobraniu decyduje zawartość plików.
+
 Serwer bez okna: `godot --headless --path game -- --server=nazwa_świata [--port=7777] [--seed=42] [--enable=accounts]`.
 Gra z oknem: menu „Gra wieloosobowa” (dołącz po adresie albo „Graj na serwerze” na własnym świecie).
 

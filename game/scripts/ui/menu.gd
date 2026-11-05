@@ -24,6 +24,8 @@ func _ready() -> void:
 	scroll.add_child(content)
 	get_viewport().size_changed.connect(_fit)
 	show_main()
+	Net.mods_offer.connect(show_mods_offer)
+	Net.mods_progress.connect(_on_mods_progress)
 	if not Net.last_error.is_empty():
 		_error(Net.last_error)
 		Net.last_error = ""
@@ -192,6 +194,59 @@ func show_multiplayer() -> void:
 	content.add_child(UI.button("Wróć", show_main))
 
 
+## Serwer ma mody, których gracz nie ma (albo ma inne wersje): lista, rozmiar i zgoda na pobranie.
+func show_mods_offer(mods: Array) -> void:
+	_screen()
+	content.add_child(UI.label("Mody serwera", 30))
+	content.add_child(UI.wrap("Ten serwer używa modów, których nie masz albo masz w innej wersji. Pobierz je, żeby dołączyć."))
+	var total := 0
+	for m in mods:
+		total += int(m.size)
+		var row := VBoxContainer.new()
+		row.add_child(UI.label("%s  %s" % [m.name, m.version], 20))
+		var info := ("aktualizacja" if m.get("update", false) else "nowy") + " · " + Net._kb(int(m.size))
+		if str(m.author) != "":
+			info = str(m.author) + " · " + info
+		row.add_child(UI.label(info, 15, UI.MUTED))
+		content.add_child(row)
+	content.add_child(UI.wrap("Razem: %s. Pobrane mody działają tylko na tym serwerze i nie zmieniają twoich modów. Kod modów działa w zabezpieczonej piaskownicy (bez dostępu do plików i sieci)." % Net._kb(total), 15, UI.MUTED))
+	var status := UI.wrap("", 16, UI.LOCK)
+	status.set_meta("net_status", true)
+	if not Net.status.is_connected(_on_net_status):
+		Net.status.connect(_on_net_status)
+	var bar := ProgressBar.new()
+	bar.custom_minimum_size = Vector2(0, 22)
+	bar.show_percentage = false
+	bar.visible = false
+	bar.set_meta("mods_bar", true)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	var yes := UI.button("Pobierz i dołącz", func(): pass, true)
+	var no := UI.button("Anuluj", func():
+		Net.decline_mods()
+		show_multiplayer())
+	yes.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	no.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	yes.pressed.connect(func():
+		yes.disabled = true
+		bar.visible = true
+		Net.accept_mods())
+	row.add_child(yes)
+	row.add_child(no)
+	content.add_child(row)
+	content.add_child(bar)
+	content.add_child(status)
+	if not GameState.autotest_dir.is_empty():
+		await _shot(GameState.autotest_dir, "mp_mods_offer")
+		yes.pressed.emit()
+
+
+func _on_mods_progress(done: int, all: int) -> void:
+	for c in content.get_children():
+		if c is ProgressBar and c.has_meta("mods_bar"):
+			c.value = float(done) / maxf(1.0, float(all)) * 100.0
+
+
 func _on_net_status(text: String) -> void:
 	for c in content.get_children():
 		if c is Label and c.has_meta("net_status"):
@@ -234,6 +289,8 @@ func _auto_join(target: String, args: PackedStringArray) -> void:
 			Settings.player_name = a.trim_prefix("--name=")
 		if a.begins_with("--shots="):
 			GameState.autotest_dir = a.trim_prefix("--shots=")
+		if a == "--accept-mods":
+			Net.auto_accept_mods = true
 	var parts := target.split(":")
 	var err := Net.join(parts[0], int(parts[1]) if parts.size() > 1 else Net.DEFAULT_PORT)
 	if err != "":

@@ -13,6 +13,7 @@ var order: Array[String] = []
 var enabled := {}         # id -> bool
 var values := {}          # id -> {klucz: wartość} (ustawienia gracza)
 var server_profile := {}  # {"order": [...], "enabled": {...}, "settings": {id: {klucz: wartość}}}
+var server_mods := {}     # id -> folder moda pobranego z serwera (zastępuje mod gracza tylko na czas gry na tym serwerze)
 
 
 func _ready() -> void:
@@ -36,6 +37,34 @@ func scan() -> void:
 				continue
 			parsed["path"] = dir_path.path_join(sub)
 			manifests[parsed.id] = parsed
+	for id in server_mods:
+		var path: String = server_mods[id].path_join("mod.json")
+		var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+		if typeof(parsed) == TYPE_DICTIONARY and str(parsed.get("id", "")) == id:
+			parsed["path"] = server_mods[id]
+			parsed["from_server"] = true
+			manifests[id] = parsed
+
+
+## Mody pobrane z serwera: używane zamiast własnych do końca połączenia.
+func use_server_mods(mods: Dictionary) -> void:
+	server_mods = mods.duplicate()
+	scan()
+
+
+func clear_server_mods() -> void:
+	if server_mods.is_empty():
+		return
+	server_mods.clear()
+	scan()
+
+
+## Odciski wszystkich dostępnych modów (klient wysyła je serwerowi przy dołączaniu).
+func fingerprints() -> Dictionary:
+	var out := {}
+	for id in manifests:
+		out[id] = ModPack.fingerprint(manifests[id].path)
+	return out
 
 
 func load_user() -> void:

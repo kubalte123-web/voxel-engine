@@ -1068,6 +1068,7 @@ func _autotest_client(dir: String) -> void:
 		while my_account == "" and Time.get_ticks_msec() - t0 < 20000:
 			await _wait(0.2)
 	print("KLIENT ", Settings.player_name, " zalogowany jako=", my_account)
+	print("KLIENT mody=", Mods.loaded, " z serwera=", ModManager.server_mods.keys(), " blok crystal=", Blocks.id("crystal"))
 	await _wait_loaded()
 	await _wait(2.0)
 	print("KLIENT pozycja=", player.global_position.snapped(Vector3(0.1, 0.1, 0.1)), " zdrowie=", player.health,

@@ -9,8 +9,12 @@ extends Node
 ## skrót rejestru treści (te same bloki, przedmioty i świat).
 
 signal status(text: String)
+signal mods_offer(mods: Array)    # klient: serwer ma mody, których brakuje (menu pyta gracza)
+signal mods_progress(done: int, total: int)
 
-const PROTOCOL := 1
+const PROTOCOL := 2
+const CHUNK := 48 * 1024           # kawałek paczki modu w jednym pakiecie
+const CHUNKS_PER_FRAME := 3
 const DEFAULT_PORT := 7777
 const MAX_PLAYERS := 8
 const STATE_DT := 1.0 / 15.0
@@ -28,6 +32,17 @@ var sent_chunks := {}    # serwer: chunki, które klienci już mają
 var _state_t := 0.0
 var _ent_t := 0.0
 var dig_times := {}      # klient: czas kopania od serwera (pozycja -> sekundy)
+# pobieranie modów z serwera
+var auto_accept_mods := false      # testy: zgoda bez pytania (--accept-mods)
+var offer := []                    # klient: mody do pobrania [{id, name, version, author, fp, size}]
+var _offered_all := []             # klient: wszystkie mody z oferty (także te już w pamięci podręcznej)
+var _offer_round := 0
+var _dl := {}                      # klient: id -> PackedByteArray (odbierane)
+var _dl_done := 0
+var _dl_total := 0
+var _packs := {}                   # serwer: id -> paczka (liczona raz)
+var _offers := {}                  # serwer: peer -> {id: fp} zaproponowane mody
+var _uploads := {}                 # serwer: peer -> [[id, paczka, przesunięcie]]
 
 
 func is_server() -> bool:
@@ -92,6 +107,13 @@ func leave() -> void:
 	full_chunks.clear()
 	sent_chunks.clear()
 	dig_times.clear()
+	offer = []
+	_offered_all = []
+	_offer_round = 0
+	_dl.clear()
+	_offers.clear()
+	_uploads.clear()
+	ModManager.clear_server_mods()
 
 
 func kick(p: int, reason: String) -> void:
@@ -114,7 +136,11 @@ static func mods_signature() -> Dictionary:
 
 func _on_connected() -> void:
 	status.emit("Połączono, sprawdzanie modów...")
-	c_hello.rpc_id(1, Settings.player_name, PROTOCOL, ModManager.manifests.keys())
+	_hello()
+
+
+func _hello() -> void:
+	c_hello.rpc_id(1, Settings.player_name, PROTOCOL, ModManager.fingerprints())
 
 
 func _on_failed() -> void:
@@ -136,6 +162,8 @@ func _on_peer_connected(_p: int) -> void:
 
 
 func _on_peer_disconnected(p: int) -> void:
+	_uploads.erase(p)
+	_offers.erase(p)
 	if main:
 		main.remove_remote_player(p)
 
@@ -143,23 +171,158 @@ func _on_peer_disconnected(p: int) -> void:
 # ---------- uzgadnianie (klient -> serwer -> klient) ----------
 
 @rpc("any_peer", "reliable")
-func c_hello(name: String, proto: int, available: Array) -> void:
+func c_hello(name: String, proto: int, available: Variant) -> void:
 	var p := multiplayer.get_remote_sender_id()
 	if main == null:
 		s_reject.rpc_id(p, "Serwer jeszcze nie wczytał świata.")
 		return
-	if proto != PROTOCOL:
-		s_reject.rpc_id(p, "Inna wersja gry (protokół %d, serwer %d)." % [proto, PROTOCOL])
+	if proto != PROTOCOL or not available is Dictionary:
+		s_reject.rpc_id(p, "Inna wersja gry (protokół %d, serwer %d). Zaktualizuj grę." % [proto, PROTOCOL])
 		return
-	var missing := []
+	# mody, których klient nie ma albo ma w innej wersji (inny odcisk): proponujemy pobranie
+	var need := []
+	var fps := {}
 	for id in mods_signature():
-		if not available.has(id):
-			missing.append(ModManager.manifests[id].get("name", id))
-	if not missing.is_empty():
-		s_reject.rpc_id(p, "Brakuje modów: " + ", ".join(missing))
+		var m: Dictionary = ModManager.manifests[id]
+		var fp := ModPack.fingerprint(m.path)
+		if str(available.get(id, "")) == fp:
+			continue
+		if not _packs.has(id):
+			_packs[id] = ModPack.pack(m.path)
+		fps[id] = fp
+		need.append({"id": id, "name": str(m.get("name", id)), "version": str(m.get("version", "")),
+			"author": str(m.get("author", "")), "fp": fp, "size": (_packs[id] as PackedByteArray).size(),
+			"update": available.has(id)})
+	if not need.is_empty():
+		print("MODY oferta dla %d: %s" % [p, fps.keys()])
+		_offers[p] = fps
+		s_offer_mods.rpc_id(p, need)
 		return
 	main.pending_names[p] = name.strip_edges().left(24) if not name.strip_edges().is_empty() else "Gracz"
 	s_welcome.rpc_id(p, main.world_info_for_client())
+
+
+# ---------- pobieranie modów z serwera ----------
+
+## Klient: serwer proponuje mody. Te, które już kiedyś pobraliśmy (ten sam odcisk), bierzemy z pamięci
+## podręcznej; o resztę pytamy gracza (menu), a po zgodzie pobieramy je od serwera.
+@rpc("authority", "reliable")
+func s_offer_mods(mods: Array) -> void:
+	_offer_round += 1
+	if _offer_round > 2:
+		last_error = "Nie udało się dopasować modów do serwera (pobrane mody różnią się od serwerowych)."
+		status.emit(last_error)
+		leave()
+		return
+	_offered_all = mods
+	offer = []
+	for m in mods:
+		if not ModPack.is_cached(str(m.id), str(m.fp)):
+			offer.append(m)
+	if offer.is_empty():
+		_use_offered()
+		return
+	if auto_accept_mods:
+		accept_mods()
+	else:
+		mods_offer.emit(offer)
+
+
+func accept_mods() -> void:
+	if offer.is_empty() or not is_client():
+		return
+	_dl.clear()
+	_dl_done = 0
+	_dl_total = 0
+	var ids := []
+	for m in offer:
+		ids.append(m.id)
+		_dl_total += int(m.size)
+	status.emit("Pobieranie modów...")
+	print("MODY pobieranie: ", ids, " ", _kb(_dl_total))
+	c_get_mods.rpc_id(1, ids)
+
+
+func decline_mods() -> void:
+	last_error = "Nie dołączono: bez modów serwera nie można grać na tym serwerze."
+	leave()
+	status.emit(last_error)
+
+
+func _use_offered() -> void:
+	var dirs := {}
+	for m in _offered_all:
+		dirs[str(m.id)] = ModPack.cache_dir(str(m.id), str(m.fp))
+	ModManager.use_server_mods(dirs)
+	print("MODY z serwera gotowe: ", dirs.keys(), " (pobrane teraz: ", offer.size(), ")")
+	status.emit("Mody gotowe, dołączanie...")
+	_hello()
+
+
+@rpc("any_peer", "reliable")
+func c_get_mods(ids: Array) -> void:
+	var p := multiplayer.get_remote_sender_id()
+	var allowed: Dictionary = _offers.get(p, {})
+	var queue := []
+	for id in ids:
+		if allowed.has(str(id)) and _packs.has(str(id)):
+			queue.append([str(id), _packs[str(id)], 0])
+	_uploads[p] = queue
+	print("MODY wysyłanie do %d: %s" % [p, ids])
+
+
+## Serwer: wysyłanie paczek kawałkami (kilka na klatkę, żeby gra działała płynnie).
+func _send_uploads() -> void:
+	for p in _uploads.keys():
+		var queue: Array = _uploads[p]
+		var n := CHUNKS_PER_FRAME
+		while n > 0 and not queue.is_empty():
+			var job: Array = queue[0]
+			var data: PackedByteArray = job[1]
+			var off: int = job[2]
+			var end := mini(off + CHUNK, data.size())
+			s_mod_chunk.rpc_id(p, job[0], off, data.size(), data.slice(off, end))
+			job[2] = end
+			if end >= data.size():
+				queue.pop_front()
+			n -= 1
+		if queue.is_empty():
+			_uploads.erase(p)
+
+
+@rpc("authority", "reliable")
+func s_mod_chunk(id: String, offset: int, total: int, bytes: PackedByteArray) -> void:
+	var m: Dictionary = {}
+	for o in offer:
+		if str(o.id) == id:
+			m = o
+	if m.is_empty() or total != int(m.size) or total > ModPack.MAX_TOTAL:
+		return
+	var buf: PackedByteArray = _dl.get(id, PackedByteArray())
+	if offset != buf.size():
+		return
+	buf.append_array(bytes)
+	_dl[id] = buf
+	_dl_done += bytes.size()
+	mods_progress.emit(_dl_done, _dl_total)
+	status.emit("Pobieranie modów: %d%% (%s z %s)" % [100 * _dl_done / maxi(1, _dl_total), _kb(_dl_done), _kb(_dl_total)])
+	if buf.size() < total:
+		return
+	var err := ModPack.unpack(id, str(m.fp), buf)
+	_dl.erase(id)
+	if err != "":
+		last_error = "Nie udało się zapisać modu „%s”: %s" % [m.name, err]
+		status.emit(last_error)
+		leave()
+		return
+	for o in offer:
+		if not ModPack.is_cached(str(o.id), str(o.fp)):
+			return
+	_use_offered()
+
+
+static func _kb(n: int) -> String:
+	return "%.1f MB" % (n / 1048576.0) if n >= 1048576 else "%d KB" % maxi(1, n / 1024)
 
 
 @rpc("authority", "reliable")
@@ -457,6 +620,8 @@ func _physics_process(delta: float) -> void:
 			_state_t = STATE_DT
 			main.send_my_state()
 		return
+	if not _uploads.is_empty():
+		_send_uploads()
 	if main.remote_count() == 0:
 		return
 	# bloki: całe chunki zmienione po raz pierwszy, potem pojedyncze zmiany
