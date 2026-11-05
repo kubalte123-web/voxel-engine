@@ -66,7 +66,11 @@ func show_main() -> void:
 	var title := UI.label("VOXEL ENGINE", 46)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	content.add_child(title)
-	var sub := UI.label("nazwa robocza · etap 6", 16, UI.MUTED)
+	# wersja: plik version.txt zapisuje automatyczne budowanie (data i commit), żeby było widać, czy przeglądarka ma najnowszą
+	var ver := "etap 7"
+	if FileAccess.file_exists("res://version.txt"):
+		ver += " · " + FileAccess.get_file_as_string("res://version.txt").strip_edges()
+	var sub := UI.label("nazwa robocza · " + ver, 16, UI.MUTED)
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	content.add_child(sub)
 	content.add_child(_gap(8))

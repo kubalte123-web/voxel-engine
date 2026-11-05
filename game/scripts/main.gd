@@ -1157,6 +1157,7 @@ func _test_alchemy(dir: String) -> void:
 		player.select(0)
 		Mods.as_player(me, func(): return Mods.before("block.use", {"pos": p, "normal": Vector3i.UP, "block": world.get_block(p), "item": item, "slot": 1}))
 	var state := func(p: Vector3i) -> String: return str(reg.state_of(world.get_block(p)).get("content", "?"))
+	print("ALCH zestaw startowy: kocioł=", _count_item("cauldron"), " wiadra wody=", _count_item("water_bucket"), " butelki=", _count_item("glass_bottle"), " piec=", _count_item("furnace"), " skrzynie=", _count_item("chest"), " motyka=", _count_item("wooden_hoe"))
 	# kocioł na płaskim miejscu obok gracza
 	var c := Vector3i(player.global_position.floor()) + Vector3i(0, 0, -3)
 	for y in range(c.y + 4, c.y - 6, -1):

@@ -7,5 +7,8 @@
 	"requires": ["modkit", "backpack"],
 	"after": ["ores", "animals", "crafting_classic", "crafting_discovery", "tools"],
 	"content": ["content.lua"],
-	"scripts": ["main.lua"]
+	"scripts": ["main.lua"],
+	"settings": [
+		{"key": "starter", "label": "Zestaw na start (piec, węgiel, ruda)", "type": "bool", "default": true}
+	]
 }

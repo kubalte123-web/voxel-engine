@@ -7,5 +7,8 @@
 	"requires": ["backpack"],
 	"after": ["crafting_classic", "crafting_discovery"],
 	"content": ["content.lua"],
-	"scripts": ["main.lua"]
+	"scripts": ["main.lua"],
+	"settings": [
+		{"key": "starter", "label": "Zestaw na start (skrzynie)", "type": "bool", "default": true}
+	]
 }

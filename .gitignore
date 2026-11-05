@@ -10,3 +10,4 @@ game/bin/*.so
 game/bin/*.dll
 game/bin/*.wasm
 !game/addons/lua-gdextension/build/
+game/version.txt

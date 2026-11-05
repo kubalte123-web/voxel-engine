@@ -248,3 +248,21 @@ if discovery then
 end
 
 engine.export({ recipes = RECIPES, ingredients = INGREDIENTS, colors = COLORS })
+
+-- zestaw na start (raz na konto; wyłączany w ustawieniach moda)
+engine.on("player.join", function()
+	if not engine.settings.get("starter") or engine.player.storage.get("started", false) then return end
+	local bp = engine.require("backpack")
+	if engine.items.def("cauldron") then bp.give("cauldron", 1) end
+	if engine.items.def("water_bucket") then bp.give("water_bucket", 2) end
+	if engine.items.def("stick") then bp.give("stick", 4) end
+	if engine.items.def("glass_bottle") then bp.give("glass_bottle", 6) end
+	if engine.items.def("feather") then bp.give("feather", 4) end
+	if engine.items.def("flower_yellow") then bp.give("flower_yellow", 2) end
+	if engine.items.def("flower_red") then bp.give("flower_red", 2) end
+	if engine.items.def("apple") then bp.give("apple", 2) end
+	if engine.items.def("egg") then bp.give("egg", 2) end
+	if engine.items.def("leaves") then bp.give("leaves", 2) end
+	if engine.items.def("ruby") then bp.give("ruby", 2) end
+	engine.player.storage.set("started", true)
+end)

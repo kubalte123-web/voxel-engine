@@ -23,3 +23,11 @@ local classic = engine.optional("crafting_classic")
 if classic then classic.shaped({ "PPP", "P P", "PPP" }, { P = "planks" }, "chest") end
 local discovery = engine.optional("crafting_discovery")
 if discovery then discovery.add("skrzynia", { planks = 8 }, "chest", 1, 4) end
+
+-- zestaw na start (raz na konto; wyłączany w ustawieniach moda)
+engine.on("player.join", function()
+	if not engine.settings.get("starter") or engine.player.storage.get("started", false) then return end
+	local bp = engine.require("backpack")
+	if engine.items.def("chest") then bp.give("chest", 2) end
+	engine.player.storage.set("started", true)
+end)

@@ -148,3 +148,13 @@ local discovery = engine.optional("crafting_discovery")
 if discovery then discovery.add("piec", { cobblestone = 8 }, "furnace", 1, 5) end
 
 engine.export({ recipe = recipe, fuel = add_fuel, recipes = recipes })
+
+-- zestaw na start (raz na konto; wyłączany w ustawieniach moda)
+engine.on("player.join", function()
+	if not engine.settings.get("starter") or engine.player.storage.get("started", false) then return end
+	local bp = engine.require("backpack")
+	if engine.items.def("furnace") then bp.give("furnace", 1) end
+	if engine.items.def("coal") then bp.give("coal", 4) end
+	if engine.items.def("raw_iron") then bp.give("raw_iron", 4) end
+	engine.player.storage.set("started", true)
+end)

@@ -60,6 +60,7 @@ jobs:
       - name: Eksportuj
         run: |
           mkdir -p build/web build/windows
+          echo "$(TZ=Europe/Warsaw date '+%Y-%m-%d %H:%M') · ${GITHUB_SHA::7}" > game/version.txt
           ./godot --headless --path game --import || true
           # Godot czasem pada przy zamykaniu już po zapisaniu eksportu: liczy się, czy plik powstał
           ./godot --headless --path game --export-release "Web" ../build/web/index.html || test -s build/web/index.pck

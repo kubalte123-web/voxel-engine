@@ -92,3 +92,12 @@ if discovery then
 	discovery.add("motyka_drewniana", { planks = 2, stick = 2, log = 1 }, "wooden_hoe", 1, 3)
 	discovery.add("motyka_kamienna", { cobblestone = 2, stick = 2, log = 1 }, "stone_hoe", 1, 4)
 end
+
+-- zestaw na start (raz na konto; wyłączany w ustawieniach moda)
+engine.on("player.join", function()
+	if not engine.settings.get("starter") or engine.player.storage.get("started", false) then return end
+	local bp = engine.require("backpack")
+	if engine.items.def("wooden_hoe") then bp.give("wooden_hoe", 1) end
+	if engine.items.def("seeds") then bp.give("seeds", 8) end
+	engine.player.storage.set("started", true)
+end)

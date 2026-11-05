@@ -9,6 +9,7 @@
 	"content": ["content.lua"],
 	"scripts": ["main.lua"],
 	"settings": [
+		{"key": "starter", "label": "Zestaw na start (kocioł i składniki)", "type": "bool", "default": true},
 		{"key": "brew_time", "label": "Czas warzenia (s)", "type": "int", "default": 10, "min": 3, "max": 60, "step": 1}
 	]
 }

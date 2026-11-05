@@ -9,6 +9,7 @@
 	"content": ["content.lua"],
 	"scripts": ["main.lua"],
 	"settings": [
+		{"key": "starter", "label": "Zestaw na start (motyka i nasiona)", "type": "bool", "default": true},
 		{"key": "growth", "label": "Szybkość wzrostu", "type": "float", "default": 1.0, "min": 0.25, "max": 8.0}
 	]
 }
