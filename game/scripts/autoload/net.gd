@@ -20,6 +20,7 @@ const MAX_PLAYERS := 8
 const STATE_DT := 1.0 / 15.0
 const ENTITY_DT := 0.1
 
+var admins: Array = []   # konta administratorów serwera dedykowanego (--admin=a,b)
 var mode := "single"     # single | host | client | dedicated
 var peer: ENetMultiplayerPeer = null
 var main: Node = null
@@ -342,8 +343,23 @@ func c_console(code: String) -> void:
 func s_console_out(text: String) -> void:
 	if main and main.console:
 		main.console.print_line(text)
-	elif main:
-		main.hud.notify(text.left(200))
+	elif main and main.chat:
+		main.chat.print_line(text)
+
+
+# ---------- czat ----------
+
+@rpc("any_peer", "reliable")
+func c_chat(text: String) -> void:
+	var p := multiplayer.get_remote_sender_id()
+	if main and main.is_logged(p):
+		main.chat_from(p, text.left(256))
+
+
+@rpc("authority", "reliable")
+func s_chat(who: String, text: String, color: String) -> void:
+	if main:
+		main.show_chat(who, text, color)
 
 
 @rpc("any_peer", "reliable")

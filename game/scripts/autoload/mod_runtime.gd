@@ -135,7 +135,7 @@ func _open_lua() -> bool:
 		push_error(load_errors["_"])
 		lua = null
 		return false
-	for k in ["dispatch", "make_env", "input", "window_action", "finalize", "run_chunk", "block_update", "projectile_hit", "item_tooltip", "console", "entity_think"]:
+	for k in ["dispatch", "make_env", "input", "window_action", "finalize", "run_chunk", "block_update", "projectile_hit", "item_tooltip", "console", "entity_think", "command"]:
 		_api[k] = res.get(k)
 	return true
 
@@ -160,6 +160,7 @@ func stop() -> void:
 	hud.clear()
 	_hooks.clear()
 	entity_brains.clear()
+	mod_commands.clear()
 	hotbar.container = ""
 	hotbar.first = 0
 	hotbar.count = 0
@@ -290,6 +291,13 @@ func projectile_hit(type: String, ctx: Dictionary) -> void:
 		_api.projectile_hit.invoke(type, ctx)
 
 
+## Polecenie moda: zwraca tekst odpowiedzi (albo null).
+func run_command(name: String, ctx: Dictionary) -> Variant:
+	if _api.has("command"):
+		return _api.command.invoke(name, ctx)
+	return null
+
+
 func entity_think(type: String, ctx: Dictionary) -> void:
 	if _api.has("entity_think"):
 		_api.entity_think.invoke(type, ctx)
@@ -345,6 +353,7 @@ func _mod_name(id: String) -> String:
 # data – dane egzemplarza (np. amunicja w broni); stosy z różnymi danymi się nie łączą.
 # info – linie opisu policzone przez mod (engine.items.tooltip), wysyłane do graczy razem z miejscem.
 
+var mod_commands := {}    # polecenie -> {description, permission, usage, mod} (engine.commands.register)
 var entity_brains := {}   # rodzaj stworzenia -> true (mod ma mózg engine.entities.on_think)
 var tooltip_items := {}   # klucz przedmiotu -> true (mod liczy opis dynamiczny)
 
@@ -639,7 +648,7 @@ func _host_table() -> Dictionary:
 		"hud_text", "hud_remove", "ui_held", "ui_set_held", "input_bind", "randf", "randi",
 		"entity_spawn", "entity_remove", "entity_exists", "entity_get", "entity_list", "entity_set",
 		"entity_damage", "entity_tag", "entity_data", "item_drop", "entity_brain", "entity_mount", "entity_dismount",
-		"entity_nearest_player", "world_light",
+		"entity_nearest_player", "world_light", "command_register", "chat_send", "role_get", "role_set",
 		"player_id", "player_name", "player_is_host", "players_list", "set_ctx", "get_ctx",
 		"pstorage_get", "pstorage_set", "players_accept", "players_kick", "is_multiplayer", "hash",
 		"block_state", "block_set_state", "block_with_state", "block_base", "block_data", "block_set_data",
@@ -1415,6 +1424,33 @@ func _h_entity_set(id, key, v) -> void:
 				e.velocity += Vector3(v)
 			elif e is RigidBody3D:
 				(e as RigidBody3D).apply_central_impulse(Vector3(v) * (e as RigidBody3D).mass)
+
+
+func _h_command_register(mod_id, name, def) -> void:
+	var d: Dictionary = def if def is Dictionary else {}
+	mod_commands[str(name).to_lower()] = {"description": str(d.get("description", "")), "usage": str(d.get("usage", "/" + str(name))),
+		"permission": str(d.get("permission", "player")), "mod": str(mod_id)}
+
+
+## Wiadomość czatu od serwera: do wszystkich albo do jednego gracza (to >= 0); who = nadawca (puste: serwer).
+func _h_chat_send(text, color, to, who) -> void:
+	if main:
+		main.broadcast_chat(str(who) if who != null else "", str(text), str(color) if color != null else "#cfe0f0", int(to) if to != null else -1)
+
+
+func _h_role_get(peer) -> String:
+	if main == null:
+		return "player"
+	return main.role_of(int(peer) if peer != null and int(peer) >= 0 else ctx)
+
+
+func _h_role_set(peer_or_account, role) -> void:
+	if main == null or not Commands.ROLES.has(str(role)):
+		return
+	var account := str(peer_or_account)
+	if (peer_or_account is int or peer_or_account is float) and sessions.has(int(peer_or_account)):
+		account = (sessions[int(peer_or_account)] as Session).account
+	main.set_role(account, str(role))
 
 
 func _h_entity_brain(type) -> void:

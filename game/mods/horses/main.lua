@@ -48,3 +48,16 @@ engine.on("player.join", function()
 	local id = engine.entities.spawn("horse", p + Vector3(2.5, 0.5, 0))
 	if id and id > 0 then tame(id) end
 end)
+
+-- polecenie: oswojony koń obok gracza (moderator i administrator)
+engine.commands.register("kon", {
+	description = "oswojony koń obok ciebie", usage = "/kon [siwy]", permission = "moderator",
+	fn = function(ctx)
+		local kind = ctx.args[1] == "siwy" and "horse_white" or "horse"
+		local id = engine.entities.spawn(kind, engine.player.position() + Vector3(2, 0.5, 0))
+		if not id or id < 0 then return "Nie udało się" end
+		tame(id)
+		engine.chat.send(ctx.name .. " przywołał konia", { color = "#c8a070" })
+		return "Koń czeka obok"
+	end,
+})

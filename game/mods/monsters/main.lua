@@ -32,3 +32,14 @@ engine.on("player.death", function(e)
 		if engine.entities.target(id) == engine.player.id() then engine.entities.set_state(id, "wander", 5) end
 	end
 end)
+
+-- polecenie dla administratora: zombie przed graczem (test walki)
+engine.commands.register("zombie", {
+	description = "przywołuje zombie przed tobą", usage = "/zombie [ile]", permission = "admin",
+	fn = function(ctx)
+		local n = math.min(tonumber(ctx.args[1]) or 1, 10)
+		local p = engine.player.position()
+		for i = 1, n do engine.entities.spawn("zombie", p + Vector3(math.cos(i) * 4, 0.5, math.sin(i) * 4)) end
+		return "Przywołano zombie: " .. n
+	end,
+})

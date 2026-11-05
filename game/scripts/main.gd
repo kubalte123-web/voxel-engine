@@ -109,6 +109,9 @@ func _ready() -> void:
 	hud.main = self
 	hud.touch_mode = touch_mode
 	ui.add_child(hud)
+	chat = Chat.new()
+	chat.main = self
+	ui.add_child(chat)
 	if touch_mode:
 		touch = TouchControls.new()
 		touch.player = player
@@ -255,14 +258,66 @@ func accept_player(p: int, account: String) -> String:
 
 
 func _announce(text: String) -> void:
+	broadcast_chat("", text, "#ffe08a")
+
+
+# ---------- czat ----------
+
+var chat: Chat
+
+
+## U siebie: wpisany tekst z czatu (polecenie albo wiadomość).
+func send_chat(text: String) -> void:
+	if text.begins_with("/"):
+		run_command_local(text, chat)
+	elif Net.is_client():
+		Net.c_chat.rpc_id(1, text)
+	else:
+		chat_from(Mods.local_peer, text)
+
+
+## Serwer: wiadomość gracza p. Hak "chat.message" może ją zmienić (ctx.text, ctx.name, ctx.color) albo zatrzymać.
+func chat_from(p: int, text: String) -> void:
+	var s: Session = Mods.sessions.get(p)
+	if s == null or not s.logged_in:
+		return
+	text = text.strip_edges().left(256)
+	if text == "":
+		return
+	if text.begins_with("/"):
+		var r := run_command(p, text)
+		if r != "":
+			send_system(p, r)
+		return
+	var ctx: Dictionary = Mods.as_player(p, func(): return Mods.before("chat.message", {"player": p, "name": s.account, "text": text, "color": ""}))
+	if ctx.get("cancel", false):
+		return
+	broadcast_chat(str(ctx.get("name", s.account)), str(ctx.get("text", text)), str(ctx.get("color", "")))
+	Mods.as_player(p, func(): Mods.after("chat.message", ctx))
+
+
+## Serwer: linijka czatu do wszystkich (who = "" to wiadomość serwera) albo tylko do gracza `to`.
+func broadcast_chat(who: String, text: String, color := "", to := -1) -> void:
+	if Net.mode == "dedicated" or OS.get_cmdline_user_args().has("--chat-log"):
+		print("CZAT ", ("<%s> " % who) if who != "" else "", text)
 	for q in Mods.sessions:
 		var s: Session = Mods.sessions[q]
-		if not s.logged_in:
+		if not s.logged_in or (to >= 0 and q != to):
 			continue
 		if s.local:
-			hud.notify(text)
+			if Net.mode != "dedicated":
+				show_chat(who, text, color)
 		else:
-			Net.send_notify(q, text)
+			Net.s_chat.rpc_id(q, who, text, color)
+
+
+func send_system(p: int, text: String) -> void:
+	broadcast_chat("", text, "#cfe0f0", p)
+
+
+func show_chat(who: String, text: String, color: String) -> void:
+	if chat:
+		chat.add_line(text, Color.from_string(color, Color(1, 1, 1)) if color != "" else Color(1, 1, 1), who)
 
 
 ## Serwer: klient wczytał świat. Tworzymy jego postać, wysyłamy stan i uruchamiamy logowanie.
@@ -602,6 +657,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		open_console()
 		return
+	if event is InputEventKey and event.pressed and not event.echo and (event.keycode == KEY_T or event.keycode == KEY_ENTER or event.keycode == KEY_SLASH) \
+			and console == null and windows.is_empty() and pause_menu == null and chat and not chat.open:
+		get_viewport().set_input_as_handled()
+		chat.open_input("/" if event.keycode == KEY_SLASH else "")
+		return
 	if event.is_action_pressed("ui_cancel") and pause_menu == null and windows.is_empty():
 		get_viewport().set_input_as_handled()
 		open_pause()
@@ -679,7 +739,30 @@ func role_of(p: int) -> String:
 		return "player"
 	if s.local and Net.mode != "dedicated":
 		return "admin"
-	return str(GameState.current.get("roles", {}).get(s.account, "player"))
+	return role_of_account(s.account)
+
+
+func role_of_account(account: String) -> String:
+	var roles: Dictionary = GameState.current.get("roles", {}) if GameState.current.get("roles") is Dictionary else {}
+	for a in Net.admins:
+		if str(a).to_lower() == account.to_lower():
+			return "admin"
+	return str(roles.get(account, "player"))
+
+
+## Rola konta zapisywana w świecie (world.json); działa od razu, także dla grających.
+func set_role(account: String, role: String) -> void:
+	if not GameState.current.get("roles") is Dictionary:
+		GameState.current["roles"] = {}
+	if role == "player":
+		GameState.current.roles.erase(account)
+	else:
+		GameState.current.roles[account] = role
+	if not GameState.current_dir.is_empty():
+		GameState.write_info(GameState.current_dir, GameState.current)
+	var q := Commands.find_player(account)
+	if q >= 0:
+		send_system(q, "Twoja rola: %s" % role)
 
 
 # ---------- okna modów ----------
@@ -1208,6 +1291,11 @@ func _autotest_client(dir: String) -> void:
 			player.break_block()
 			await _wait(1.5)
 			print("KLIENT zniszczył at=", at, " blok=", Blocks.key(world.get_block(at)))
+	if opt.has("say"):
+		for t in str(opt.say).split("|"):
+			send_chat(t)
+			await _wait(1.0)
+		print("KLIENT czat: ", chat.text_lines())
 	if opt.has("walk"):
 		player.global_position += Vector3(float(opt.walk), 1.0, 0.0)
 		await _wait(1.0)
@@ -1612,6 +1700,36 @@ func _test_perf() -> void:
 
 
 ## Test logiki bloków: skrzynia (kierunek, kontener), piec (dane, plan, świecenie), uprawy (losowe, sąsiad), dźwięki.
+## Czat i polecenia: wiadomość, /help, /give, /time, /tp, polecenie moda, hak chat.message.
+func _test_chat(dir: String) -> void:
+	await _wait_loaded()
+	await _wait(0.5)
+	Mods.console_exec(Mods.local_peer, "engine.hooks.before('chat.message', function(c) c.text = c.text:gsub('brzydkie', '***') end)")
+	send_chat("Cześć wszystkim! brzydkie słowo")
+	send_chat("/help")
+	var before := _inv_total()
+	send_chat("/give stone 5")
+	print("CZAT /give: przedmiotów ", before, " -> ", _inv_total())
+	send_chat("/time night")
+	print("CZAT /time: ", time_of_day)
+	var y0 := player.global_position.y
+	send_chat("/tp ~ ~3 ~")
+	print("CZAT /tp: wysokość +", snappedf(player.global_position.y - y0, 0.01))
+	send_chat("/zombie")
+	send_chat("/kon")
+	send_chat("/nieznane")
+	send_chat("/me macha ręką")
+	await _wait(0.5)
+	print("CZAT linie: ", chat.text_lines())
+	print("CZAT polecenia modów: ", Mods.mod_commands.keys(), " rola=", role_of(Mods.local_peer))
+	time_of_day = 12.0
+	chat.open_input("/gi")
+	await _wait(0.5)
+	await _shot(dir, "ch1_chat")
+	chat.close_input()
+	get_tree().quit()
+
+
 ## Stworzenia: jazda na koniu, wrogie zombie z modelem GLB, mózg w Lua (płonięcie w słońcu).
 func _test_creatures(dir: String) -> void:
 	await _wait_loaded()
@@ -1975,6 +2093,9 @@ func _autotest(dir: String) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--creatures-only"):
 		await _test_creatures(dir)
+		return
+	if OS.get_cmdline_user_args().has("--chat-only"):
+		await _test_chat(dir)
 		return
 	if OS.get_cmdline_user_args().has("--shapes-only"):
 		await _test_shapes(dir)

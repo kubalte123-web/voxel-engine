@@ -451,6 +451,20 @@ function engine.entities.nearest_player(pos, radius) end
 ---@param pos any
 function engine.entities.drop(item, count, pos) end
 
+---@class engine.commands
+engine.commands = {}
+
+---@param name any
+---@param def any
+function engine.commands.register(name, def) end
+
+---@class engine.chat
+engine.chat = {}
+
+---@param text any
+---@param opts any
+function engine.chat.send(text, opts) end
+
 ---@class engine.world
 engine.world = {}
 
@@ -491,6 +505,14 @@ function engine.world.set_time(h) end
 engine.players = {}
 
 function engine.players.list() end
+
+--- rola gracza: "player" | "moderator" | "admin" (gospodarz gry jest administratorem)
+---@param id any
+function engine.players.role(id) end
+
+---@param id_or_account any
+---@param role any
+function engine.players.set_role(id_or_account, role) end
 
 --- wywołuje fn(gracz) w imieniu każdego zalogowanego gracza (np. głód co sekundę)
 ---@param fn any

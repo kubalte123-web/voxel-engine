@@ -266,6 +266,8 @@ func _dedicated(world_name: String, args: PackedStringArray) -> void:
 			port = int(a.trim_prefix("--port="))
 		if a.begins_with("--seed="):
 			seed_text = a.trim_prefix("--seed=")
+		if a.begins_with("--admin="):
+			Net.admins = Array(a.trim_prefix("--admin=").split(",", false))
 		# --enable=accounts,crafting_discovery: mody włączone tylko dla tego uruchomienia (bez zapisu ustawień)
 		if a.begins_with("--enable="):
 			for id in a.trim_prefix("--enable=").split(","):
@@ -381,7 +383,7 @@ func _autotest(dir: String) -> void:
 				if ModManager.manifests.has(id):
 					ModManager.enabled[id] = true
 	# testy wybranych funkcji: od razu świat testowy, bez zrzutów menu
-	if args.has("--craft-only") or args.has("--light-only") or args.has("--blocks-only") or args.has("--perf-only") or args.has("--alchemy-only") or args.has("--fishing-only") or args.has("--gun-only") or args.has("--api-only") or args.has("--console-only") or args.has("--shapes-only") or args.has("--creatures-only"):
+	if args.has("--craft-only") or args.has("--light-only") or args.has("--blocks-only") or args.has("--perf-only") or args.has("--alchemy-only") or args.has("--fishing-only") or args.has("--gun-only") or args.has("--api-only") or args.has("--console-only") or args.has("--shapes-only") or args.has("--creatures-only") or args.has("--chat-only"):
 		GameState.start(GameState.create_world("Test", "42"))
 		return
 	await _shot(dir, "m1_menu")

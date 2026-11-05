@@ -225,6 +225,23 @@ local function block_update(key, ctx)
 	end
 end
 
+-- polecenia modów: nazwa -> {fn, owner}
+local command_fns = {}
+
+local function command(name, ctx)
+	local c = command_fns[name]
+	if not c then return nil end
+	if guard.depth == 0 then guard.tripped = false end
+	local args = to_lua(ctx)
+	local ok, res = guarded(c.owner, LIMIT_CALL, c.fn, args)
+	if not ok then
+		if res ~= nil then host.report_error(c.owner, "polecenie /" .. name .. ": " .. tostring(res)) end
+		return "Błąd w poleceniu /" .. name
+	end
+	if res == nil then return nil end
+	return tostring(res)
+end
+
 -- mózgi stworzeń: rodzaj -> lista {fn, owner}
 local entity_handlers = {}
 
@@ -902,6 +919,26 @@ local function make_api(mod_id)
 		drop = function(item, count, pos) return host.item_drop(item, count or 1, VF(pos)) end,
 	}
 
+	-- polecenia czatu: /nazwa argumenty; fn(ctx) z ctx.player, ctx.name, ctx.args (lista słów), ctx.text, ctx.role
+	-- zwraca tekst odpowiedzi dla gracza; permission: "player" | "moderator" | "admin"
+	E.commands = {
+		register = function(name, def)
+			assert(type(name) == "string" and type(def) == "table" and type(def.fn) == "function",
+				"commands.register: podaj nazwę i tabelę z polem fn")
+			name = name:lower():gsub("^/", "")
+			command_fns[name] = { fn = def.fn, owner = mod_id }
+			host.command_register(mod_id, name, to_godot({ description = def.description, usage = def.usage, permission = def.permission }))
+		end,
+	}
+
+	-- czat: send(tekst, {player = id (tylko on), color = "#rrggbb", from = "nadawca"})
+	E.chat = {
+		send = function(text, opts)
+			opts = opts or {}
+			host.chat_send(tostring(text), opts.color, opts.player or -1, opts.from)
+		end,
+	}
+
 	E.world = {
 		get_block = function(pos) return host.get_block(VI(pos)) end,
 		-- promień od punktu w kierunku: {position, normal, place_pos, point, distance, block, key} albo nil
@@ -926,6 +963,9 @@ local function make_api(mod_id)
 	-- klika, naciska klawisz); engine.player.* dotyczy właśnie jego
 	E.players = {
 		list = function() return to_lua(host.players_list()) end,
+		-- rola gracza: "player" | "moderator" | "admin" (gospodarz gry jest administratorem)
+		role = function(id) return host.role_get(id or -1) end,
+		set_role = function(id_or_account, role) host.role_set(id_or_account, role) end,
 		-- wywołuje fn(gracz) w imieniu każdego zalogowanego gracza (np. głód co sekundę)
 		each = function(fn)
 			local prev = host.get_ctx()
@@ -1089,4 +1129,4 @@ local function make_env(mod_id)
 end
 make_env_ref = make_env
 
-return { dispatch = dispatch, make_env = make_env, input = input, window_action = window_action, finalize = finalize, run_chunk = run_chunk, block_update = block_update, entity_think = entity_think, projectile_hit = projectile_hit, item_tooltip = item_tooltip, console = console }
+return { dispatch = dispatch, make_env = make_env, input = input, window_action = window_action, finalize = finalize, run_chunk = run_chunk, block_update = block_update, entity_think = entity_think, command = command, projectile_hit = projectile_hit, item_tooltip = item_tooltip, console = console }

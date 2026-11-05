@@ -846,6 +846,41 @@ engine.ui.window({
 
 Okno o tym samym `id` otwarte ponownie odświeża się na miejscu (tekst wpisany w pola zostaje).
 
+## Czat, polecenia i uprawnienia
+
+T albo Enter otwiera czat (na telefonie: pauza → Czat). Tekst od `/` to polecenie. Wbudowane: `/help`, `/list`,
+`/me`, `/mods`, `/tp`, `/give`, `/time`, `/kick`, `/op`, `/deop`, `/role`, `/reload`.
+
+Role: `player` < `moderator` < `admin`. Gospodarz gry (gra lokalna i serwer z oknem) jest administratorem,
+na serwerze dedykowanym administratorów podaje się przy starcie: `--admin=konto1,konto2`. Pozostałe role nadaje
+`/op`, `/role konto moderator` albo mod (`engine.players.set_role`); zapisują się w świecie.
+
+```lua
+engine.commands.register("dom", {
+	description = "przenosi do domu", usage = "/dom [ustaw]", permission = "player",
+	fn = function(ctx)            -- ctx.player, ctx.name, ctx.args (lista słów), ctx.text, ctx.role
+		if ctx.args[1] == "ustaw" then
+			engine.player.storage.set("dom", engine.player.position())
+			return "Dom ustawiony"
+		end
+		local p = engine.player.storage.get("dom")
+		if not p then return "Najpierw /dom ustaw" end
+		engine.player.teleport(p)
+	end,                          -- zwrócony tekst widzi tylko ten gracz
+})
+
+engine.chat.send("Burza nadciąga!", { color = "#ffd060" })            -- do wszystkich
+engine.chat.send("Tylko dla ciebie", { player = id, from = "Strażnik" })
+engine.hooks.before("chat.message", function(c)                       -- c.player, c.name, c.text, c.color
+	c.text = c.text:gsub("brzydkie", "***")                           -- albo c.cancel = true
+end)
+engine.hooks.before("command", function(c)                            -- c.player, c.name, c.args; c.cancel, c.reply
+	if c.name == "tp" and engine.world.time() > 20 then c.cancel = true c.reply = "Nocą nie wolno" end
+end)
+engine.players.role(id)                    -- "player" | "moderator" | "admin"
+engine.players.set_role("Ola", "moderator")
+```
+
 ## Gra wieloosobowa
 
 Do 8 graczy. Serwer jest jedynym miejscem, gdzie działają skrypty modów, ciecze, stworzenia i zapis świata.
