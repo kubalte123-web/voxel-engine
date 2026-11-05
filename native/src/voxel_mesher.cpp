@@ -18,7 +18,8 @@ constexpr int S = 32;
 constexpr int P = S + 2;
 
 constexpr uint8_t AIR = 0;
-constexpr int P_OPAQUE = 1, P_CROSS = 2, P_SOLID = 4, P_LIQUID = 8, P_THIN = 16, P_MODEL = 32;
+constexpr int P_OPAQUE = 1, P_CROSS = 2, P_SOLID = 4, P_LIQUID = 8, P_THIN = 16, P_MODEL = 32, P_BOXES = 64;
+constexpr int SHAPE_STRIDE = 11;
 // układ danych z game/scripts/content/worldgen_spec.gd
 constexpr int BS = 21, FS = 11, OS = 6;
 constexpr int CG = 11; // punkty siatki szumu jaskiń na oś
@@ -76,6 +77,7 @@ void VoxelMesher::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("prepare", "cpos", "own", "neighbors"), &VoxelMesher::prepare);
 	ClassDB::bind_method(D_METHOD("build", "padded", "plight"), &VoxelMesher::build);
 	ClassDB::bind_method(D_METHOD("set_light_props", "lprops"), &VoxelMesher::set_light_props);
+	ClassDB::bind_method(D_METHOD("set_shapes", "index", "boxes"), &VoxelMesher::set_shapes);
 	ClassDB::bind_method(D_METHOD("light", "cpos", "chunks", "skyh", "margin"), &VoxelMesher::light);
 	ClassDB::bind_method(D_METHOD("heights", "x0", "z0", "step", "n"), &VoxelMesher::heights);
 }
@@ -152,6 +154,11 @@ VoxelMesher::Col VoxelMesher::column(int x, int z) const {
 }
 
 void VoxelMesher::set_light_props(const PackedInt32Array &lp) { copy_array(lprops, lp); }
+
+void VoxelMesher::set_shapes(const PackedInt32Array &index, const PackedFloat32Array &boxes) {
+	copy_array(shape_index, index);
+	shape_boxes.assign(boxes.ptr(), boxes.ptr() + boxes.size());
+}
 
 Array VoxelMesher::light(const Vector3i &cpos, const Array &chunks, const PackedInt32Array &skyh, int M) const {
 	const int N = S + 2 * M;
@@ -712,6 +719,68 @@ Array VoxelMesher::build(const PackedByteArray &padded, const PackedByteArray &p
 						}
 						static const int Q[6] = { 0, 2, 1, 0, 3, 2 };
 						for (int i = 0; i < 6; i++) indices.push_back(base + Q[i]);
+					}
+					continue;
+				}
+				if (bp & P_BOXES) {
+					// ---------- kształt z prostopadłościanów (półblok, schody, płot, szyba) ----------
+					const int si = int(b) * SHAPE_STRIDE;
+					if (si + SHAPE_STRIDE > int(shape_index.size())) continue;
+					const float sk = float(double(lt(ci) >> 4) / 15.0), bl = float(double(lt(ci) & 15) / 15.0);
+					const bool solid = (bp & P_SOLID) != 0;
+					const int group = shape_index[si + 2];
+					static const int CONN[4][2] = { { 0, -1 }, { 1, 0 }, { 0, 1 }, { -1, 0 } };  // N, E, S, W
+					auto emit_box = [&](const float *bx) {
+						const float lo[3] = { bx[0] / 16.0f, bx[1] / 16.0f, bx[2] / 16.0f };
+						const float hi[3] = { bx[3] / 16.0f, bx[4] / 16.0f, bx[5] / 16.0f };
+						for (int f = 0; f < 6; f++) {
+							const int *n = NORMALS[f];
+							const int axis = n[0] != 0 ? 0 : (n[1] != 0 ? 1 : 2);
+							const bool on_edge = (n[axis] > 0) ? hi[axis] >= 1.0f : lo[axis] <= 0.0f;
+							if (on_edge && op[idx(x + n[0], y + n[1], z + n[2])]) continue;
+							const int tile = tile_of(b * 6 + f);
+							const int base = verts.size();
+							Vector3 v[4];
+							for (int k = 0; k < 4; k++) {
+								const int *c = CORNERS[f][k];
+								const float lx = c[0] ? hi[0] : lo[0], ly = c[1] ? hi[1] : lo[1], lz = c[2] ? hi[2] : lo[2];
+								v[k] = Vector3(float(x - 1) + lx, float(y - 1) + ly, float(z - 1) + lz);
+								verts.push_back(v[k]);
+								norms.push_back(Vector3(float(n[0]), float(n[1]), float(n[2])));
+								float u, w;
+								switch (f) {
+									case 0: u = 1.0f - lz; w = 1.0f - ly; break;
+									case 1: u = lz; w = 1.0f - ly; break;
+									case 2: u = lx; w = lz; break;
+									case 3: u = lx; w = 1.0f - lz; break;
+									case 4: u = lx; w = 1.0f - ly; break;
+									default: u = 1.0f - lx; w = 1.0f - ly; break;
+								}
+								uvs.push_back(uv_of(tile, u, w));
+								cols.push_back(Color(FACE_SHADE[f], sk, bl));
+							}
+							static const int Q[6] = { 0, 2, 1, 0, 3, 2 };
+							for (int i = 0; i < 6; i++) {
+								indices.push_back(base + Q[i]);
+								if (solid) coll.push_back(v[Q[i]]);
+							}
+						}
+					};
+					auto emit_list = [&](int off, int cnt) {
+						for (int i = 0; i < cnt; i++) {
+							const int o = (off + i) * 6;
+							if (o + 6 <= int(shape_boxes.size())) emit_box(&shape_boxes[o]);
+						}
+					};
+					emit_list(shape_index[si], shape_index[si + 1]);
+					for (int d = 0; d < 4; d++) {
+						const int cnt = shape_index[si + 4 + d * 2];
+						if (cnt <= 0) continue;
+						const int ni = idx(x + CONN[d][0], y, z + CONN[d][1]);
+						const uint8_t nb = p[ni];
+						const int nsi = int(nb) * SHAPE_STRIDE;
+						const int ngroup = (nsi + SHAPE_STRIDE <= int(shape_index.size())) ? shape_index[nsi + 2] : 0;
+						if (op[ni] || (group > 0 && ngroup == group)) emit_list(shape_index[si + 3 + d * 2], cnt);
 					}
 					continue;
 				}

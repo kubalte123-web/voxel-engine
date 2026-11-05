@@ -81,7 +81,7 @@ static func place(actor: Node3D, world: World, entities: EntityManager, target: 
 	var block: int = actor.current_block()
 	if block <= 0:
 		return
-	block = oriented(block, actor.yaw)
+	block = oriented(block, actor.yaw, target.normal, target.get("point"))
 	var ctx := Mods.before("block.place", {"pos": p, "block": block, "slot": actor.selected + 1,
 		"item": str(actor.current_item().get("item", ""))})
 	if ctx.get("cancel", false):
@@ -101,14 +101,26 @@ static func place(actor: Node3D, world: World, entities: EntityManager, target: 
 
 
 ## Blok ze stanem „facing” stawiamy przodem do gracza (chyba że definicja ma place_facing = false).
-static func oriented(block: int, yaw: float) -> int:
+## place_facing = "away" (schody): wysoka część z dala od gracza. Stan half: górna połowa, gdy gracz
+## klika w spód bloku albo w górną połowę ściany bocznej.
+static func oriented(block: int, yaw: float, normal: Vector3i = Vector3i.UP, point: Variant = null) -> int:
 	var d := Blocks.reg.def_of(Blocks.reg.base_of(block))
 	var states: Variant = d.get("states")
-	if not states is Dictionary or not states.has("facing") or not bool(d.get("place_facing", true)):
+	if not states is Dictionary:
 		return block
-	var v := Vector3(sin(yaw), 0, cos(yaw))   # od bloku w stronę gracza
-	var dir := ("east" if v.x > 0 else "west") if absf(v.x) > absf(v.z) else ("south" if v.z > 0 else "north")
-	return Blocks.reg.with_state(block, {"facing": dir})
+	var changes := {}
+	var pf: Variant = d.get("place_facing", true)
+	if states.has("facing") and not (pf is bool and pf == false):
+		var v := Vector3(sin(yaw), 0, cos(yaw))   # od bloku w stronę gracza
+		if str(pf) == "away":
+			v = -v
+		changes["facing"] = ("east" if v.x > 0 else "west") if absf(v.x) > absf(v.z) else ("south" if v.z > 0 else "north")
+	if states.has("half"):
+		var top := normal.y < 0
+		if normal.y == 0 and point is Vector3:
+			top = fposmod((point as Vector3).y, 1.0) > 0.5
+		changes["half"] = "top" if top else "bottom"
+	return Blocks.reg.with_state(block, changes) if not changes.is_empty() else block
 
 
 static func attack(actor: Node3D, node: Node3D) -> void:

@@ -26,6 +26,17 @@ const BOTTOM_UV := [Vector2(0, 0), Vector2(1, 0), Vector2(1, 1), Vector2(0, 1)]
 const AO_LEVELS := [0.42, 0.62, 0.8, 1.0]
 const FACE_SHADE := [0.86, 0.86, 1.0, 0.62, 0.92, 0.92]
 const PLANT_SHADE := 0.9
+const SHAPE_STRIDE := 11
+const CONN := [Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0)]  # N, E, S, W
+
+## Kształty z prostopadłościanów (ustawiane z rejestru, jak w rdzeniu C++).
+static var shape_index := PackedInt32Array()
+static var shape_boxes := PackedFloat32Array()
+
+
+static func set_shapes(index: PackedInt32Array, boxes: PackedFloat32Array) -> void:
+	shape_index = index
+	shape_boxes = boxes
 
 
 static func build(padded: PackedByteArray, tiles: PackedInt32Array, cols_n: int, rows_n: int, props: PackedInt32Array,
@@ -81,6 +92,9 @@ static func build(padded: PackedByteArray, tiles: PackedInt32Array, cols_n: int,
 				var ci := x + P * (y + P * z)
 				if pr & Blocks.THIN:
 					_thin(x, y, z, b, tiles, cols_n, iu, iv, eps, lt[ci], verts, norms, uvs, cols, idx)
+					continue
+				if pr & Blocks.BOXES:
+					_boxes(x, y, z, b, pr, padded, op, tiles, cols_n, iu, iv, eps, lt[ci], verts, norms, uvs, cols, idx, coll)
 					continue
 				if pr & Blocks.CROSS:
 					_cross(x, y, z, tiles[b * 6], cols_n, iu, iv, eps, lt[ci], verts, norms, uvs, cols, idx)
@@ -259,6 +273,69 @@ static func _liquid(x: int, y: int, z: int, lq: PackedInt32Array, op: PackedByte
 
 ## Roślina: dwie skrzyżowane ściany, każda widoczna z obu stron. Bez kolizji.
 ## Cienki słupek (pochodnia): 2/16 szerokości i 10/16 wysokości, światło z własnej komórki.
+static func _boxes(x: int, y: int, z: int, b: int, pr: int, padded: PackedByteArray, op: PackedByteArray,
+		tiles: PackedInt32Array, cols_n: int, iu: float, iv: float, eps: float, l: int,
+		verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array,
+		cols: PackedColorArray, idx: PackedInt32Array, coll: PackedVector3Array) -> void:
+	var si := b * SHAPE_STRIDE
+	if si + SHAPE_STRIDE > shape_index.size():
+		return
+	var sk := float(l >> 4) / 15.0
+	var bl := float(l & 15) / 15.0
+	var solid := (pr & Blocks.SOLID) != 0
+	var group := shape_index[si + 2]
+	var lists := [[shape_index[si], shape_index[si + 1]]]
+	for d in 4:
+		var cnt := shape_index[si + 4 + d * 2]
+		if cnt <= 0:
+			continue
+		var cdir: Vector2i = CONN[d]
+		var ni := (x + cdir.x) + P * (y + P * (z + cdir.y))
+		var nb := padded[ni]
+		var nsi := nb * SHAPE_STRIDE
+		var ngroup := shape_index[nsi + 2] if nsi + SHAPE_STRIDE <= shape_index.size() else 0
+		if op[ni] != 0 or (group > 0 and ngroup == group):
+			lists.append([shape_index[si + 3 + d * 2], cnt])
+	for li in lists:
+		for bi in int(li[1]):
+			var o: int = (int(li[0]) + bi) * 6
+			if o + 6 > shape_boxes.size():
+				continue
+			var lo := Vector3(shape_boxes[o] / 16.0, shape_boxes[o + 1] / 16.0, shape_boxes[o + 2] / 16.0)
+			var hi := Vector3(shape_boxes[o + 3] / 16.0, shape_boxes[o + 4] / 16.0, shape_boxes[o + 5] / 16.0)
+			for f in 6:
+				var n: Vector3i = NORMALS[f]
+				var axis := 0 if n.x != 0 else (1 if n.y != 0 else 2)
+				var on_edge: bool = hi[axis] >= 1.0 if n[axis] > 0 else lo[axis] <= 0.0
+				if on_edge and op[(x + n.x) + P * ((y + n.y) + P * (z + n.z))] != 0:
+					continue
+				var t := tiles[b * 6 + f]
+				var base := verts.size()
+				var corners: Array = CORNERS[f]
+				for k in 4:
+					var c: Vector3i = corners[k]
+					var lx: float = hi.x if c.x == 1 else lo.x
+					var ly: float = hi.y if c.y == 1 else lo.y
+					var lz: float = hi.z if c.z == 1 else lo.z
+					verts.append(Vector3(float(x - 1) + lx, float(y - 1) + ly, float(z - 1) + lz))
+					norms.append(Vector3(n))
+					var u := 0.0
+					var w := 0.0
+					match f:
+						0: u = 1.0 - lz; w = 1.0 - ly
+						1: u = lz; w = 1.0 - ly
+						2: u = lx; w = lz
+						3: u = lx; w = 1.0 - lz
+						4: u = lx; w = 1.0 - ly
+						_: u = 1.0 - lx; w = 1.0 - ly
+					uvs.append(Vector2((t % cols_n + clampf(u, eps, 1.0 - eps)) * iu, (t / cols_n + clampf(w, eps, 1.0 - eps)) * iv))
+					cols.append(Color(FACE_SHADE[f], sk, bl))
+				for q in [0, 2, 1, 0, 3, 2]:
+					idx.append(base + q)
+					if solid:
+						coll.append(verts[base + q])
+
+
 static func _thin(x: int, y: int, z: int, b: int, tiles: PackedInt32Array, cols_n: int, iu: float, iv: float, eps: float,
 		l: int, verts: PackedVector3Array, norms: PackedVector3Array, uvs: PackedVector2Array,
 		cols: PackedColorArray, idx: PackedInt32Array) -> void:

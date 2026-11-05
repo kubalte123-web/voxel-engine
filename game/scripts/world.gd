@@ -88,9 +88,11 @@ func _ready() -> void:
 		native = ClassDB.instantiate("VoxelMesher")
 		native.call("configure", terrain.native_noises(), terrain.spec, tiles, props, reg.liquid, Registry.ATLAS_COLS, reg.atlas_rows)
 		native.call("set_light_props", reg.lprops)
+		native.call("set_shapes", reg.shape_index, reg.shape_boxes)
 		mesher_name = "C++"
 	else:
 		light_margin = 6  # wersja w GDScript (przeglądarka): mniejszy zasięg światła spoza chunka
+	GDMesher.set_shapes(reg.shape_index, reg.shape_boxes)
 	if OS.has_feature("web"):
 		threaded = false
 	max_queued = maxi(2, OS.get_processor_count())
@@ -696,7 +698,12 @@ func raycast(origin: Vector3, dir: Vector3, max_dist: float, with_liquids: bool 
 	while t <= max_dist:
 		var hb := get_block(pos)
 		if hb != Blocks.AIR and (with_liquids or not reg.is_liquid(hb)) and (not solid_only or (reg.props[hb] & Registry.SOLID) != 0 or reg.is_liquid(hb)):
-			return {"hit": true, "pos": pos, "normal": normal, "dist": t}
+			if (reg.props[hb] & Registry.BOXES) == 0:
+				return {"hit": true, "pos": pos, "normal": normal, "dist": t, "point": origin + dir * t}
+			# kształt z prostopadłościanów: trafienie tylko w jego części (półblok ma wolną połowę)
+			var bh := _ray_boxes(pos, origin, dir)
+			if not bh.is_empty() and float(bh.dist) <= max_dist:
+				return {"hit": true, "pos": pos, "normal": bh.normal, "dist": bh.dist, "point": origin + dir * float(bh.dist)}
 		if t_max.x < t_max.y and t_max.x < t_max.z:
 			pos.x += step.x; t = t_max.x; t_max.x += t_delta.x; normal = Vector3i(-step.x, 0, 0)
 		elif t_max.y < t_max.z:
@@ -704,6 +711,82 @@ func raycast(origin: Vector3, dir: Vector3, max_dist: float, with_liquids: bool 
 		else:
 			pos.z += step.z; t = t_max.z; t_max.z += t_delta.z; normal = Vector3i(0, 0, -step.z)
 	return {"hit": false}
+
+
+## Prostopadłościany kształtu w komórce p (0..1 w bloku), z połączeniami z sąsiadami (płot, szyba).
+func shape_aabbs(p: Vector3i) -> Array[AABB]:
+	var out: Array[AABB] = []
+	var b := get_block(p)
+	var si := b * Registry.SHAPE_STRIDE
+	var idx := reg.shape_index
+	if (reg.props[b] & Registry.BOXES) == 0 or si + Registry.SHAPE_STRIDE > idx.size():
+		return out
+	var lists := [[idx[si], idx[si + 1]]]
+	var group := idx[si + 2]
+	for d in 4:
+		var cnt := idx[si + 4 + d * 2]
+		if cnt <= 0:
+			continue
+		var cd: Vector2i = GDMesher.CONN[d]
+		var nb := get_block(p + Vector3i(cd.x, 0, cd.y))
+		var nsi := nb * Registry.SHAPE_STRIDE
+		var ng := idx[nsi + 2] if nsi + Registry.SHAPE_STRIDE <= idx.size() else 0
+		if (reg.props[nb] & Registry.OPAQUE) != 0 or (group > 0 and ng == group):
+			lists.append([idx[si + 3 + d * 2], cnt])
+	var bx := reg.shape_boxes
+	for li in lists:
+		for i in int(li[1]):
+			var o: int = (int(li[0]) + i) * 6
+			var lo := Vector3(bx[o], bx[o + 1], bx[o + 2]) / 16.0
+			out.append(AABB(lo, Vector3(bx[o + 3], bx[o + 4], bx[o + 5]) / 16.0 - lo))
+	return out
+
+
+func _ray_boxes(p: Vector3i, origin: Vector3, dir: Vector3) -> Dictionary:
+	var best := INF
+	var nrm := Vector3i.ZERO
+	for a in shape_aabbs(p):
+		var lo := Vector3(p) + a.position
+		var hi := lo + a.size
+		var t0 := -INF
+		var t1 := INF
+		var n0 := Vector3i.ZERO
+		var ok := true
+		for k in 3:
+			if absf(dir[k]) < 0.0000001:
+				if origin[k] < lo[k] or origin[k] > hi[k]:
+					ok = false
+					break
+				continue
+			var ta := (lo[k] - origin[k]) / dir[k]
+			var tb := (hi[k] - origin[k]) / dir[k]
+			var nk := Vector3i.ZERO
+			nk[k] = -1 if dir[k] > 0 else 1
+			if ta > tb:
+				var tmp := ta
+				ta = tb
+				tb = tmp
+			if ta > t0:
+				t0 = ta
+				n0 = nk
+			t1 = minf(t1, tb)
+		if ok and t0 <= t1 and t1 >= 0.0 and t0 < best:
+			best = maxf(t0, 0.0)
+			nrm = n0
+	if best == INF:
+		return {}
+	return {"dist": best, "normal": nrm}
+
+
+## Obrys kształtu do podświetlenia celu (cały blok dla zwykłych bloków).
+func target_box(p: Vector3i) -> AABB:
+	var list := shape_aabbs(p)
+	if list.is_empty():
+		return AABB(Vector3.ZERO, Vector3.ONE)
+	var u: AABB = list[0]
+	for a in list:
+		u = u.merge(a)
+	return u
 
 
 # ---------- zapis ----------

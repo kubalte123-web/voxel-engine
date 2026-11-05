@@ -412,6 +412,50 @@ local function orient(tex, facing)
 	return t
 end
 
+-- Kształty z prostopadłościanów (w szesnastkach bloku: x1, y1, z1, x2, y2, z2). Przód kształtu to północ;
+-- stan facing obraca prostopadłościany, stan half = "top" odwraca półbloki i schody do góry nogami.
+local function rot_box(b, turns)
+	for _ = 1, turns do b = { 16 - b[6], b[2], b[1], 16 - b[3], b[5], b[4] } end
+	return b
+end
+local TURNS = { north = 0, east = 1, south = 2, west = 3 }
+local SHAPE_PRESETS = {
+	slab = { boxes = { { 0, 0, 0, 16, 8, 16 } }, top = { { 0, 8, 0, 16, 16, 16 } } },
+	stairs = { boxes = { { 0, 0, 0, 16, 8, 16 }, { 0, 8, 0, 16, 16, 8 } }, top = { { 0, 8, 0, 16, 16, 16 }, { 0, 0, 0, 16, 8, 8 } } },
+	fence = { boxes = { { 6, 0, 6, 10, 16, 10 } }, group = "fence", north = { { 7, 12, 0, 9, 15, 6 }, { 7, 6, 0, 9, 9, 6 } } },
+	pane = { boxes = { { 7, 0, 7, 9, 16, 9 } }, group = "pane", north = { { 7, 0, 0, 9, 16, 7 } } },
+	wall = { boxes = { { 4, 0, 4, 12, 16, 12 } }, group = "wall", north = { { 5, 0, 0, 11, 13, 4 } } },
+}
+
+local function shape_of(b)
+	local preset = SHAPE_PRESETS[b.shape]
+	if not preset and not b.boxes then return nil end
+	local st = b.state or {}
+	local boxes = preset and ((st.half == "top" and preset.top) or preset.boxes) or b.boxes
+	local turns = TURNS[st.facing] or 0
+	local out = {}
+	for i, bx in ipairs(boxes) do out[i] = rot_box({ bx[1], bx[2], bx[3], bx[4], bx[5], bx[6] }, turns) end
+	local con = b.connect
+	if preset and preset.group then
+		con = { group = preset.group, north = preset.north }
+	end
+	local connect = nil
+	if con then
+		connect = { group = con.group }
+		local north = con.north or {}
+		local dirs = { "north", "east", "south", "west" }
+		for k, d in ipairs(dirs) do
+			local src = con[d]
+			if src == nil then
+				src = {}
+				for i, bx in ipairs(north) do src[i] = rot_box({ bx[1], bx[2], bx[3], bx[4], bx[5], bx[6] }, k - 1) end
+			end
+			connect[d] = src
+		end
+	end
+	return out, connect
+end
+
 local function state_names(states)
 	local names = {}
 	for n in pairs(states) do names[#names + 1] = n end
@@ -478,6 +522,12 @@ local function finalize()
 	local list = {}
 	for _, key in ipairs(R.block_list) do
 		local b = R.blocks[key]
+		-- kształty gotowe dostają swoje stany (półblok: half; schody: facing i half)
+		if b.shape == "slab" and b.states == nil then b.states = { half = { "bottom", "top" } } end
+		if b.shape == "stairs" and b.states == nil then
+			b.states = { facing = { "north", "east", "south", "west" }, half = { "bottom", "top" } }
+			if b.place_facing == nil then b.place_facing = "away" end
+		end
 		if type(b.states) == "table" and next(b.states) ~= nil and not b.liquid then
 			for _, v in ipairs(expand_states(key, b)) do list[#list + 1] = v end
 		else
@@ -495,6 +545,12 @@ local function finalize()
 		end
 		local out = copy(b)
 		out.variant = nil
+		local boxes, connect = shape_of(b)
+		if boxes then
+			out.boxes = boxes
+			out.connect = connect
+			if b.transparent == nil then out.transparent = true end
+		end
 		out.drops = norm_drops(b.variant_of or key, b.drops, base.item ~= false)
 		if out.texture then
 			out.textures = out.textures or { all = out.texture }

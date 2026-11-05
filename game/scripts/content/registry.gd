@@ -10,6 +10,8 @@ const SOLID := 4
 const LIQUID := 8
 const THIN := 16           # cienki słupek (pochodnia)
 const MODEL := 32          # blok z własnym modelem (bez ścian w siatce chunka)
+const BOXES := 64          # kształt z prostopadłościanów w siatce chunka (półblok, schody, płot)
+const SHAPE_STRIDE := 11
 const LEVELS := 8          # poziomy cieczy: 1 (cienka warstwa) .. 8 (pełny blok)
 const MAX_BLOCKS := 256
 const ATLAS_COLS := 16
@@ -26,7 +28,10 @@ var liquid := PackedInt32Array([0])  # id bloku -> rodzaj cieczy * 16 + poziom (
 var liquid_kinds: Array = []         # [{key, name, source, levels: [id dla poziomu 0..8], color, deep, viscosity, ...}]
 var hardness := PackedFloat32Array([0.0])
 var lprops := PackedInt32Array([0])  # id -> świecenie 0..15 | 16 nieprzezroczysty | 32 ciecz
-var tile_colors: Array[Color] = []   # średni kolor kafelka (dalekie widoki, cząsteczki)
+var tile_colors: Array[Color] = []
+var shape_index := PackedInt32Array()   # id -> [przes, ile, grupa, N przes, N ile, E.., S.., W..] (prostopadłościany)
+var shape_boxes := PackedFloat32Array()  # po 6 liczb na prostopadłościan, w szesnastkach bloku
+var _shape_groups := {}   # średni kolor kafelka (dalekie widoki, cząsteczki)
 var atlas: ImageTexture
 var atlas_rows := 1
 
@@ -128,6 +133,10 @@ func build(content: Dictionary, paths: Dictionary = {}) -> void:
 			p = CROSS if shape == "cross" else THIN
 			if bool(d.get("solid", false)):
 				p |= SOLID
+		elif d.get("boxes") is Array and not (d.boxes as Array).is_empty():
+			p = BOXES
+			if bool(d.get("solid", true)):
+				p |= SOLID
 		elif shape == "model" or d.get("model") is Dictionary:
 			p = MODEL
 			if bool(d.get("solid", true)):
@@ -157,6 +166,7 @@ func build(content: Dictionary, paths: Dictionary = {}) -> void:
 	particles = content.get("particles", {}) if content.get("particles") is Dictionary else {}
 	projectiles = content.get("projectiles", {}) if content.get("projectiles") is Dictionary else {}
 	effects = content.get("effects", {}) if content.get("effects") is Dictionary else {}
+	_build_shapes()
 	_build_atlas()
 
 
@@ -186,6 +196,45 @@ func _add_liquid(d: Dictionary, key: String) -> void:
 		levels.append(_add_block(vd, "%s~%d" % [key, lv], LIQUID, kind * 16 + lv))
 	info.levels = levels
 	info.source = _add_block(d, key, LIQUID, kind * 16 + LEVELS)
+
+
+## Tablice kształtów dla siatki (C++ i GDScript): prostopadłościany bloku i doklejane przy łączeniu z sąsiadem.
+func _build_shapes() -> void:
+	shape_index.resize(keys.size() * SHAPE_STRIDE)
+	shape_index.fill(0)
+	shape_boxes = PackedFloat32Array()
+	for id in keys.size():
+		if (props[id] & BOXES) == 0:
+			continue
+		var d: Dictionary = defs[id]
+		var si := id * SHAPE_STRIDE
+		shape_index[si] = shape_boxes.size() / 6
+		shape_index[si + 1] = _add_boxes(d.get("boxes"))
+		var con: Variant = d.get("connect")
+		if con is Dictionary:
+			var g := str(con.get("group", ""))
+			if g != "":
+				if not _shape_groups.has(g):
+					_shape_groups[g] = _shape_groups.size() + 1
+				shape_index[si + 2] = _shape_groups[g]
+			var dirs := ["north", "east", "south", "west"]
+			for k in 4:
+				shape_index[si + 3 + k * 2] = shape_boxes.size() / 6
+				shape_index[si + 4 + k * 2] = _add_boxes(con.get(dirs[k]))
+	if shape_boxes.is_empty():
+		shape_boxes.append_array([0, 0, 0, 0, 0, 0])
+
+
+func _add_boxes(list: Variant) -> int:
+	var n := 0
+	for bx in arr(list):
+		var a := arr(bx)
+		if a.size() < 6:
+			continue
+		for i in 6:
+			shape_boxes.append(float(a[i]))
+		n += 1
+	return n
 
 
 func liquid_kind(id: int) -> int:
@@ -244,7 +293,7 @@ func _build_atlas() -> void:
 func content_hash() -> String:
 	var ent := entities.keys()
 	ent.sort()
-	return var_to_str(_canon([keys, item_keys, ent, worldgen, lprops, props])).sha256_text()
+	return var_to_str(_canon([keys, item_keys, ent, worldgen, lprops, props, shape_index, shape_boxes])).sha256_text()
 
 
 ## Postać niezależna od kolejności kluczy w słownikach (tabele Lua mają losową kolejność iteracji).
@@ -400,6 +449,13 @@ func icon(item_key: String) -> Texture2D:
 	elif b > 0:
 		if props[b] & (CROSS | THIN):
 			img = tile_images[tiles[b * 6]]
+		elif props[b] & BOXES:
+			var bx := Registry.arr(defs[b].get("boxes")).duplicate()
+			var con: Variant = defs[b].get("connect")
+			if con is Dictionary:   # ogrodzenie i szyba na ikonie: połączone na wprost
+				bx.append_array(Registry.arr(con.get("north")))
+				bx.append_array(Registry.arr(con.get("south")))
+			img = TexGen.boxes_icon(bx, tile_images[tiles[b * 6 + 2]], tile_images[tiles[b * 6 + 0]], tile_images[tiles[b * 6 + 4]])
 		else:
 			img = TexGen.cube_icon(tile_images[tiles[b * 6 + 2]], tile_images[tiles[b * 6 + 0]], tile_images[tiles[b * 6 + 4]])
 	elif it.has("icon") and it.icon != null:

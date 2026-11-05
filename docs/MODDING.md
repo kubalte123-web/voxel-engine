@@ -71,7 +71,8 @@ engine.blocks.register("ruby_ore", {
 	name = "Ruda rubinu",
 	texture = "textures/ruby_ore.png",          -- jedna tekstura na wszystkie ściany
 	-- albo: textures = { top = "...", bottom = "...", side = "...", north/south/east/west = "..." }
-	shape = "cube",          -- "cube" (domyślnie) albo "cross" (roślina z dwóch skrzyżowanych ścian)
+	shape = "cube",          -- "cube" (domyślnie), "cross" (roślina z dwóch skrzyżowanych ścian), "model",
+	                         -- albo kształt z prostopadłościanów: "slab", "stairs", "fence", "pane", "wall", "boxes"
 	transparent = false,     -- true: blok nie zasłania sąsiadów (szkło, liście z dziurami)
 	solid = true,            -- kolizja z graczem
 	drops = "ruby",          -- łup: klucz przedmiotu, {item, count, chance}, lista takich albo false
@@ -90,6 +91,37 @@ engine.blocks.register("ruby_ore", {
 ```
 
 Tekstura z innego moda: `"base:textures/dirt.png"` (tak samo dźwięki: `"base:sounds/pop.ogg"`).
+
+### Kształty bloków (półbloki, schody, płoty)
+
+Blok może się składać z prostopadłościanów. Są częścią siatki chunka (szybkie jak zwykłe bloki), mają kolizję
+w swoim kształcie, celownik trafia tylko w ich części, a ikona w ekwipunku pokazuje kształt.
+
+```lua
+engine.blocks.register("oak_slab",   { name = "Półblok", shape = "slab",   textures = { all = "base:textures/planks.png" } })
+engine.blocks.register("oak_stairs", { name = "Schody",  shape = "stairs", textures = { all = "base:textures/planks.png" } })
+engine.blocks.register("oak_fence",  { name = "Płot",    shape = "fence",  texture = "base:textures/planks.png" })
+-- własny kształt: liczby w szesnastkach bloku {x1, y1, z1, x2, y2, z2}; przód kształtu to północ (-z)
+engine.blocks.register("table", {
+	name = "Stolik", texture = "base:textures/planks.png",
+	boxes = { { 0, 14, 0, 16, 16, 16 }, { 7, 0, 7, 9, 14, 9 } },
+	connect = { group = "table", north = { { 7, 14, 0, 9, 16, 1 } } },  -- opcjonalnie: łączenie z sąsiadami
+})
+```
+
+| Kształt | Stany dodawane same | Zachowanie |
+| --- | --- | --- |
+| `slab` | `half` = bottom/top | górny półblok, gdy gracz klika spód bloku albo górną połowę ściany |
+| `stairs` | `facing` (4 strony), `half` | stopień od strony, w którą patrzy gracz; pod sufitem do góry nogami |
+| `fence` | – | słupek; łączy się z płotami i pełnymi blokami obok |
+| `pane` | – | cienka szyba; łączy się z szybami i pełnymi blokami |
+| `wall` | – | murek; łączy się z murkami i pełnymi blokami |
+| `boxes` (albo samo pole `boxes`) | – | własne prostopadłościany, stan `facing` obraca je |
+
+`connect = { group, north, east, south, west }`: części dodawane, gdy sąsiad z danej strony jest pełnym blokiem
+albo ma tę samą grupę. Wystarczy podać `north` – pozostałe strony powstają przez obrót. Bloki kształtowe są
+domyślnie przezroczyste dla światła (`transparent = true`); `solid = false` wyłącza kolizję.
+Przykład: mod `building` (półbloki i schody z desek, kamienia, bruku i cegieł, płot, murek, szyba, stolik).
 
 ### Stany bloku
 
@@ -741,6 +773,7 @@ Mod „Plecak i postać” udostępnia `engine.require("backpack").give(przedmio
 | `farming` | stany (wiek uprawy, wilgotność), losowe aktualizacje, aktualizacja od sąsiada, `item.use` z pozycją |
 | `storage` | skrzynia: kontener bloku, stan `facing`, mody opcjonalne (`after`, `engine.optional`) |
 | `alchemy` | kocioł: blok z modelem GLB i klocków, animacje, emitery cząsteczek, wygląd z gry, mikstury na czas |
+| `building` | kształty z prostopadłościanów: półbloki, schody, płot, murek, szyba, własny kształt (stolik) |
 | `smelting` | piec: dane bloku, zaplanowane aktualizacje, wariant świecący, okno odświeżane wszystkim patrzącym |
 
 ## Narzędzia modera

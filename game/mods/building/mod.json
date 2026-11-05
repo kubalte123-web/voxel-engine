@@ -1,0 +1,14 @@
+{
+	"id": "building",
+	"name": "Budowanie",
+	"version": "0.1.0",
+	"author": "Jakub Lewicki",
+	"description": "Półbloki, schody, ogrodzenia, murki i szyby z bloków innych modów. Schody obracają się w stronę, w którą patrzysz, a postawione pod sufitem odwracają się do góry nogami. Ogrodzenia, murki i szyby łączą się z sąsiadami. Przykład kształtów z prostopadłościanów (shape = \"slab\", \"stairs\", \"fence\", \"pane\", \"wall\" albo własne boxes).",
+	"requires": [],
+	"after": ["base", "ores", "backpack", "crafting_classic", "crafting_discovery"],
+	"content": ["content.lua"],
+	"scripts": ["main.lua"],
+	"settings": [
+		{"key": "starter", "label": "Zestaw na start (półbloki, schody, ogrodzenie, szyby)", "type": "bool", "default": true}
+	]
+}

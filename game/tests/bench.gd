@@ -14,6 +14,7 @@ func _run() -> void:
 	for id in mm.manifests:
 		mm.enabled[id] = true  # wszystkie mody, żeby sprawdzić też rudy i struktury
 	var reg: Registry = mods.start_content("")
+	GDMesher.set_shapes(reg.shape_index, reg.shape_boxes)
 	var spec := WorldgenSpec.compile(reg.worldgen, reg, 42)
 	print("BENCH bloki: %d, przedmioty: %d, biomy: %s, bledy: %s" % [reg.count(), reg.items.size(), spec.names, spec.errors])
 	var terrain := Terrain.new(42, spec)
@@ -72,6 +73,7 @@ func _run() -> void:
 		return
 	var m: Object = ClassDB.instantiate("VoxelMesher")
 	m.call("configure", terrain.native_noises(), spec, reg.tiles, reg.props, reg.liquid, Registry.ATLAS_COLS, reg.atlas_rows)
+	m.call("set_shapes", reg.shape_index, reg.shape_boxes)
 	var same := true
 	var diff_at := ""
 	t0 = Time.get_ticks_usec()
@@ -156,4 +158,40 @@ func _run() -> void:
 				lit_dark += 1
 	print("BENCH swiatlo C++: %.2f ms/chunk, GDScript: %.2f ms/chunk, zgodne: %s, ciemnych komórek: %d" % [t_lc / cps.size(), t_lg / cps.size(), light_same, lit_dark])
 	print("BENCH siatka C++: %.2f ms/chunk, siatki zgodne: %s (%d/%d), ściany wody: %d" % [cpp, mesh_same, faces_c, faces_gd, water_faces])
+	# kształty z prostopadłościanów (półbloki, schody, płoty, szyby): losowo rozrzucone w chunku z ziemią
+	var shape_ids := []
+	for id in reg.count():
+		if reg.props[id] & Registry.BOXES:
+			shape_ids.append(id)
+	if not shape_ids.is_empty():
+		var rng := RandomNumberGenerator.new()
+		rng.seed = 7
+		var sc: PackedByteArray = chunks[0].duplicate()
+		var sl := PackedByteArray()
+		sl.resize(sc.size())
+		for i in sc.size():
+			sl[i] = rng.randi_range(0, 255)
+			if rng.randf() < 0.25:
+				sc[i] = shape_ids[rng.randi() % shape_ids.size()]
+			elif rng.randf() < 0.1:
+				sc[i] = reg.id_of("stone")
+		var sa: Array = m.call("build", sc, sl)
+		var sb: Array = GDMesher.build(sc, reg.tiles, Registry.ATLAS_COLS, reg.atlas_rows, reg.props, reg.liquid, sl)
+		var shp_same := true
+		for k in [0, 1, 4, 5, 11]:
+			if sa[k] != sb[k]:
+				shp_same = false
+				print("BENCH kształty: różnica w tablicy ", k, " rozmiary ", sa[k].size(), "/", sb[k].size())
+		for k in [2, 3]:
+			var xa: Array = Array(sa[k])
+			var xb: Array = Array(sb[k])
+			if xa.size() != xb.size():
+				shp_same = false
+				continue
+			for u in xa.size():
+				if not xa[u].is_equal_approx(xb[u]):
+					shp_same = false
+					print("BENCH kształty: różnica w tablicy ", k, " na ", u, ": ", xa[u], " / ", xb[u])
+					break
+		print("BENCH kształty (%d rodzajów): siatki zgodne: %s, ścian: %d" % [shape_ids.size(), shp_same, (sa[0] as PackedVector3Array).size() / 4])
 	quit()

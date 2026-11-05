@@ -467,7 +467,9 @@ func _update_target() -> void:
 	if r.get("hit", false) and (Vector3(r.pos) + Vector3(0.5, 0.5, 0.5)).distance_to(head) <= reach + 0.5:
 		target = r
 		highlight.visible = true
-		highlight.global_position = Vector3(r.pos)
+		var box := world.target_box(r.pos)
+		highlight.global_position = Vector3(r.pos) + box.position
+		highlight.scale = box.size.max(Vector3(0.05, 0.05, 0.05))
 	else:
 		target = {}
 		highlight.visible = false

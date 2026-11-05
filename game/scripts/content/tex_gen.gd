@@ -304,3 +304,53 @@ static func cube_icon(top: Image, side: Image, front: Image) -> Image:
 					var c := side.get_pixel(int(k * 15.99), int((fy - y0) / 15.0 * 15.99))
 					img.set_pixel(x, y, Color(c.r * 0.6, c.g * 0.6, c.b * 0.6, c.a))
 	return img
+
+
+## Ikona bloku zbudowanego z prostopadłościanów (w szesnastkach): ten sam rzut co cube_icon, każdy piksel
+## to promień w stronę widza (kierunek (1, 1, 1)); widać ściany +y, +z (lewa) i +x (prawa).
+static func boxes_icon(boxes: Array, top: Image, side: Image, front: Image) -> Image:
+	var n := 32
+	var img := Image.create(n, n, false, Image.FORMAT_RGBA8)
+	img.fill(Color(0, 0, 0, 0))
+	var bx := []
+	for b in boxes:
+		var a := Registry.arr(b)
+		if a.size() >= 6:
+			bx.append([Vector3(float(a[0]), float(a[1]), float(a[2])) / 16.0, Vector3(float(a[3]), float(a[4]), float(a[5])) / 16.0])
+	for y in n:
+		for x in n:
+			var a := (float(x) + 0.5 - 16.0) / 15.0
+			var c := (float(y) + 0.5 - 8.5) / 15.0
+			var p0 := Vector3(a, (a + 1.0) * 0.5 - c, 0.0)
+			var best := -INF
+			var face := -1
+			for b in bx:
+				var lo: Vector3 = b[0]
+				var hi: Vector3 = b[1]
+				var t0 := -INF
+				var t1 := INF
+				var f1 := -1
+				for k in 3:
+					var ta := lo[k] - p0[k]
+					var tb := hi[k] - p0[k]
+					t0 = maxf(t0, ta)
+					if tb < t1:
+						t1 = tb
+						f1 = k
+				if t0 <= t1 and t1 > best:
+					best = t1
+					face = f1
+			if face < 0:
+				continue
+			var q := p0 + Vector3.ONE * best
+			var col: Color
+			if face == 1:
+				col = top.get_pixel(clampi(int(q.x * 16.0), 0, 15), clampi(int(q.z * 16.0), 0, 15))
+			elif face == 2:
+				col = front.get_pixel(clampi(int(q.x * 16.0), 0, 15), clampi(int((1.0 - q.y) * 16.0), 0, 15))
+				col = Color(col.r * 0.78, col.g * 0.78, col.b * 0.78, col.a)
+			else:
+				col = side.get_pixel(clampi(int((1.0 - q.z) * 16.0), 0, 15), clampi(int((1.0 - q.y) * 16.0), 0, 15))
+				col = Color(col.r * 0.6, col.g * 0.6, col.b * 0.6, col.a)
+			img.set_pixel(x, y, col)
+	return img

@@ -1606,6 +1606,84 @@ func _test_perf() -> void:
 
 
 ## Test logiki bloków: skrzynia (kierunek, kontener), piec (dane, plan, świecenie), uprawy (losowe, sąsiad), dźwięki.
+## Kształty z prostopadłościanów (mod building): stawianie schodów i półbloków, celowanie, chodzenie po nich.
+func _test_shapes(dir: String) -> void:
+	await _wait_loaded()
+	await _wait(0.5)
+	var reg := Mods.registry
+	var hb := Mods.cid("hotbar")
+	print("KSZTAŁTY bloki=", reg.count(), " schody=", reg.id_of("planks_stairs"), " półblok=", reg.id_of("stone_slab"))
+	# płaska scena: podłoga z kamienia, powietrze nad nią
+	var o := Vector3i(floori(player.global_position.x) + 4, 0, floori(player.global_position.z))
+	o.y = floori(player.global_position.y) - 1
+	for x in range(-6, 7):
+		for z in range(-6, 7):
+			world.set_block(o + Vector3i(x, 0, z), reg.id_of("stone"))
+			for y in range(1, 6):
+				world.set_block(o + Vector3i(x, y, z), Blocks.AIR)
+	await _wait(0.5)
+	# stawianie przez gracza: schody patrzą tam, gdzie gracz (północ), półblok pod sufitem jest górny
+	player.global_position = Vector3(o) + Vector3(0.5, 1.0, 3.5)
+	player.velocity = Vector3.ZERO
+	Mods.set_slot(hb, 0, {"item": "planks_stairs", "count": 5})
+	player.select(0)
+	player.yaw = 0.0
+	player.pitch = -0.6
+	await _wait(0.4)
+	var at: Vector3i = player.target.pos + player.target.normal if not player.target.is_empty() else Vector3i(0, -999, 0)
+	player.use_item()
+	await _wait(0.3)
+	print("KSZTAŁTY schody: ", reg.block_key(world.get_block(at)), " stan=", reg.state_of(world.get_block(at)))
+	# celowanie w półblok: trafienie w górną ściankę na wysokości 0.5
+	var s1 := o + Vector3i(3, 1, 0)
+	world.set_block(s1, reg.id_of("stone_slab"))
+	var r := world.raycast(Vector3(s1) + Vector3(0.5, 3.0, 0.5), Vector3.DOWN, 6.0)
+	print("KSZTAŁTY trafienie w półblok: pos=", r.get("pos"), " normal=", r.get("normal"), " y=", snappedf((r.point as Vector3).y - s1.y, 0.01) if r.has("point") else -1)
+	print("KSZTAŁTY górny półblok: ", reg.block_key(Actions.oriented(reg.id_of("stone_slab"), 0.0, Vector3i.DOWN)),
+		" boczna ściana wysoko: ", reg.block_key(Actions.oriented(reg.id_of("stone_slab"), 0.0, Vector3i(1, 0, 0), Vector3(0, 5.8, 0))))
+	# chodzenie po półbloku: gracz spada na niego i stoi pół bloku wyżej niż na podłodze
+	player.global_position = Vector3(s1) + Vector3(0.5, 2.0, 0.5)
+	player.velocity = Vector3.ZERO
+	await _wait(1.2)
+	print("KSZTAŁTY gracz na półbloku: y nad podłogą=", snappedf(player.global_position.y - s1.y, 0.01))
+	# scena: płot, murek, szyby (łączą się), schody z czterech stron, stolik
+	var fence := reg.id_of("planks_fence")
+	for x in range(-5, 0):
+		world.set_block(o + Vector3i(x, 1, -4), fence)
+	world.set_block(o + Vector3i(-5, 1, -3), fence)
+	world.set_block(o + Vector3i(-5, 1, -2), fence)
+	for x in range(1, 5):
+		world.set_block(o + Vector3i(x, 1, -4), reg.id_of("cobblestone_wall"))
+	for x in range(-2, 1):
+		world.set_block(o + Vector3i(x, 1, -2), reg.id_of("glass_pane"))
+		world.set_block(o + Vector3i(x, 2, -2), reg.id_of("glass_pane"))
+	var st := reg.id_of("stone_stairs")
+	for k in 4:
+		world.set_block(o + Vector3i(-4 + k, 1, 1), reg.with_state(st, {"facing": ["north", "east", "south", "west"][k]}))
+		world.set_block(o + Vector3i(-4 + k, 2, 2), reg.with_state(st, {"facing": ["north", "east", "south", "west"][k], "half": "top"}))
+	for k in 4:
+		world.set_block(o + Vector3i(1 + k, 1, 1), reg.with_state(reg.id_of("bricks_slab"), {"half": "bottom" if k % 2 == 0 else "top"}))
+	world.set_block(o + Vector3i(2, 1, -1), reg.id_of("planks_table"))
+	await _wait(1.0)
+	player.global_position = Vector3(o) + Vector3(0.5, 1.0, 6.5)
+	player.velocity = Vector3.ZERO
+	player.yaw = 0.0
+	player.pitch = -0.35
+	await _wait(0.8)
+	await _shot(dir, "s1_shapes")
+	player.global_position = Vector3(o) + Vector3(-6.0, 1.0, 4.5)
+	player.yaw = -0.9
+	player.pitch = -0.3
+	await _wait(0.8)
+	await _shot(dir, "s2_shapes_side")
+	# ikony w pasku
+	for i in 6:
+		Mods.set_slot(hb, i, {"item": ["planks_stairs", "stone_slab", "planks_fence", "glass_pane", "cobblestone_wall", "planks_table"][i], "count": 8})
+	await _wait(0.4)
+	await _shot(dir, "s3_icons")
+	get_tree().quit()
+
+
 func _test_blocks(dir: String) -> void:
 	await _wait_loaded()
 	await _wait(0.5)
@@ -1813,6 +1891,9 @@ func _autotest(dir: String) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--blocks-only"):
 		await _test_blocks(dir)
+		return
+	if OS.get_cmdline_user_args().has("--shapes-only"):
+		await _test_shapes(dir)
 		return
 	Settings.render_distance = 4
 	_apply_settings()
