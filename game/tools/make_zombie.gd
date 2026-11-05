@@ -1,5 +1,5 @@
 extends SceneTree
-## Generuje mods/monsters/models/zombie.glb: postać z nazwanymi częściami (Head, ArmL, ArmR, LegL, LegR, Body)
+## Generuje mods/podstawowa/mods/monsters/models/zombie.glb: postać z nazwanymi częściami (Head, ArmL, ArmR, LegL, LegR, Body)
 ## i animacjami w pliku (Idle, Walk, Attack, Hurt) – tak jak model zrobiony w Blenderze. Silnik odtwarza
 ## animacje z pliku według stanu stworzenia (model.animations w definicji).
 ## Uruchom: godot --headless --path game -s tools/make_zombie.gd
@@ -135,8 +135,8 @@ func _initialize() -> void:
 	var doc := GLTFDocument.new()
 	var state := GLTFState.new()
 	var err := doc.append_from_scene(root, state)
-	var path := "res://mods/monsters/models/zombie.glb"
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://mods/monsters/models"))
+	var path := "res://mods/podstawowa/mods/monsters/models/zombie.glb"
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://mods/podstawowa/mods/monsters/models"))
 	if err == OK:
 		err = doc.write_to_filesystem(state, ProjectSettings.globalize_path(path))
 	print("GLB ", path, " błąd=", err, " animacji=", lib.get_animation_list().size())

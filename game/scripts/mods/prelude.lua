@@ -546,6 +546,40 @@ local function shape_of(b)
 	return out, connect
 end
 
+-- Paczki zasobów gracza: pliki podmieniane po kluczu (blocks/stone.png, blocks/furnace.front.png,
+-- items/apple.png, entities/horse.glb, sounds/cow.say.ogg). Działa też dla tekstur ze wzorów i modeli z klocków.
+local function res_file(names) return host.res_file(to_godot(names)) end
+local RES_FACES = { "top", "bottom", "side", "front", "back", "north", "south", "east", "west" }
+
+local function res_block(v, keys)
+	local function find(suffix)
+		local names = {}
+		for _, k in ipairs(keys) do names[#names + 1] = "blocks/" .. k .. suffix end
+		return res_file(names)
+	end
+	local all = find(".png")
+	local tex = nil
+	if all ~= "" then tex = { all = all } end
+	for _, f in ipairs(RES_FACES) do
+		local p = find("." .. f .. ".png")
+		if p ~= "" then
+			if not tex then
+				tex = {}
+				if type(v.textures) == "table" then for k2, t in pairs(v.textures) do tex[k2] = t end
+				elseif v.texture then tex.all = v.texture end
+			end
+			tex[f] = p
+		end
+	end
+	if tex then v.textures = tex v.texture = nil end
+	local glb = find(".glb")
+	if glb ~= "" and type(v.model) == "table" then
+		local m = copy(v.model)
+		m.file = glb
+		v.model = m
+	end
+end
+
 local function state_names(states)
 	local names = {}
 	for n in pairs(states) do names[#names + 1] = n end
@@ -588,6 +622,11 @@ local function expand_states(key, b)
 			end
 		end
 		if v.texture and not v.textures then v.textures = { all = v.texture } v.texture = nil end
+		do
+			local parts = {}
+			for _, n in ipairs(names) do parts[#parts + 1] = n .. "=" .. tostring(st[n]) end
+			res_block(v, { key .. "[" .. table.concat(parts, ",") .. "]", key })
+		end
 		if st.facing ~= nil then v.textures = orient(v.textures, st.facing) end
 		v.base = key
 		v.state = st
@@ -632,6 +671,7 @@ local function finalize()
 		if type(b.states) == "table" and next(b.states) ~= nil and not b.liquid then
 			for _, v in ipairs(expand_states(key, b)) do list[#list + 1] = v end
 		else
+			res_block(b, { key })
 			list[#list + 1] = b
 		end
 	end
@@ -653,6 +693,8 @@ local function finalize()
 			if b.transparent == nil then out.transparent = true end
 		end
 		out.drops = norm_drops(b.variant_of or key, b.drops, base.item ~= false)
+		local ricon = res_file({ "items/" .. (b.variant_of or key) .. ".png" })
+		if ricon ~= "" then out.icon = ricon end
 		if out.texture then
 			out.textures = out.textures or { all = out.texture }
 			out.texture = nil
@@ -660,7 +702,35 @@ local function finalize()
 		blocks[#blocks + 1] = out
 	end
 	local items = {}
-	for _, key in ipairs(R.item_list) do items[#items + 1] = copy(R.items[key]) end
+	for _, key in ipairs(R.item_list) do
+		local it = copy(R.items[key])
+		local ricon = res_file({ "items/" .. key .. ".png" })
+		if ricon ~= "" then it.icon = ricon end
+		items[#items + 1] = it
+	end
+	-- stworzenia: model z pliku zamiast klocków (+ entities/<rodzaj>.json z ustawieniami modelu)
+	for t, d in pairs(R.entities) do
+		local glb = res_file({ "entities/" .. t .. ".glb" })
+		if glb ~= "" then
+			local m = { file = glb, animations = { idle = "Idle", walk = "Walk", run = "Run", attack = "Attack", hurt = "Hurt" } }
+			local extra = to_lua(host.res_json("entities/" .. t .. ".json"))
+			if type(extra) == "table" then for k, v in pairs(extra) do m[k] = v end end
+			d.model = m
+		end
+	end
+	-- dźwięki: sounds/<nazwa>.ogg albo kilka wersji sounds/<nazwa>.1.ogg, .2.ogg ...
+	for name, d in pairs(R.sounds) do
+		local files = {}
+		for _, ext in ipairs({ "ogg", "wav", "mp3" }) do
+			local one = res_file({ "sounds/" .. name .. "." .. ext })
+			if one ~= "" then files[#files + 1] = one end
+			for i = 1, 8 do
+				local f = res_file({ "sounds/" .. name .. "." .. i .. "." .. ext })
+				if f ~= "" then files[#files + 1] = f end
+			end
+		end
+		if #files > 0 then d.files = files d.file = nil end
+	end
 	local biomes = {}
 	for _, key in ipairs(R.biome_list) do biomes[#biomes + 1] = copy(R.biomes[key]) end
 	local ores = {}
@@ -714,10 +784,19 @@ local function make_api(mod_id)
 	-- biblioteki: mod udostępnia tabelę, inne mody ją pobierają (wymagają go w mod.json)
 	function E.export(t) exports[mod_id] = t end
 	-- biblioteka innego moda albo nil, gdy mod jest wyłączony (w mod.json: "after": [id])
-	function E.optional(id) return exports[id] end
+	-- moduł zastąpiony przez inny mod ("replaces" w mod.json): biblioteka zastępcy
+	local function lib(id)
+		local t = exports[id]
+		if t == nil then
+			local r = host.mod_replacement(id)
+			if r ~= "" then t = exports[r] end
+		end
+		return t
+	end
+	function E.optional(id) return lib(id) end
 
 	function E.require(id)
-		local t = exports[id]
+		local t = lib(id)
 		if t == nil then
 			error("mod '" .. id .. "' nie jest wczytany; dodaj go do \"requires\" w mod.json", 2)
 		end

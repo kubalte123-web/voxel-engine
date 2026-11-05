@@ -10,6 +10,8 @@ const PX := 16
 
 static func load_spec(spec: Variant, mod_path: String) -> Image:
 	if spec is String:
+		if spec.begins_with("res://") or spec.begins_with("user://"):
+			return _from_file(spec)   # plik z paczki zasobów
 		return _from_file(mod_path.path_join(spec))
 	if spec is Dictionary:
 		return pattern(spec)

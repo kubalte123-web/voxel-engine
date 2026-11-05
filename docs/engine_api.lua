@@ -42,7 +42,6 @@ function engine.hooks.after(name, fn, priority) end
 ---@param t any
 function engine.export(t) end
 
---- biblioteka innego moda albo nil, gdy mod jest wyłączony (w mod.json: "after": [id])
 ---@param id any
 function engine.optional(id) end
 

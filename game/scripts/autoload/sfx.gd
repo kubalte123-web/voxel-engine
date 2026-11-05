@@ -67,7 +67,7 @@ func _load(name: String) -> Array:
 		if file.find(":") > 0 and not file.begins_with("res:") and not file.begins_with("user:"):
 			mod = file.substr(0, file.find(":"))   # plik z innego moda: "base:sounds/pop.ogg"
 			file = file.substr(file.find(":") + 1)
-		var path := r._mod_path(mod).path_join(file)
+		var path := file if file.begins_with("res://") or file.begins_with("user://") else r._mod_path(mod).path_join(file)
 		var s: AudioStream = null
 		if FileAccess.file_exists(path):
 			match path.get_extension().to_lower():

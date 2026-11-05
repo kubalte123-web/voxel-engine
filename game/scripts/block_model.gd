@@ -94,7 +94,7 @@ static func instance_glb(reg: Registry, mod: String, rel: String) -> Node3D:
 	if rel.find(":") > 0 and not rel.begins_with("res:") and not rel.begins_with("user:"):
 		mod = rel.substr(0, rel.find(":"))
 		rel = rel.substr(rel.find(":") + 1)
-	var path := reg._mod_path(mod).path_join(rel)
+	var path := rel if rel.begins_with("user://") or rel.begins_with("res://") else reg._mod_path(mod).path_join(rel)
 	var tpl: Node3D = _glb_cache.get(path)
 	if tpl == null:
 		if FileAccess.file_exists(path):

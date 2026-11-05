@@ -5,7 +5,7 @@ powietrze: bloki, przedmioty, biomy, woda, stworzenia, zasady, kamera i animacje
 (także podstawowy świat).
 
 - `game/` – projekt Godot 4.6 (GDScript): świat, gracz, interfejs, menu, system modów
-- `game/mods/` – mody dołączone do gry (podstawowy świat i przykłady)
+- `game/mods/podstawowa/` – paczka podstawowa: cała rozgrywka jako moduły w `mods/` (świat, ekwipunek, zwierzęta, potwory i przykłady)
 - `native/` – rdzeń w C++ (GDExtension): generowanie świata z danych modów i budowa siatek
 - Gra wieloosobowa do 8 graczy (serwer z oknem albo bez, konta graczy przez mod, pobieranie modów z serwera)
 - `docs/MODDING.md` – instrukcja tworzenia modów, `llms.txt` – punkt startowy dla AI

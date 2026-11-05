@@ -11,6 +11,43 @@ Mod to folder z plikiem `mod.json` i skryptami w Lua 5.4. Gra wczytuje mody z dw
 Każdy mod działa we własnym, odizolowanym środowisku. Nie ma dostępu do plików, sieci ani systemu,
 tylko do obiektu `engine` opisanego niżej.
 
+## Paczki modów
+
+Gra przychodzi jako **paczka** – cała rozgrywka w jednym folderze z modułami (`game/mods/podstawowa/`):
+
+```
+mods/podstawowa/
+  pack.json            nazwa, wersja, opis, "defaults": {"accounts": false} – moduły domyślnie wyłączone
+  mods/base/  mods/backpack/  mods/horses/  ...   zwykłe mody (moduły paczki)
+```
+
+W menu Mody paczka jest jedną pozycją: przełącznik włącza całą paczkę, „Otwórz” pokazuje moduły, każdy
+z własnym przełącznikiem i ustawieniami. Mody gracza (`mods/<id>/` obok paczek) są „dodatkami” i wczytują się
+po modułach paczek. Własną paczkę robi się tak samo: folder z `pack.json` i podfolderem `mods/`.
+
+Żeby zmienić fragment rozgrywki bez ruszania paczki, mod-dodatek wpisuje `"replaces": ["horses"]` – wtedy
+zamiast modułu Konie działa ten mod (może zarejestrować własne stworzenie `horse` z innym modelem i AI).
+
+## Paczki zasobów
+
+Paczka zasobów zmienia wygląd, dźwięki i teksty bez kodu i działa także na cudzym serwerze. Leży w folderze
+gry `resourcepacks/<nazwa>/` i podmienia rzeczy **po kluczu**, niezależnie od tego, który mod je dodał i czy
+tekstura jest plikiem, czy wzorem:
+
+```
+blocks/stone.png                 tekstura bloku (16 × 16), też .top/.bottom/.side/.front albo .north/.east...
+blocks/furnace[facing=north,lit=true].front.png   wygląd jednego stanu
+blocks/cauldron.glb              model bloku
+items/apple.png                  ikona przedmiotu
+entities/horse.glb               model stworzenia (+ entities/horse.json: scale, offset, rotation, swing, head, animations)
+sounds/cow.say.ogg               dźwięk (kilka wersji: cow.say.1.ogg, cow.say.2.ogg)
+lang/pl.json                     teksty: {"horses:horse": "Rumak"}
+```
+
+W menu Mody → Paczki zasobów włącza się paczki i ustawia kolejność (wyższa wygrywa). Przycisk
+**Eksportuj szablon zasobów** zapisuje wszystko, czego gra teraz używa, w tej strukturze (także tekstury ze
+wzorów jako PNG i listę części każdego stworzenia do nazwania węzłów w Blenderze) – wystarczy zmienić pliki.
+
 ## Dwie fazy: content i scripts
 
 | Faza | Pliki w mod.json | Kiedy | Do czego |
@@ -55,6 +92,8 @@ tylko w fazie content; wywołane później zgłoszą błąd.
 | `scripts` | Pliki Lua fazy scripts (logika w świecie) |
 | `library` | Mod jest biblioteką dla innych (na liście trafia wyżej) |
 | `settings` | Ustawienia widoczne w grze w ekranie Mody |
+| `replaces` | Moduły, które ten mod zastępuje (np. `["horses"]`): zastąpiony się nie wczytuje, a mody zależne od niego dostają ten mod (`engine.require("horses")` zwraca jego bibliotekę) |
+| `conflicts` | Mody, z którymi ten nie może działać: włączenie jednego wyłącza drugi |
 
 Rodzaje ustawień: `bool`, `int`, `float`, `choice` (lista `options`, wartość to tekst opcji) oraz
 `block_toggles` (przełącznik dla każdego bloku w grze, także z innych modów; wartość to tabela

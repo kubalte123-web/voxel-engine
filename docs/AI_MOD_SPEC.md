@@ -33,6 +33,10 @@ Najważniejsze zasady (szczegóły niżej):
 > powietrze; bloki, przedmioty, biomy, zasady, kamera i animacje pochodzą z modów. Ten plik jest punktem
 > startowym dla asystentów AI, które mają napisać mod.
 
+Gra przychodzi jako paczka modów `game/mods/podstawowa/` (pack.json + moduły w `mods/`); nowy mod to dodatek
+w `mods/<id>/` obok paczki, który może zastąpić moduł (`"replaces": ["horses"]`). Wygląd bez kodu zmieniają
+paczki zasobów (`resourcepacks/<nazwa>/blocks/stone.png`, `entities/horse.glb` ...).
+
 Mod to folder z `mod.json` i skryptami Lua w dwóch fazach: `content` (rejestracja bloków, przedmiotów,
 biomów, rud, struktur i animacji, także zmiany cudzych definicji) oraz `scripts` (haki, zdarzenia, okna,
 klawisze). Skrypty działają w piaskownicy: bez plików, sieci i systemu, tylko z obiektem `engine`.
@@ -48,28 +52,28 @@ a mody mogą udostępniać sobie biblioteki przez `engine.export` i `engine.requ
 
 ## Przykładowe mody
 
-- [Świat podstawowy](game/mods/base/content.lua): bloki z PNG, biomy, drzewa, rośliny
-- [Rudy i ruiny](game/mods/ores/content.lua): tekstury ze wzorów, przedmioty, rudy, struktury z warstw, zmiana bloku innego moda
-- [Przetrwanie](game/mods/survival/main.lua): zdrowie i głód na ekranie, obrażenia od upadku, jedzenie przez hak item.use
-- [Zwierzęta](game/mods/animals/content.lua): modele stworzeń z klocków, AI, łup, pojawianie się ([skrypty](game/mods/animals/main.lua): strzyżenie, jajka, rozmnażanie)
-- [Luźne przedmioty](game/mods/loose/content.lua): obiekty fizyczne (pchanie, toczenie, pływanie)
-- [Gesty, kamera i wygląd](game/mods/emotes/content.lua): animacje klatkowe, tryby kamery, kolory postaci ([skrypty](game/mods/emotes/main.lua))
-- [Zestaw modera](game/mods/modkit/main.lua): biblioteka z łatkami, ekwipunkiem i licznikami czasu
-- [Plecak i postać](game/mods/backpack/main.lua): kontenery, pasek z kontenera, okno postaci, łup z bloków
-- [Zniszczalność bloków](game/mods/destructible/main.lua): hak `block.break` i ustawienie `block_toggles`
-- [Konta graczy](game/mods/accounts/main.lua): logowanie na serwer przez hak `player.login` i okno z polami
-- [Narzędzia](game/mods/tools/content.lua): przedmioty-narzędzia, pole `tool` bloków ([skrypt](game/mods/tools/main.lua): hak `block.dig`)
-- [Rzemiosło klasyczne](game/mods/crafting_classic/main.lua): siatki 2×2/3×3, przepisy kształtowe, hak `slot.click`
-- [Rzemiosło odkrywcze](game/mods/crafting_discovery/main.lua): ukryte przepisy, wykuwanie w czasie, dane gracza
-- [Uprawy](game/mods/farming/content.lua): stany bloku (wiek, wilgotność) ([skrypt](game/mods/farming/main.lua): losowe aktualizacje, sąsiad)
-- [Skrzynie](game/mods/storage/main.lua): kontener bloku, stan facing
-- [Alchemia](game/mods/alchemy/content.lua): blok z modelem GLB i klocków, animacje, emitery cząsteczek ([skrypt](game/mods/alchemy/main.lua): wygląd z gry, mikstury)
-- [Piec](game/mods/smelting/main.lua): dane bloku, zaplanowane aktualizacje, wariant świecący ([treść](game/mods/smelting/content.lua))
-- [Budowanie](game/mods/building/content.lua): kształty z prostopadłościanów – półbloki, schody, płoty, murki, szyby, własne `boxes`
-- [Potwory](game/mods/monsters/content.lua): wrogie zombie z modelem GLB i animacjami z pliku ([skrypt](game/mods/monsters/main.lua): mózg `on_think`, polecenie `/zombie`)
-- [Konie](game/mods/horses/content.lua): jazda (`ride`), tłumaczenia `@klucz` ([skrypt](game/mods/horses/main.lua): oswajanie hakiem `entity.interact`, `engine.t`)
-- [Poradnik](game/mods/handbook/main.lua): okno z zakładkami, listą, obrazkiem, suwakiem, przełącznikiem; kompas na ekranie z `anchor`
-- [Głazy i ruiny](game/mods/ruins/main.lua): generator świata w Lua (`engine.worldgen.on_generate`, szum, deterministyczny los)
+- [Świat podstawowy](game/mods/podstawowa/mods/base/content.lua): bloki z PNG, biomy, drzewa, rośliny
+- [Rudy i ruiny](game/mods/podstawowa/mods/ores/content.lua): tekstury ze wzorów, przedmioty, rudy, struktury z warstw, zmiana bloku innego moda
+- [Przetrwanie](game/mods/podstawowa/mods/survival/main.lua): zdrowie i głód na ekranie, obrażenia od upadku, jedzenie przez hak item.use
+- [Zwierzęta](game/mods/podstawowa/mods/animals/content.lua): modele stworzeń z klocków, AI, łup, pojawianie się ([skrypty](game/mods/podstawowa/mods/animals/main.lua): strzyżenie, jajka, rozmnażanie)
+- [Luźne przedmioty](game/mods/podstawowa/mods/loose/content.lua): obiekty fizyczne (pchanie, toczenie, pływanie)
+- [Gesty, kamera i wygląd](game/mods/podstawowa/mods/emotes/content.lua): animacje klatkowe, tryby kamery, kolory postaci ([skrypty](game/mods/podstawowa/mods/emotes/main.lua))
+- [Zestaw modera](game/mods/podstawowa/mods/modkit/main.lua): biblioteka z łatkami, ekwipunkiem i licznikami czasu
+- [Plecak i postać](game/mods/podstawowa/mods/backpack/main.lua): kontenery, pasek z kontenera, okno postaci, łup z bloków
+- [Zniszczalność bloków](game/mods/podstawowa/mods/destructible/main.lua): hak `block.break` i ustawienie `block_toggles`
+- [Konta graczy](game/mods/podstawowa/mods/accounts/main.lua): logowanie na serwer przez hak `player.login` i okno z polami
+- [Narzędzia](game/mods/podstawowa/mods/tools/content.lua): przedmioty-narzędzia, pole `tool` bloków ([skrypt](game/mods/podstawowa/mods/tools/main.lua): hak `block.dig`)
+- [Rzemiosło klasyczne](game/mods/podstawowa/mods/crafting_classic/main.lua): siatki 2×2/3×3, przepisy kształtowe, hak `slot.click`
+- [Rzemiosło odkrywcze](game/mods/podstawowa/mods/crafting_discovery/main.lua): ukryte przepisy, wykuwanie w czasie, dane gracza
+- [Uprawy](game/mods/podstawowa/mods/farming/content.lua): stany bloku (wiek, wilgotność) ([skrypt](game/mods/podstawowa/mods/farming/main.lua): losowe aktualizacje, sąsiad)
+- [Skrzynie](game/mods/podstawowa/mods/storage/main.lua): kontener bloku, stan facing
+- [Alchemia](game/mods/podstawowa/mods/alchemy/content.lua): blok z modelem GLB i klocków, animacje, emitery cząsteczek ([skrypt](game/mods/podstawowa/mods/alchemy/main.lua): wygląd z gry, mikstury)
+- [Piec](game/mods/podstawowa/mods/smelting/main.lua): dane bloku, zaplanowane aktualizacje, wariant świecący ([treść](game/mods/podstawowa/mods/smelting/content.lua))
+- [Budowanie](game/mods/podstawowa/mods/building/content.lua): kształty z prostopadłościanów – półbloki, schody, płoty, murki, szyby, własne `boxes`
+- [Potwory](game/mods/podstawowa/mods/monsters/content.lua): wrogie zombie z modelem GLB i animacjami z pliku ([skrypt](game/mods/podstawowa/mods/monsters/main.lua): mózg `on_think`, polecenie `/zombie`)
+- [Konie](game/mods/podstawowa/mods/horses/content.lua): jazda (`ride`), tłumaczenia `@klucz` ([skrypt](game/mods/podstawowa/mods/horses/main.lua): oswajanie hakiem `entity.interact`, `engine.t`)
+- [Poradnik](game/mods/podstawowa/mods/handbook/main.lua): okno z zakładkami, listą, obrazkiem, suwakiem, przełącznikiem; kompas na ekranie z `anchor`
+- [Głazy i ruiny](game/mods/podstawowa/mods/ruins/main.lua): generator świata w Lua (`engine.worldgen.on_generate`, szum, deterministyczny los)
 
 ## Zasady dla generowanego moda
 
@@ -127,6 +131,43 @@ Mod to folder z plikiem `mod.json` i skryptami w Lua 5.4. Gra wczytuje mody z dw
 Każdy mod działa we własnym, odizolowanym środowisku. Nie ma dostępu do plików, sieci ani systemu,
 tylko do obiektu `engine` opisanego niżej.
 
+## Paczki modów
+
+Gra przychodzi jako **paczka** – cała rozgrywka w jednym folderze z modułami (`game/mods/podstawowa/`):
+
+```
+mods/podstawowa/
+  pack.json            nazwa, wersja, opis, "defaults": {"accounts": false} – moduły domyślnie wyłączone
+  mods/base/  mods/backpack/  mods/horses/  ...   zwykłe mody (moduły paczki)
+```
+
+W menu Mody paczka jest jedną pozycją: przełącznik włącza całą paczkę, „Otwórz” pokazuje moduły, każdy
+z własnym przełącznikiem i ustawieniami. Mody gracza (`mods/<id>/` obok paczek) są „dodatkami” i wczytują się
+po modułach paczek. Własną paczkę robi się tak samo: folder z `pack.json` i podfolderem `mods/`.
+
+Żeby zmienić fragment rozgrywki bez ruszania paczki, mod-dodatek wpisuje `"replaces": ["horses"]` – wtedy
+zamiast modułu Konie działa ten mod (może zarejestrować własne stworzenie `horse` z innym modelem i AI).
+
+## Paczki zasobów
+
+Paczka zasobów zmienia wygląd, dźwięki i teksty bez kodu i działa także na cudzym serwerze. Leży w folderze
+gry `resourcepacks/<nazwa>/` i podmienia rzeczy **po kluczu**, niezależnie od tego, który mod je dodał i czy
+tekstura jest plikiem, czy wzorem:
+
+```
+blocks/stone.png                 tekstura bloku (16 × 16), też .top/.bottom/.side/.front albo .north/.east...
+blocks/furnace[facing=north,lit=true].front.png   wygląd jednego stanu
+blocks/cauldron.glb              model bloku
+items/apple.png                  ikona przedmiotu
+entities/horse.glb               model stworzenia (+ entities/horse.json: scale, offset, rotation, swing, head, animations)
+sounds/cow.say.ogg               dźwięk (kilka wersji: cow.say.1.ogg, cow.say.2.ogg)
+lang/pl.json                     teksty: {"horses:horse": "Rumak"}
+```
+
+W menu Mody → Paczki zasobów włącza się paczki i ustawia kolejność (wyższa wygrywa). Przycisk
+**Eksportuj szablon zasobów** zapisuje wszystko, czego gra teraz używa, w tej strukturze (także tekstury ze
+wzorów jako PNG i listę części każdego stworzenia do nazwania węzłów w Blenderze) – wystarczy zmienić pliki.
+
 ## Dwie fazy: content i scripts
 
 | Faza | Pliki w mod.json | Kiedy | Do czego |
@@ -171,6 +212,8 @@ tylko w fazie content; wywołane później zgłoszą błąd.
 | `scripts` | Pliki Lua fazy scripts (logika w świecie) |
 | `library` | Mod jest biblioteką dla innych (na liście trafia wyżej) |
 | `settings` | Ustawienia widoczne w grze w ekranie Mody |
+| `replaces` | Moduły, które ten mod zastępuje (np. `["horses"]`): zastąpiony się nie wczytuje, a mody zależne od niego dostają ten mod (`engine.require("horses")` zwraca jego bibliotekę) |
+| `conflicts` | Mody, z którymi ten nie może działać: włączenie jednego wyłącza drugi |
 
 Rodzaje ustawień: `bool`, `int`, `float`, `choice` (lista `options`, wartość to tekst opcji) oraz
 `block_toggles` (przełącznik dla każdego bloku w grze, także z innych modów; wartość to tabela

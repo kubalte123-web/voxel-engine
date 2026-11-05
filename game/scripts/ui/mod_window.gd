@@ -320,7 +320,7 @@ static func load_image(s: Dictionary, mod: String) -> Texture2D:
 		if rel.find(":") > 0 and not rel.begins_with("res:") and not rel.begins_with("user:"):
 			mod = rel.substr(0, rel.find(":"))
 			rel = rel.substr(rel.find(":") + 1)
-		var path: String = Mods.registry._mod_path(mod).path_join(rel)
+		var path: String = rel if rel.begins_with("user://") or rel.begins_with("res://") else Mods.registry._mod_path(mod).path_join(rel)
 		if FileAccess.file_exists(path):
 			var img := Image.new()
 			if img.load_png_from_buffer(FileAccess.get_file_as_bytes(path)) == OK or img.load_jpg_from_buffer(FileAccess.get_file_as_bytes(path)) == OK:

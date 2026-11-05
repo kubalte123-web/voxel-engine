@@ -391,6 +391,11 @@ func _autotest(dir: String) -> void:
 	await _shot(dir, "m2_new_world")
 	show_mods()
 	await _shot(dir, "m3_mods")
+	var msp: ModsScreen = content.get_child(0)
+	msp.open_pack = "podstawowa"
+	msp.selected = "horses"
+	msp._refresh()
+	await _shot(dir, "m3b_pack_open")
 	ModManager.apply_server_profile({"settings": {"base": {"hill_height": 1.4}}, "enabled": {"daynight": true}})
 	show_mods()
 	await _shot(dir, "m4_mods_server")

@@ -195,6 +195,9 @@ func resolve_load_order() -> Array[String]:
 			var bad_ver := []
 			for req in reqs:
 				var r: String = ModManager.dep_parse(str(req))[0]
+				var rr := ModManager.replacement_of(r)
+				if rr != "" and wanted.has(rr):
+					r = rr   # zależność od modułu zastąpionego innym modem
 				if not wanted.has(r):
 					missing.append(r)
 				elif not out.has(r):
@@ -208,9 +211,23 @@ func resolve_load_order() -> Array[String]:
 				progress = true
 				continue
 			# "after": mody opcjonalne – jeśli są włączone, wczytujemy je wcześniej
-			for r in ModManager.manifests[id].get("after", []):
+			for r0 in ModManager.manifests[id].get("after", []) + ModManager.manifests[id].get("replaces", []):
+				var r: String = str(r0)
+				if ModManager.replacement_of(r) != "" and ModManager.replacement_of(r) != id:
+					r = ModManager.replacement_of(r)
 				if wanted.has(r) and not out.has(r) and r != id:
 					waiting = true
+			var clash := []
+			for c in ModManager.manifests[id].get("conflicts", []):
+				if wanted.has(str(c)) and (out.has(str(c)) or pending.has(str(c))):
+					clash.append(str(c))
+			if not clash.is_empty() and not out.has(id):
+				# z pary wykluczających się wczytuje się ten wcześniej na liście
+				if out.has(clash[0]) or wanted.find(clash[0]) < wanted.find(id):
+					load_errors[id] = "nie działa razem z: " + ", ".join(clash)
+					pending.erase(id)
+					progress = true
+					continue
 			if not missing.is_empty():
 				load_errors[id] = "wymaga wyłączonych lub brakujących modów: " + ", ".join(missing)
 				pending.erase(id)
@@ -307,6 +324,18 @@ func projectile_hit(type: String, ctx: Dictionary) -> void:
 ## Tekst moda w języku (lang/<język>.json); po kolei: język, polski, angielski, inne mody, sam klucz.
 func translate(mod_id: String, key: String, lang: String) -> String:
 	for l in [lang, "pl", "en"]:
+		var rf := ModManager.resource_file("lang/%s.json" % l)
+		if rf != "":
+			var rk := "@res|" + rf
+			if not lang_tables.has(rk):
+				var d: Variant = JSON.parse_string(FileAccess.get_file_as_string(rf))
+				lang_tables[rk] = d if d is Dictionary else {}
+			var rt: Dictionary = lang_tables[rk]
+			if rt.has(mod_id + ":" + key):
+				return str(rt[mod_id + ":" + key])
+			if rt.has(key):
+				return str(rt[key])
+	for l in [lang, "pl", "en"]:
 		var t := _lang(mod_id, l)
 		if t.has(key):
 			return str(t[key])
@@ -325,6 +354,25 @@ func _lang(mod_id: String, lang: String) -> Dictionary:
 		var d: Variant = JSON.parse_string(FileAccess.get_file_as_string(path)) if path != "" and FileAccess.file_exists(path) else null
 		lang_tables[k] = d if d is Dictionary else {}
 	return lang_tables[k]
+
+
+## Paczki zasobów: plik dla klucza (pierwsza pasująca nazwa z listy) albo "".
+func _h_res_file(names) -> String:
+	for n in (names if names is Array else [names]):
+		var f := ModManager.resource_file(str(n))
+		if f != "":
+			return f
+	return ""
+
+
+func _h_res_json(rel) -> Variant:
+	var f := ModManager.resource_file(str(rel))
+	return JSON.parse_string(FileAccess.get_file_as_string(f)) if f != "" else null
+
+
+func _h_mod_replacement(id) -> String:
+	var r := ModManager.replacement_of(str(id))
+	return r if loaded.has(r) else ""
 
 
 func _h_weather_set(kind, intensity) -> void:
@@ -758,7 +806,7 @@ func _host_table() -> Dictionary:
 		"entity_damage", "entity_tag", "entity_data", "item_drop", "entity_brain", "entity_mount", "entity_dismount",
 		"entity_nearest_player", "world_light", "command_register", "chat_send", "role_get", "role_set", "hud_image",
 		"worldgen_on", "gen_get", "gen_set", "gen_height", "gen_biome", "gen_noise", "t",
-		"weather_set", "weather_get", "sky_set", "player_wear",
+		"weather_set", "weather_get", "sky_set", "player_wear", "mod_replacement", "res_file", "res_json",
 		"player_id", "player_name", "player_is_host", "players_list", "set_ctx", "get_ctx",
 		"pstorage_get", "pstorage_set", "players_accept", "players_kick", "is_multiplayer", "hash",
 		"block_state", "block_set_state", "block_with_state", "block_base", "block_data", "block_set_data",

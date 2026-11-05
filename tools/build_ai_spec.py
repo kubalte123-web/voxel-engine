@@ -108,7 +108,7 @@ PITFALLS = """# Część 4. Najczęstsze pułapki
 def example(mod):
     out = f"## Mod `{mod}`\n\n"
     for f in ["mod.json", "content.lua", "main.lua"]:
-        p = f"game/mods/{mod}/{f}"
+        p = f"game/mods/podstawowa/mods/{mod}/{f}"
         if os.path.exists(p):
             lang = "json" if f.endswith(".json") else "lua"
             out += f"`{f}`\n\n```{lang}\n{r(p).rstrip()}\n```\n\n"

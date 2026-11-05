@@ -1,0 +1,12 @@
+{
+	"id": "podstawowa",
+	"name": "Paczka podstawowa",
+	"version": "0.1.0",
+	"author": "Jakub Lewicki",
+	"description": "Cała rozgrywka w jednej paczce: świat z biomami i rudami, plecak i postać, narzędzia i rzemiosło, przetrwanie, zwierzęta i konie, potwory nocą, uprawy, skrzynie, piec, alchemia, wędkarstwo, budowanie, poradnik i ruiny. Każdy moduł można osobno wyłączyć albo zmienić jego ustawienia, a mod gracza może zastąpić wybrany moduł (pole \"replaces\").",
+	"defaults": {
+		"accounts": false,
+		"crafting_discovery": false,
+		"destructible": false
+	}
+}

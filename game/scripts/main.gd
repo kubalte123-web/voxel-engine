@@ -1612,7 +1612,7 @@ func _test_gun(dir: String) -> void:
 	await scen.call("A (blokomiot w 1. miejscu, cegły w 2.)", [{"item": "block_gun", "count": 1}, {"item": "ammo_brick", "count": 5}])
 	await scen.call("B (patyk w 1., blokomiot w 2., ziemia w 3.)", [{"item": "stick", "count": 3}, {"item": "block_gun", "count": 1}, {"item": "dirt", "count": 5}])
 	await scen.call("C (ziemia w 1., blokomiot w 2.)", [{"item": "dirt", "count": 5}, {"item": "block_gun", "count": 1}])
-	print("GUN tekstura cegły: ", "brak pliku (fioletowa szachownica)" if not FileAccess.file_exists("res://mods/base/textures/bricks.png") else "jest")
+	print("GUN tekstura cegły: ", "brak pliku (fioletowa szachownica)" if not FileAccess.file_exists("res://mods/podstawowa/mods/base/textures/bricks.png") else "jest")
 	get_tree().quit()
 
 

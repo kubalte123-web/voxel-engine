@@ -1,5 +1,5 @@
 extends SceneTree
-## Generuje mods/alchemy/models/cauldron.glb: kocioł z toczonego profilu (jak w Blenderze „Screw”/„Spin”),
+## Generuje mods/podstawowa/mods/alchemy/models/cauldron.glb: kocioł z toczonego profilu (jak w Blenderze „Screw”/„Spin”),
 ## miedzianą obręcz, dwa uchwyty i powierzchnię cieczy. Każdy element to osobny, nazwany węzeł –
 ## silnik szuka węzłów po nazwie (animacje, kolory, ukrywanie). Uruchom: godot --headless --path game -s tools/make_cauldron.gd
 
@@ -108,7 +108,7 @@ func _init() -> void:
 	var doc := GLTFDocument.new()
 	var state := GLTFState.new()
 	var err := doc.append_from_scene(root, state)
-	var path := "res://mods/alchemy/models/cauldron.glb"
+	var path := "res://mods/podstawowa/mods/alchemy/models/cauldron.glb"
 	if err == OK:
 		err = doc.write_to_filesystem(state, ProjectSettings.globalize_path(path))
 	var tris := 0
