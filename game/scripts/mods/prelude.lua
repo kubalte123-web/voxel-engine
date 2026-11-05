@@ -55,6 +55,7 @@ end
 -- zostaje wyłączony do końca gry, a gra działa dalej.
 ---------------------------------------------------------------------------
 local sethook = debug.sethook
+local traceback = debug.traceback
 local collectgarbage = collectgarbage
 local co_create, co_resume = coroutine.create, coroutine.resume
 local STEP = 1000                 -- co ile instrukcji sprawdzamy limity
@@ -91,7 +92,13 @@ local function guarded(owner, limit, fn, ...)
 	if guard.depth == 0 then guard.tripped = false end
 	guard.depth = guard.depth + 1
 	guard.used, guard.limit, guard.owner = 0, limit, owner
-	local ok, err = pcall(fn, ...)
+	local ok, err = xpcall(fn, function(e)
+		if guard.tripped or type(e) ~= "string" then return e end
+		local tb = traceback("", 2)
+		tb = tb:gsub("\n%s*%[C%]: in %?", ""):gsub("\n[^\n]*prelude%.lua[^\n]*", ""):gsub("\n[^\n]*xpcall[^\n]*", "")
+		if not tb:find("\n%s*%S+:%d+:") then tb = "" end   -- sam nagłówek bez miejsc w kodzie moda
+		return e .. tb:sub(1, 700)
+	end, ...)
 	local tripped = guard.tripped
 	guard.depth = guard.depth - 1
 	guard.used, guard.limit, guard.owner = saved_used + guard.used, saved_limit, saved_owner
@@ -202,6 +209,8 @@ local function input(id)
 	end
 end
 
+local make_env_ref  -- ustawiane niżej (make_env jest zdefiniowane na końcu pliku)
+
 -- aktualizacje bloków: base klucz -> lista {fn, owner}
 local block_handlers = {}
 
@@ -245,6 +254,38 @@ local function item_tooltip(key, slot)
 	local out = {}
 	for _, l in ipairs(lines) do out[#out + 1] = tostring(l) end
 	return to_godot(out)
+end
+
+-- konsola modera: kod Lua w środowisku moda "console" (z pełnym engine), wynik jako tekst
+local console_env = nil
+
+local function console(code)
+	if console_env == nil then console_env = make_env_ref("console") end
+	local f = load("return " .. code, "=konsola", "t", console_env)
+	if not f then
+		local err
+		f, err = load(code, "=konsola", "t", console_env)
+		if not f then return "błąd: " .. tostring(err) end
+	end
+	local out = {}
+	local ok, r = guarded("console", LIMIT_CALL, function()
+		local res = table.pack(f())
+		for i = 1, res.n do
+			local v = res[i]
+			if type(v) == "table" then
+				local parts = {}
+				for k, x in pairs(v) do
+					parts[#parts + 1] = tostring(k) .. " = " .. tostring(x)
+					if #parts >= 30 then parts[#parts + 1] = "…" break end
+				end
+				out[#out + 1] = "{ " .. table.concat(parts, ", ") .. " }"
+			else
+				out[#out + 1] = tostring(v)
+			end
+		end
+	end)
+	if not ok then return "błąd: " .. tostring(r) end
+	return table.concat(out, "\t")
 end
 
 local function window_action(id, fields)
@@ -947,5 +988,6 @@ local function make_env(mod_id)
 	env._G = env
 	return env
 end
+make_env_ref = make_env
 
-return { dispatch = dispatch, make_env = make_env, input = input, window_action = window_action, finalize = finalize, run_chunk = run_chunk, block_update = block_update, projectile_hit = projectile_hit, item_tooltip = item_tooltip }
+return { dispatch = dispatch, make_env = make_env, input = input, window_action = window_action, finalize = finalize, run_chunk = run_chunk, block_update = block_update, projectile_hit = projectile_hit, item_tooltip = item_tooltip, console = console }

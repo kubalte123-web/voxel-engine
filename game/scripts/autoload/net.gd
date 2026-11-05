@@ -325,6 +325,37 @@ static func _kb(n: int) -> String:
 	return "%.1f MB" % (n / 1048576.0) if n >= 1048576 else "%d KB" % maxi(1, n / 1024)
 
 
+# ---------- konsola i polecenia ----------
+
+@rpc("any_peer", "reliable")
+func c_console(code: String) -> void:
+	var p := multiplayer.get_remote_sender_id()
+	if main == null or not main.is_logged(p):
+		return
+	if main.role_of(p) != "admin":
+		s_console_out.rpc_id(p, "Konsola Lua na serwerze jest tylko dla administratora.")
+		return
+	s_console_out.rpc_id(p, Mods.console_exec(p, code.left(4000)))
+
+
+@rpc("authority", "reliable")
+func s_console_out(text: String) -> void:
+	if main and main.console:
+		main.console.print_line(text)
+	elif main:
+		main.hud.notify(text.left(200))
+
+
+@rpc("any_peer", "reliable")
+func c_command(text: String) -> void:
+	var p := multiplayer.get_remote_sender_id()
+	if main == null or not main.is_logged(p):
+		return
+	var r: String = main.run_command(p, text.left(400))
+	if r != "":
+		s_console_out.rpc_id(p, r)
+
+
 # ---------- modele bloków i cząsteczki ----------
 
 @rpc("authority", "reliable")

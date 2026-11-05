@@ -42,6 +42,10 @@ func show_main() -> void:
 	content.add_child(UI.label("Pauza", 30))
 	content.add_child(UI.button("Wróć do gry", func(): resume.emit(), true))
 	content.add_child(UI.button("Opcje", show_options))
+	content.add_child(UI.button("Konsola modera (F2)", func():
+		var m: Node = get_tree().current_scene
+		if m and m.has_method("open_console"):
+			m.open_console()))
 	content.add_child(UI.button("Zapisz i wyjdź do menu", func(): save_and_exit.emit()))
 
 

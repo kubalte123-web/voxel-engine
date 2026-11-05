@@ -743,6 +743,20 @@ Mod „Plecak i postać” udostępnia `engine.require("backpack").give(przedmio
 | `alchemy` | kocioł: blok z modelem GLB i klocków, animacje, emitery cząsteczek, wygląd z gry, mikstury na czas |
 | `smelting` | piec: dane bloku, zaplanowane aktualizacje, wariant świecący, okno odświeżane wszystkim patrzącym |
 
+## Narzędzia modera
+
+- **Konsola** (F2 albo `, na telefonie w menu pauzy): dziennik modów z błędami (na czerwono, ze śladem
+  wywołań: plik i linia) oraz linia poleceń. Kod Lua wykonuje się na serwerze w imieniu Twojego gracza,
+  np. `engine.player.position()`, `engine.effects.add("alchemy.speed", 30)`, `x = 5` i potem `x * 2`.
+  W grze sieciowej tylko administrator. Strzałki w górę/dół – historia.
+- **Przeładowanie modów**: `/reload` w konsoli zapisuje grę, wczytuje pliki modów od nowa (także nowe mody
+  i zmienioną treść) i wraca do świata – bez wychodzenia z gry. Nie działa, gdy na serwerze są inni gracze.
+- **Błędy**: w grze widać pierwszą linię, w konsoli pełny opis z miejscem w kodzie (`mojmod/main.lua:42`).
+- **Podpowiedzi w edytorze**: plik `docs/engine_api.lua` opisuje całe API `engine` dla Lua Language Server.
+  W VS Code zainstaluj rozszerzenie „Lua” (sumneko) i otwórz folder repozytorium albo `game/mods`
+  (pliki `.luarc.json` już wskazują definicje) – edytor podpowie funkcje i argumenty.
+  Po zmianach w API: `python3 tools/build_api_defs.py`.
+
 ## Bezpieczeństwo
 
 Każde wywołanie kodu moda ma limit czasu (liczony w instrukcjach Lua, około 0,1–0,3 s na hak i kilka

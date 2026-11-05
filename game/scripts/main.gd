@@ -592,6 +592,10 @@ func _process(delta: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and (event.keycode == KEY_F2 or event.keycode == KEY_QUOTELEFT) and console == null:
+		get_viewport().set_input_as_handled()
+		open_console()
+		return
 	if event.is_action_pressed("ui_cancel") and pause_menu == null and windows.is_empty():
 		get_viewport().set_input_as_handled()
 		open_pause()
@@ -602,6 +606,74 @@ func _unhandled_input(event: InputEvent) -> void:
 				get_viewport().set_input_as_handled()
 				Mods.press_bind(b.id)
 				return
+
+
+# ---------- konsola modera i przeładowanie modów ----------
+
+var console: ModConsole
+
+
+func open_console() -> void:
+	if console:
+		return
+	close_pause()
+	console = ModConsole.new()
+	console.main = self
+	console.closed.connect(func():
+		console = null
+		player.ui_blocked = not windows.is_empty()
+		if windows.is_empty() and not touch:
+			Input.mouse_mode = Input.MOUSE_MODE_CAPTURED)
+	ui.add_child(console)
+	player.ui_blocked = true
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+## Polecenie wpisane w konsoli albo czacie (u siebie): /reload działa lokalnie, reszta idzie do serwera.
+func run_command_local(text: String, out: Node) -> void:
+	var cmd := text.substr(1).get_slice(" ", 0).to_lower()
+	if cmd == "reload":
+		var err := reload_mods()
+		if err != "" and out:
+			out.print_line(err, "#ff8a7a")
+		return
+	if Net.is_client():
+		Net.c_command.rpc_id(1, text)
+	else:
+		var r := run_command(Mods.local_peer, text)
+		if out and r != "":
+			out.print_line(r)
+
+
+## Przeładowanie modów bez wychodzenia z gry: zapis, ponowne wczytanie plików modów i świata.
+func reload_mods() -> String:
+	if Net.is_client():
+		return "Mody przeładowuje serwer (polecenie /reload na serwerze)."
+	if Net.online() and remote_count() > 0:
+		return "Nie można przeładować modów, gdy na serwerze są inni gracze."
+	save_game()
+	ModPack.clear_cache()
+	ModManager.scan()
+	ModManager.load_user()
+	Mods.stop()
+	print("PRZEŁADOWANIE modów")
+	GameState.start(GameState.current_dir)
+	return ""
+
+
+## Polecenie na serwerze w imieniu gracza `p`. Zwraca odpowiedź dla gracza.
+func run_command(p: int, text: String) -> String:
+	return Commands.run(self, p, text)
+
+
+## Rola gracza: administrator może używać konsoli Lua i poleceń administracyjnych.
+func role_of(p: int) -> String:
+	var s: Session = Mods.sessions.get(p)
+	if s == null:
+		return "player"
+	if s.local and Net.mode != "dedicated":
+		return "admin"
+	return str(GameState.current.get("roles", {}).get(s.account, "player"))
 
 
 # ---------- okna modów ----------
@@ -1456,6 +1528,27 @@ func _test_api(dir: String) -> void:
 	get_tree().quit()
 
 
+func _test_console(dir: String) -> void:
+	await _wait_loaded()
+	if GameState.has_meta("reloaded"):
+		print("KONSOLA po przeładowaniu: mody=", Mods.loaded.size(), " świat wczytany, gracz w ", player.global_position.snapped(Vector3.ONE))
+		get_tree().quit()
+		return
+	var me := Mods.local_peer
+	print("KONSOLA wynik: ", Mods.console_exec(me, "engine.player.position()"))
+	print("KONSOLA tabela: ", Mods.console_exec(me, "engine.items.def('apple')"))
+	print("KONSOLA instrukcja: ", Mods.console_exec(me, "x = 5"), " | potem: ", Mods.console_exec(me, "x * 2"))
+	print("KONSOLA błąd: ", Mods.console_exec(me, "local t = nil; return t.pole"))
+	print("KONSOLA /help: ", run_command(me, "/help").replace("\n", " | "))
+	print("KONSOLA /cos: ", run_command(me, "/cos"))
+	open_console()
+	await _wait(0.3)
+	await _shot(dir, "c1_console")
+	console.close()
+	GameState.set_meta("reloaded", true)
+	print("KONSOLA /reload: ", run_command(me, "/reload"))
+
+
 func _count_item(item: String) -> int:
 	var n := 0
 	for cn in ["hotbar", "backpack"]:
@@ -1699,6 +1792,9 @@ func _autotest(dir: String) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--craft-only"):
 		await _test_craft(dir)
+		return
+	if OS.get_cmdline_user_args().has("--console-only"):
+		await _test_console(dir)
 		return
 	if OS.get_cmdline_user_args().has("--api-only"):
 		await _test_api(dir)

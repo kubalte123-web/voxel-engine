@@ -135,7 +135,7 @@ func _open_lua() -> bool:
 		push_error(load_errors["_"])
 		lua = null
 		return false
-	for k in ["dispatch", "make_env", "input", "window_action", "finalize", "run_chunk", "block_update", "projectile_hit", "item_tooltip"]:
+	for k in ["dispatch", "make_env", "input", "window_action", "finalize", "run_chunk", "block_update", "projectile_hit", "item_tooltip", "console"]:
 		_api[k] = res.get(k)
 	return true
 
@@ -305,13 +305,29 @@ func report_error(mod_id: String, msg: String) -> void:
 	logs.append(line)
 	if _errors_shown < MAX_ERRORS_SHOWN:
 		_errors_shown += 1
-		notified.emit("Błąd w modzie „%s”: %s" % [_mod_name(mod_id), msg.left(140)])
+		notified.emit("Błąd w modzie „%s”: %s (szczegóły: konsola F2)" % [_mod_name(mod_id), msg.get_slice("\n", 0).left(140)])
+	log_added.emit(line)
 
 
 func _log(mod_id: String, msg: String) -> void:
 	var line := "[%s] %s" % [mod_id, msg]
 	print(line)
 	logs.append(line)
+	log_added.emit(line)
+
+
+signal log_added(line: String)
+
+
+## Konsola: kod Lua wykonany w imieniu gracza `peer` (serwer). Zwraca wynik jako tekst.
+func console_exec(peer: int, code: String) -> String:
+	if not _api.has("console"):
+		return "Skrypty modów nie działają (klient bez serwera?)."
+	var prev := ctx
+	ctx = peer
+	var r: Variant = _api.console.invoke(code)
+	ctx = prev
+	return str(r) if r != null else ""
 
 
 func _mod_name(id: String) -> String:
