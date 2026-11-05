@@ -656,7 +656,15 @@ func _apply_settings() -> void:
 	player.camera.far = dist + 64.0
 
 
+var prof_main_ms := 0.0
+
 func _process(delta: float) -> void:
+	var tp0 := Time.get_ticks_usec()
+	_process_inner(delta)
+	prof_main_ms = (Time.get_ticks_usec() - tp0) / 1000.0
+
+
+func _process_inner(delta: float) -> void:
 	world.update_center(player.global_position)
 	if Net.online() and Net.is_server():
 		var extra: Array[Vector3] = []
@@ -1754,6 +1762,180 @@ func _test_perf() -> void:
 	get_tree().quit()
 
 
+## Pomiar renderowania: zasięgi z --bench-radii (domyślnie 8,16), z cieniami i bez, obrót kamery o 360°.
+## Wyniki: wiersze BENCH w konsoli i plik render_bench.json w folderze zrzutów. Opcje gracza nie są zapisywane.
+func _test_render_bench(dir: String) -> void:
+	var radii := [8, 16]
+	var far_list := [Settings.far_view]
+	var walk_speeds := []
+	for a in OS.get_cmdline_user_args():
+		if a.begins_with("--bench-walk="):
+			walk_speeds = Array(a.trim_prefix("--bench-walk=").split(",")).map(func(s): return float(s))
+		if a.begins_with("--bench-radii="):
+			radii = Array(a.trim_prefix("--bench-radii=").split(",")).map(func(s): return int(s))
+		if a.begins_with("--bench-far="):
+			far_list = Array(a.trim_prefix("--bench-far=").split(",")).map(func(s): return int(s))
+	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+	Engine.max_fps = 0
+	if not "--bench-window" in OS.get_cmdline_user_args():
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_MAXIMIZED)
+	var vp_rid := get_viewport().get_viewport_rid()
+	RenderingServer.viewport_set_measure_render_time(vp_rid, true)
+	time_of_day = 12.0
+	await _wait_loaded()
+	print("BENCH okno=", DisplayServer.window_get_size(), " renderer=", RenderingServer.get_current_rendering_method(), " karta=", RenderingServer.get_video_adapter_name(), " sterownik=", RenderingServer.get_video_adapter_api_version(), " siatka=", world.mesher_name, " wątki=", world.threaded)
+	var pct := func(a: Array, p: float) -> float:
+		var b := a.duplicate()
+		b.sort()
+		return b[clampi(int(p * (b.size() - 1)), 0, b.size() - 1)]
+	var results := []
+	for r in radii:
+		for fv in far_list:
+			for sh in [true, false]:
+				Settings.render_distance = r
+				Settings.far_view = fv
+				Settings.shadows = sh
+				_apply_settings()
+				var t0 := Time.get_ticks_msec()
+				var calm := 0
+				while calm < 10 and Time.get_ticks_msec() - t0 < 240000:
+					await _wait(0.1)
+					calm = calm + 1 if world.queued.size() == 0 and world.dirty.size() == 0 else 0
+				var load_ms := Time.get_ticks_msec() - t0
+				player.pitch = -0.12
+				for i in 30:
+					await get_tree().process_frame
+				var n := 360
+				var frame := []
+				var logic := []
+				var phys := []
+				var cpu_r := []
+				var gpu_r := []
+				var draws := []
+				var objs := []
+				var prims := []
+				var last := Time.get_ticks_usec()
+				for i in n:
+					player.yaw += TAU / n
+					await get_tree().process_frame
+					var now := Time.get_ticks_usec()
+					frame.append((now - last) / 1000.0)
+					last = now
+					logic.append(Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
+					phys.append(Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0)
+					cpu_r.append(RenderingServer.viewport_get_measured_render_time_cpu(vp_rid) + RenderingServer.get_frame_setup_time_cpu())
+					gpu_r.append(RenderingServer.viewport_get_measured_render_time_gpu(vp_rid))
+					draws.append(Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME))
+					objs.append(Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME))
+					prims.append(Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME))
+				var bodies := 0
+				for c in world.nodes:
+					if is_instance_valid(world.nodes[c]) and world.nodes[c].get_node_or_null("Body") != null:
+						bodies += 1
+				var med: float = pct.call(frame, 0.5)
+				var row := {
+					"radius": r, "far_view": fv, "shadows": sh, "load_ms": load_ms,
+					"fps_median": snappedf(1000.0 / maxf(med, 0.001), 0.1),
+					"frame_ms_median": snappedf(med, 0.01), "frame_ms_p95": snappedf(pct.call(frame, 0.95), 0.01), "frame_ms_max": snappedf(pct.call(frame, 1.0), 0.01),
+					"logic_ms": snappedf(pct.call(logic, 0.5), 0.01), "physics_ms": snappedf(pct.call(phys, 0.5), 0.01),
+					"render_cpu_ms": snappedf(pct.call(cpu_r, 0.5), 0.01), "render_gpu_ms": snappedf(pct.call(gpu_r, 0.5), 0.01),
+					"draw_calls": int(pct.call(draws, 0.5)), "draw_calls_max": int(pct.call(draws, 1.0)),
+					"objects": int(pct.call(objs, 0.5)), "primitives": int(pct.call(prims, 0.5)),
+					"chunk_meshes": world.nodes.size(), "water_meshes": world.water_nodes.size(), "collision_bodies": bodies,
+					"far_tiles": far.tiles.size() if "tiles" in far else -1,
+					"static_mem_mb": snappedf(Performance.get_monitor(Performance.MEMORY_STATIC) / 1048576.0, 0.1),
+					"video_mem_mb": snappedf(Performance.get_monitor(Performance.RENDER_VIDEO_MEM_USED) / 1048576.0, 0.1),
+				}
+				row["parts_ms"] = await _bench_parts(120)
+				results.append(row)
+				print("BENCH ", JSON.stringify(row))
+				await _shot(dir, "bench_r%d_f%d_%s" % [r, fv, "cienie" if sh else "bez_cieni"])
+				if sh:
+					for v in walk_speeds:
+						var w := await _bench_walk(r, fv, v, pct)
+						results.append(w)
+						print("BENCH ", JSON.stringify(w))
+	_bench_write(dir, results)
+	get_tree().quit()
+
+
+func _bench_write(dir: String, results: Array) -> void:
+	var f := FileAccess.open(dir.path_join("render_bench.json"), FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify(results, "  "))
+
+
+## Mediana czasów części klatki (ms): skrypty main/world/far, fizyka.
+func _bench_parts(n: int) -> Dictionary:
+	var acc := {}
+	for i in n:
+		await get_tree().process_frame
+		var d := world.prof.duplicate()
+		d["main_process"] = prof_main_ms
+		d["physics"] = Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
+		d["process_total"] = Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
+		for k in d:
+			if not acc.has(k):
+				acc[k] = []
+			acc[k].append(float(d[k]))
+	var out := {}
+	for k in acc:
+		var a: Array = acc[k]
+		a.sort()
+		out[k] = snappedf(a[a.size() / 2], 0.01)
+	return out
+
+
+## Gracz przesuwany w linii prostej (+x) z prędkością v bloków/s przez 15 s, 30 bloków nad startem.
+func _bench_walk(r: int, fv: int, v: float, pct: Callable) -> Dictionary:
+	var start := player.global_position
+	var y := start.y + 30.0
+	var frame := []
+	var collect := []
+	var applied := []
+	var apply_ms := []
+	var worst_parts := {}
+	var worst := 0.0
+	var dist := 0.0
+	var last := Time.get_ticks_usec()
+	var t_end := Time.get_ticks_msec() + 15000
+	player.pitch = -0.12
+	player.yaw = -PI / 2.0   # patrzy w +x
+	while Time.get_ticks_msec() < t_end:
+		var st0: int = world.apply_stats.full + world.apply_stats.light
+		var us0: int = world.apply_stats.us
+		await get_tree().process_frame
+		var now := Time.get_ticks_usec()
+		var ms := (now - last) / 1000.0
+		last = now
+		dist += v * ms / 1000.0
+		player.global_position = Vector3(start.x + dist, y, start.z)
+		player.velocity = Vector3.ZERO
+		frame.append(ms)
+		collect.append(float(world.prof.get("collect", 0.0)))
+		applied.append(world.apply_stats.full + world.apply_stats.light - st0)
+		apply_ms.append((world.apply_stats.us - us0) / 1000.0)
+		if ms > worst:
+			worst = ms
+			worst_parts = world.prof.duplicate()
+			worst_parts["main_process"] = prof_main_ms
+			worst_parts["physics"] = Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
+			worst_parts["applied_chunks"] = applied[-1]
+	var slow := frame.filter(func(x): return x > 33.3).size()
+	var med: float = pct.call(frame, 0.5)
+	return {
+		"walk_speed": v, "radius": r, "far_view": fv, "shadows": true, "frames": frame.size(),
+		"fps_median": snappedf(1000.0 / maxf(med, 0.001), 0.1), "fps_avg": snappedf(frame.size() / 15.0, 0.1),
+		"frame_ms_median": snappedf(med, 0.01), "frame_ms_p95": snappedf(pct.call(frame, 0.95), 0.01), "frame_ms_p99": snappedf(pct.call(frame, 0.99), 0.01), "frame_ms_max": snappedf(worst, 0.01),
+		"frames_over_33ms_pct": snappedf(100.0 * slow / maxf(1, frame.size()), 0.1),
+		"collect_ms_median": snappedf(pct.call(collect, 0.5), 0.01), "collect_ms_p95": snappedf(pct.call(collect, 0.95), 0.01),
+		"chunks_applied_per_frame_p95": pct.call(applied, 0.95), "chunks_applied_max": pct.call(applied, 1.0),
+		"apply_ms_p95": snappedf(pct.call(apply_ms, 0.95), 0.01),
+		"queued_end": world.queued.size(), "worst_frame_parts": worst_parts,
+	}
+
+
+
 ## Test logiki bloków: skrzynia (kierunek, kontener), piec (dane, plan, świecenie), uprawy (losowe, sąsiad), dźwięki.
 ## Postawy i animacje gracza: kucanie przy krawędzi, pełzanie pod niskim stropem, siedzenie, bieg, seria ataków.
 func _test_anim(dir: String) -> void:
@@ -2385,6 +2567,9 @@ func _autotest(dir: String) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--perf-only"):
 		await _test_perf()
+		return
+	if OS.get_cmdline_user_args().has("--render-bench"):
+		await _test_render_bench(dir)
 		return
 	if OS.get_cmdline_user_args().has("--blocks-only"):
 		await _test_blocks(dir)

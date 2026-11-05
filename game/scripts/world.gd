@@ -37,6 +37,7 @@ var unsaved := {}  # chunki zmienione od ostatniego zapisu
 var nodes := {}    # Vector3i -> MeshInstance3D
 var built := {}    # chunki gotowe (także puste, bez siatki)
 var queued := {}   # chunki w trakcie budowy
+var prof := {}     # pomiar: czasy części _process w ostatniej klatce (ms)
 var dirty := {}    # chunki do ponownej budowy po zakończeniu bieżącej
 var sync_queue: Array[Vector3i] = []
 var results: Array = []
@@ -137,11 +138,17 @@ func update_center(world_pos: Vector3) -> void:
 func _process(_delta: float) -> void:
 	if center.x == 999999:
 		return
+	var t0 := Time.get_ticks_usec()
 	_collect_results()
+	var t1 := Time.get_ticks_usec()
 	_schedule_missing()
+	var t2 := Time.get_ticks_usec()
 	if queued.size() < max_queued:
 		_process_relight()
+	var t3 := Time.get_ticks_usec()
 	_unload_far()
+	var t4 := Time.get_ticks_usec()
+	prof = {"collect": (t1 - t0) / 1000.0, "schedule": (t2 - t1) / 1000.0, "relight": (t3 - t2) / 1000.0, "unload": (t4 - t3) / 1000.0}
 	if not threaded and not sync_queue.is_empty():
 		var c: Vector3i = sync_queue.pop_front()
 		_job(c)
