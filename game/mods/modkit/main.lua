@@ -17,7 +17,8 @@ end
 ---------------------------------------------------------------------------
 kit.inventory = {}
 
--- Przedmioty to klucze tekstowe ("stone", "apple"); miejsce w kontenerze to {item, count} albo {}.
+-- Przedmioty to klucze tekstowe ("stone", "apple"); miejsce w kontenerze to {item, count, data} albo {}.
+-- Stosy z danymi egzemplarza (data) nie łączą się ze zwykłymi.
 
 -- Dodaje przedmioty do kontenera: najpierw dokłada do istniejących stosów, potem w puste miejsca.
 -- Zwraca liczbę sztuk, które się nie zmieściły.
@@ -28,7 +29,7 @@ function kit.inventory.add(container, item, count)
 	for i = 1, size do
 		if left <= 0 then break end
 		local s = engine.items.get(container, i)
-		if s.item == item and s.count < stack then
+		if s.item == item and s.data == nil and s.count < stack then
 			local n = math.min(left, stack - s.count)
 			engine.items.set(container, i, { item = item, count = s.count + n })
 			left = left - n
@@ -64,7 +65,7 @@ function kit.inventory.take(container, index, n)
 	if s.count - taken <= 0 then
 		engine.items.set(container, index, {})
 	else
-		engine.items.set(container, index, { item = s.item, count = s.count - taken })
+		engine.items.set(container, index, { item = s.item, count = s.count - taken, data = s.data })
 	end
 	return taken
 end

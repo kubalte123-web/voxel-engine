@@ -679,7 +679,7 @@ func _remesh(c: Vector3i) -> void:
 
 
 ## Przejście promienia przez siatkę bloków (DDA). Zwraca trafiony blok i ścianę wejścia.
-func raycast(origin: Vector3, dir: Vector3, max_dist: float, with_liquids: bool = false) -> Dictionary:
+func raycast(origin: Vector3, dir: Vector3, max_dist: float, with_liquids: bool = false, solid_only: bool = false) -> Dictionary:
 	dir = dir.normalized()
 	var pos := Vector3i(floori(origin.x), floori(origin.y), floori(origin.z))
 	var step := Vector3i(int(signf(dir.x)), int(signf(dir.y)), int(signf(dir.z)))
@@ -695,7 +695,7 @@ func raycast(origin: Vector3, dir: Vector3, max_dist: float, with_liquids: bool 
 	var t := 0.0
 	while t <= max_dist:
 		var hb := get_block(pos)
-		if hb != Blocks.AIR and (with_liquids or not reg.is_liquid(hb)):
+		if hb != Blocks.AIR and (with_liquids or not reg.is_liquid(hb)) and (not solid_only or (reg.props[hb] & Registry.SOLID) != 0 or reg.is_liquid(hb)):
 			return {"hit": true, "pos": pos, "normal": normal, "dist": t}
 		if t_max.x < t_max.y and t_max.x < t_max.z:
 			pos.x += step.x; t = t_max.x; t_max.x += t_delta.x; normal = Vector3i(-step.x, 0, 0)

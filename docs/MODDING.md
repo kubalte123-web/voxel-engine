@@ -271,6 +271,59 @@ Silnik sam gra:
 
 Gracz ustawia głośność w Opcjach.
 
+## Celowanie i promień
+
+```lua
+local eye = engine.player.eye_position()      -- Vector3: oczy gracza (w imieniu którego działa kod)
+local dir = engine.player.look_direction()    -- Vector3 o długości 1: kierunek celownika
+local hit = engine.player.raycast(100)        -- pierwszy blok na linii wzroku do 100 bloków albo nil
+-- to samo z dowolnego punktu: engine.world.raycast(skąd, kierunek, zasięg, { liquids = false, solid = true })
+if hit then
+	-- hit.position (blok), hit.normal (ściana trafienia), hit.place_pos (pole przed ścianą),
+	-- hit.point (dokładny punkt), hit.distance, hit.block (numer), hit.key (klucz)
+end
+```
+
+Domyślnie promień przechodzi przez rośliny, pochodnie i inne bloki bez kolizji oraz przez ciecze.
+`engine.player.target()` działa tylko w zasięgu kopania; do dalekiego celowania używaj `raycast`.
+
+## Pociski
+
+Fizykę i trafienia liczy silnik na serwerze (wzdłuż całej drogi w każdej klatce, więc szybki pocisk nie
+przenika przez bloki); klienci widzą lot. Mod opisuje rodzaj pocisku i reaguje na trafienie.
+
+```lua
+-- content.lua
+engine.projectiles.register("block_gun.shot", {
+	speed = 24, gravity = 9.8, radius = 0.15, lifetime = 5,              -- m/s, m/s², m, s
+	collision = { blocks = true, entities = true, players = true, liquids = false },
+	visual = { type = "block", size = 0.4, spin = true },               -- "block" | "item" | "none"
+	trail = "alchemy.ember",                                             -- cząsteczki za pociskiem (opcjonalnie)
+})
+
+-- main.lua
+local id = engine.projectiles.spawn("block_gun.shot", {
+	position = engine.player.eye_position(),
+	direction = engine.player.look_direction(),   -- albo velocity = {x, y, z}
+	speed = 30,                                    -- opcjonalnie zamiast speed z rodzaju
+	data = { block = "stone" },                    -- dowolne dane; data.block / data.item = wygląd w locie
+})                                                 -- owner = bieżący gracz (można podać inny)
+
+engine.projectiles.on_hit("block_gun.shot", function(ctx)
+	-- ctx.hit_type: "block" | "entity" | "player" | "expire" (skończył się czas lotu)
+	-- ctx.position (Vector3i trafionego bloku), ctx.normal, ctx.place_pos (= position + normal),
+	-- ctx.point (Vector3), ctx.entity / ctx.entity_type, ctx.player, ctx.owner, ctx.data, ctx.velocity
+	if ctx.hit_type == "block" and engine.world.get_block(ctx.place_pos) == 0 then
+		engine.world.set_block(ctx.place_pos, ctx.data.block)
+	elseif ctx.hit_type == "entity" then
+		engine.entities.damage(ctx.entity, 4, "pocisk")
+	end
+end)
+```
+
+Obsługa trafienia działa w imieniu strzelca (`engine.player.*` to on). Pocisk nie trafia strzelca przez
+pierwsze 0,3 s lotu. `engine.projectiles.remove(id)` usuwa pocisk bez trafienia.
+
 ## Cząsteczki
 
 ```lua
@@ -303,10 +356,41 @@ engine.items.register("apple", {
 	icon = { pattern = "food", color = "#d23a2a" },   -- albo "textures/apple.png"
 	max_stack = 64,
 	food = 4,              -- dowolne własne pola, czytane przez engine.items.def("apple").food
+	description = "Soczyste, czerwone.",                         -- opis w dymku
+	tooltip = { category = "Jedzenie", lines = { "Głód: +4" } },  -- kategoria i stałe linie dymka
 })
 ```
 
-Miejsce w kontenerze to `{ item = "apple", count = 3 }` albo pusta tabela `{}`.
+Miejsce w kontenerze to `{ item = "apple", count = 3 }` albo pusta tabela `{}`. Może mieć też
+`data` – dane tego egzemplarza (np. amunicja w broni) – i `info` – linie opisu policzone przez mod.
+
+### Dymek z opisem
+
+Gracz widzi opis po najechaniu na przedmiot w oknie (PC), w pasku u dołu okna po dotknięciu przedmiotu
+(telefon) i nad paskiem przez 2 s po wybraniu przedmiotu. Opis to: nazwa, `[kategoria]`, `description`,
+`tooltip.lines` i linie dynamiczne:
+
+```lua
+engine.items.tooltip("block_gun", function(slot)          -- slot = {item, count, data}
+	local d = slot.data or {}
+	return { "Załadowano: " .. (d.block or "nic"), "Amunicja: " .. (d.ammo or 0) }
+end)
+```
+
+Funkcja działa na serwerze przy każdej zmianie miejsca z tym przedmiotem, a wynik trafia do graczy razem
+z przedmiotem. Ma być szybka i nie może zmieniać ekwipunku.
+
+### Dane egzemplarza przedmiotu
+
+```lua
+local hb, i = engine.require("backpack").HOTBAR, engine.hotbar.selected()
+engine.items.set_data(hb, i, "ammo", 8)                  -- dopisuje pole do data tego miejsca
+local d = engine.items.data(hb, i)                        -- {ammo = 8} (kopia)
+engine.items.set(hb, i, { item = "block_gun", count = 1, data = { ammo = 8, block = "stone" } })
+```
+
+Stosy z różnymi `data` się nie łączą (`kit.inventory.add` dokłada tylko do stosów bez danych), a
+`kit.inventory.take` zachowuje dane. Przedmiot upuszczony na ziemię (np. z rozbitej skrzyni) traci dane.
 
 ## Świat
 
@@ -460,6 +544,10 @@ Pozycje można podawać jako wektor albo tabelę `{x = 1, y = 2, z = 3}`.
 | `engine.sound.play(nazwa, opts)`, `stop(id)`; `engine.sounds.register` | Dźwięki |
 | `engine.blocks.look(pos, wygląd)`, `get_look(pos)`, `animate(pos, nazwa)` | Model bloku: wygląd i animacje |
 | `engine.particles.register(nazwa, opis)`, `spawn(nazwa, pos, opts)` | Cząsteczki |
+| `engine.projectiles.register/spawn/on_hit/remove` | Pociski |
+| `engine.player.eye_position()`, `look_direction()`, `raycast(zasięg, opts)` | Celowanie |
+| `engine.world.raycast(skąd, kierunek, zasięg, opts)` | Promień przez świat |
+| `engine.items.data(c, i)`, `set_data(c, i, k, v)`, `tooltip(klucz, fn)` | Dane egzemplarza i opis dynamiczny |
 | `engine.world.biome(pos)`, `biome_key(pos)`, `height(x, z)`, `time()`, `set_time(h)` | Świat |
 | `engine.player.position()`, `teleport(pos)`, `velocity()`, `push(v)` | Ruch gracza |
 | `engine.player.set(stat, v)`, `get(stat)` | Statystyki: `speed`, `jump`, `gravity`, `reach`, `auto_jump`, `max_health`, `spawn`, `break_speed`, `swim_speed` |

@@ -216,6 +216,37 @@ local function block_update(key, ctx)
 	end
 end
 
+-- pociski: rodzaj -> lista {fn, owner}; opisy przedmiotów: klucz -> {fn, owner}
+local projectile_handlers = {}
+local tooltip_fns = {}
+
+local function projectile_hit(type, ctx)
+	local list = projectile_handlers[type]
+	if not list then return end
+	if guard.depth == 0 then guard.tripped = false end
+	local c = to_lua(ctx)
+	for _, h in ipairs(list) do
+		local ok, err = guarded(h.owner, LIMIT_CALL, h.fn, c)
+		if not ok and err ~= nil then host.report_error(h.owner, "pocisk " .. type .. ": " .. tostring(err)) end
+	end
+end
+
+local function item_tooltip(key, slot)
+	local t = tooltip_fns[key]
+	if not t then return nil end
+	if guard.depth == 0 then guard.tripped = false end
+	local ok, lines = guarded(t.owner, LIMIT_CALL, t.fn, to_lua(slot))
+	if not ok then
+		if lines ~= nil then host.report_error(t.owner, "opis " .. key .. ": " .. tostring(lines)) end
+		return nil
+	end
+	if type(lines) == "string" then lines = { lines } end
+	if type(lines) ~= "table" then return nil end
+	local out = {}
+	for _, l in ipairs(lines) do out[#out + 1] = tostring(l) end
+	return to_godot(out)
+end
+
 local function window_action(id, fields)
 	local a = window_actions[id]
 	if a then
@@ -262,6 +293,7 @@ local R = {
 	entities = {},
 	sounds = {},
 	particles = {},
+	projectiles = {},
 }
 
 local function open_registry(what)
@@ -438,7 +470,7 @@ local function finalize()
 	for key, s in pairs(R.structures) do structures[key] = norm_structure(s) end
 	return to_godot({
 		blocks = blocks, items = items, animations = copy(R.animations), entities = copy(R.entities),
-		sounds = copy(R.sounds), particles = copy(R.particles),
+		sounds = copy(R.sounds), particles = copy(R.particles), projectiles = copy(R.projectiles),
 		worldgen = { config = copy(R.config), biomes = biomes, ores = ores, structures = structures },
 	})
 end
@@ -557,6 +589,22 @@ local function make_api(mod_id)
 		get = function(id, index) return to_lua(host.slot_get(id, index - 1)) end,
 		set = function(id, index, slot) host.slot_set(id, index - 1, to_godot(slot or {})) end,
 		max_stack = function(key) return host.max_stack(key or "") end,
+		-- dane egzemplarza w miejscu kontenera (np. amunicja broni); stosy z różnymi danymi się nie łączą
+		data = function(id, index) return (to_lua(host.slot_get(id, index - 1)) or {}).data or {} end,
+		set_data = function(id, index, key, value)
+			local s = to_lua(host.slot_get(id, index - 1)) or {}
+			if s.item == nil then return false end
+			s.data = s.data or {}
+			s.data[key] = value
+			host.slot_set(id, index - 1, to_godot(s))
+			return true
+		end,
+		-- opis dynamiczny: fn(slot) zwraca listę linii; liczony na serwerze przy każdej zmianie miejsca
+		tooltip = function(key, fn)
+			assert(type(fn) == "function", "items.tooltip: drugi argument musi być funkcją")
+			tooltip_fns[key] = { fn = fn, owner = mod_id }
+			host.item_tooltip_register(key)
+		end,
 	}
 
 	E.worldgen = {
@@ -631,6 +679,31 @@ local function make_api(mod_id)
 		spawn = function(name, pos, opts) host.particles_spawn(tostring(name), VF(pos), to_godot(opts or {})) end,
 	}
 
+	-- pociski: rodzaj w content.lua, wystrzał i obsługa trafienia w skryptach (fizyka i kolizje liczy serwer)
+	E.projectiles = {
+		register = function(type, def)
+			open_registry("projectiles.register")
+			R.projectiles[type] = copy(def or {})
+		end,
+		get = function(type) return R.projectiles[type] end,
+		-- opts: position, direction (albo velocity), speed, owner (domyślnie bieżący gracz), data
+		spawn = function(type, opts)
+			opts = copy(opts or {})
+			if opts.position then opts.position = VF(opts.position) end
+			if opts.direction then opts.direction = VF(opts.direction) end
+			if opts.velocity then opts.velocity = VF(opts.velocity) end
+			if opts.owner == nil then opts.owner = host.player_id() end
+			return host.projectile_spawn(tostring(type), to_godot(opts))
+		end,
+		remove = function(id) host.projectile_remove(tonumber(id) or -1) end,
+		on_hit = function(type, fn)
+			assert(type ~= nil and fn ~= nil, "projectiles.on_hit: podaj rodzaj i funkcję")
+			projectile_handlers[type] = projectile_handlers[type] or {}
+			local l = projectile_handlers[type]
+			l[#l + 1] = { fn = fn, owner = mod_id }
+		end,
+	}
+
 	E.animation = {
 		-- {length = 1.0, loop = false, tracks = {arm_right = {{0, {0,0,0}}, {0.5, {-90,0,0}}}, ...}}
 		register = function(name, def)
@@ -676,6 +749,11 @@ local function make_api(mod_id)
 
 	E.world = {
 		get_block = function(pos) return host.get_block(VI(pos)) end,
+		-- promień od punktu w kierunku: {position, normal, place_pos, point, distance, block, key} albo nil
+		raycast = function(from, dir, dist, opts)
+			opts = opts or {}
+			return to_lua(host.world_raycast(VF(from), VF(dir), tonumber(dist) or 32, opts.liquids == true, opts.solid ~= false))
+		end,
 		set_block = function(pos, id)
 			if type(id) == "string" then id = host.block_id(id) end
 			return host.set_block(VI(pos), id)
@@ -750,6 +828,12 @@ local function make_api(mod_id)
 		colors = function(t) host.player_colors(to_godot(t)) end,
 		-- blok, w który celuje gracz: {pos, normal, block}; with_liquids = true uwzględnia ciecze
 		target = function(with_liquids) return to_lua(host.player_target(with_liquids == true)) end,
+		eye_position = function() return host.player_eye() end,
+		look_direction = function() return host.player_look() end,
+		raycast = function(dist, opts)
+			opts = opts or {}
+			return to_lua(host.world_raycast(host.player_eye(), host.player_look(), tonumber(dist) or 32, opts.liquids == true, opts.solid ~= false))
+		end,
 		in_liquid = function() return host.player_in_liquid() end,
 		eyes_in_liquid = function() return host.player_eyes_in_liquid() end,
 		selected_item = function() return to_lua(host.selected_item()) end,
@@ -840,4 +924,4 @@ local function make_env(mod_id)
 	return env
 end
 
-return { dispatch = dispatch, make_env = make_env, input = input, window_action = window_action, finalize = finalize, run_chunk = run_chunk, block_update = block_update }
+return { dispatch = dispatch, make_env = make_env, input = input, window_action = window_action, finalize = finalize, run_chunk = run_chunk, block_update = block_update, projectile_hit = projectile_hit, item_tooltip = item_tooltip }

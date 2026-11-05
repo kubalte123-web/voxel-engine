@@ -26,6 +26,7 @@ var was_underwater := false
 
 # gra wieloosobowa
 var players := {}        # peer -> Player (lokalny) albo RemotePlayer
+var projectiles: Projectiles   # pociski z modów (engine.projectiles)
 var pending_names := {}  # serwer: peer -> nazwa podana przy dołączaniu
 var my_account := ""
 
@@ -121,6 +122,11 @@ func _ready() -> void:
 	Mods.ui_window_requested.connect(_open_mod_window)
 	Mods.ui_close_requested.connect(_close_mod_window)
 	Net.main = self
+	projectiles = Projectiles.new()
+	projectiles.name = "Projectiles"
+	projectiles.main = self
+	projectiles.world = world
+	add_child(projectiles)
 	var me := Net.my_id()
 	players[me] = player
 	var sess := Mods.add_session(me, Settings.player_name, player, true)
@@ -155,6 +161,8 @@ func _ready() -> void:
 		touch.refresh_binds()
 
 	# test sieci: serwer stawia warzący kocioł z kolorem cieczy obok punktu startu
+	if Net.mode == "dedicated" and OS.get_cmdline_user_args().has("--test-projectiles") and Mods.registry.projectiles.has("apitest.block"):
+		_test_projectiles_server.call_deferred()
 	if Net.mode == "dedicated" and OS.get_cmdline_user_args().has("--test-cauldron") and Mods.registry.id_of("cauldron") > 0:
 		_test_cauldron_server.call_deferred()
 	if not GameState.autotest_dir.is_empty():
@@ -1082,6 +1090,13 @@ func _autotest_client(dir: String) -> void:
 	print("KLIENT mody=", Mods.loaded, " z serwera=", ModManager.server_mods.keys(), " blok crystal=", Blocks.id("crystal"))
 	await _wait_loaded()
 	await _wait(2.0)
+	if opt.has("expect-projectiles"):
+		var seen := {}
+		for i in 30:
+			await _wait(0.1)
+			for id in projectiles.list:
+				seen[id] = projectiles.list[id].pos
+		print("KLIENT widziane pociski: ", seen.size(), " przykład lotu: ", seen.values().slice(0, 2))
 	if opt.has("expect-cauldron"):
 		await _wait(1.0)
 		for ch in world.models.by_chunk.values():
@@ -1244,6 +1259,13 @@ func _test_alchemy(dir: String) -> void:
 	get_tree().quit()
 
 
+func _test_projectiles_server() -> void:
+	while true:
+		await _wait(0.7)
+		if remote_count() > 0:
+			projectiles.spawn("apitest.block", {"position": Vector3(4, 30, 0), "direction": Vector3(0.3, 0.2, -1), "speed": 12.0, "data": {"block": "planks"}})
+
+
 func _test_cauldron_server() -> void:
 	while not (world.is_loaded(Vector3i(3, 0, 0)) and world.is_loaded(Vector3i(3, 31, 0)) and world.is_loaded(Vector3i(3, 40, 0))):
 		await _wait(0.2)
@@ -1361,6 +1383,60 @@ func _test_gun(dir: String) -> void:
 	await scen.call("B (patyk w 1., blokomiot w 2., ziemia w 3.)", [{"item": "stick", "count": 3}, {"item": "block_gun", "count": 1}, {"item": "dirt", "count": 5}])
 	await scen.call("C (ziemia w 1., blokomiot w 2.)", [{"item": "dirt", "count": 5}, {"item": "block_gun", "count": 1}])
 	print("GUN tekstura cegły: ", "brak pliku (fioletowa szachownica)" if not FileAccess.file_exists("res://mods/base/textures/bricks.png") else "jest")
+	get_tree().quit()
+
+
+## Test API pocisków, celowania, opisów i danych przedmiotów (mod testowy apitest w user://mods).
+func _test_api(dir: String) -> void:
+	await _wait_loaded()
+	await _wait(0.5)
+	var me := Net.my_id()
+	var hb := Mods.cid("hotbar")
+	print("API mod=", Mods.loaded.has("apitest"), " błąd=", Mods.load_errors.get("apitest", "brak"), " pociski=", Mods.registry.projectiles.keys())
+	Mods.set_slot(hb, 0, {"item": "test_launcher", "count": 1, "data": {"ammo": 7}})
+	print("API opis: ", Mods.registry.tooltip(Mods.slot(hb, 0)).replace("\n", " | "), "  dane=", Mods.slot(hb, 0).get("data"))
+	# stosy z różnymi danymi się nie łączą
+	Mods.set_slot(hb, 1, {"item": "planks", "count": 5, "data": {"kolor": "czerwony"}})
+	Mods.local_held.clear()
+	Mods.local_held.merge({"item": "planks", "count": 3, "data": {"kolor": "zielony"}})
+	Mods.window_click(me, hb, 1, false)
+	print("API łączenie różnych danych: miejsce=", Mods.slot(hb, 1), " w ręce=", Mods.local_held)
+	Mods.local_held.clear()
+	Mods.local_held.merge({"item": "planks", "count": 3, "data": {"kolor": "zielony"}})
+	Mods.window_click(me, hb, 1, false)
+	print("API łączenie tych samych danych: miejsce=", Mods.slot(hb, 1), " w ręce=", Mods.local_held)
+	Mods.local_held.clear()
+	# strzał prawie poziomo
+	Mods.camera_stats.erase("mode")
+	player.first_person = true
+	player.select(0)
+	player.yaw = 0.0
+	player.pitch = 0.05
+	await _wait(0.5)
+	Mods.as_player(me, func(): return Mods.before("item.use", {"item": "test_launcher", "slot": 1}))
+	await _wait(0.15)
+	print("API celowanie: ", Mods._h_storage_get("apitest", "aim"), " pocisków w locie=", projectiles.list.size())
+	await _wait(0.25)
+	await _shot(dir, "p1_flight")
+	await _wait(4.0)
+	var hit: Dictionary = Mods._h_storage_get("apitest", "last_hit")
+	print("API trafienie: ", hit, " pocisków w locie=", projectiles.list.size())
+	if hit.has("place"):
+		var pp := Vector3i(int(hit.place[0]), int(hit.place[1]), int(hit.place[2]))
+		print("API blok w miejscu trafienia: ", Mods.registry.block_key(world.get_block(pp)), " odległość od gracza=", snappedf(Vector3(pp).distance_to(player.global_position), 0.1))
+	# trafienie w owcę
+	var front := player.global_position + Vector3(0, 0, -6)
+	var sid: int = entities.spawn_creature("sheep", front, {}, 1.0)
+	await _wait(0.4)
+	var sheep: Creature = entities.get_entity(sid)
+	sheep.set_physics_process(false)
+	sheep.global_position = front
+	var hp := sheep.health
+	player.pitch = atan2((front.y + 0.6) - (player.global_position.y + 1.55), 6.0)
+	await _wait(0.2)
+	Mods.as_player(me, func(): return Mods.before("item.use", {"item": "test_launcher", "slot": 1}))
+	await _wait(1.0)
+	print("API strzał w owcę: ", Mods._h_storage_get("apitest", "last_hit"), " zdrowie owcy ", hp, " -> ", sheep.health if is_instance_valid(sheep) else "zginęła")
 	get_tree().quit()
 
 
@@ -1607,6 +1683,9 @@ func _autotest(dir: String) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--craft-only"):
 		await _test_craft(dir)
+		return
+	if OS.get_cmdline_user_args().has("--api-only"):
+		await _test_api(dir)
 		return
 	if OS.get_cmdline_user_args().has("--gun-only"):
 		await _test_gun(dir)

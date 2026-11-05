@@ -56,6 +56,10 @@ a mody mogą udostępniać sobie biblioteki przez `engine.export` i `engine.requ
 - Blok z modelem: `shape = "model"`, `model = {file = "models/x.glb", parts, animations, emitters, collision, look}`;
   w skryptach `engine.blocks.look(pos, {colors, hide, anim, emitters})`, `engine.blocks.animate(pos, nazwa)`.
 - Cząsteczki: `engine.particles.register` (content), `engine.particles.spawn(nazwa, pos, opts)`.
+- Pociski: `engine.projectiles.register` (content), `spawn(rodzaj, {position, direction, data})`, `on_hit(rodzaj, fn)`.
+- Celowanie: `engine.player.eye_position()`, `look_direction()`, `raycast(zasięg)`; `engine.world.raycast(...)`.
+- Opis przedmiotu: pola `description` i `tooltip = {category, lines}`; dynamiczny: `engine.items.tooltip(klucz, fn)`.
+  Dane egzemplarza: `data` w miejscu kontenera, `engine.items.data/set_data`.
 - Dźwięki: `engine.sounds.register` (content), `engine.sound.play(nazwa, {pos = pos})`; pole bloku `sound` = grupa.
 - Pozycje jako `{x =, y =, z =}` albo wektor. Mod opcjonalny: `"after"` w mod.json i `engine.optional(id)`.
 - Przedmioty modów tools i crafting: stick, wooden_/stone_/iron_ + pickaxe/axe/shovel/sword, crafting_table, workbench.

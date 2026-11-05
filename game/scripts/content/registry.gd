@@ -35,6 +35,7 @@ var item_keys: Array[String] = []
 var placeable: Array[String] = []  # przedmioty-bloki do stawiania (tryb kreatywny)
 var worldgen := {}
 var animations := {}
+var projectiles := {}              # rodzaj pocisku -> opis (fizyka, kolizje, wygląd)
 var particles := {}                # nazwa efektu cząsteczek -> opis
 var sounds := {}                   # nazwa dźwięku -> {file|files, volume, pitch, pitch_random, range, mod}
 var entities := {}                 # rodzaj stworzenia -> definicja (części modelu, AI, łup, pojawianie się)
@@ -153,6 +154,7 @@ func build(content: Dictionary, paths: Dictionary = {}) -> void:
 	entities = content.get("entities", {}) if content.get("entities") is Dictionary else {}
 	sounds = content.get("sounds", {}) if content.get("sounds") is Dictionary else {}
 	particles = content.get("particles", {}) if content.get("particles") is Dictionary else {}
+	projectiles = content.get("projectiles", {}) if content.get("projectiles") is Dictionary else {}
 	_build_atlas()
 
 
@@ -336,6 +338,26 @@ func drops(id: int) -> Array:
 
 func item_block(item_key: String) -> int:
 	return int(items.get(item_key, {}).get("block", -1))
+
+
+## Opis przedmiotu (dymek): nazwa, kategoria, opis, stałe linie z definicji i linie policzone przez mod.
+func tooltip(slot: Dictionary) -> String:
+	var key := str(slot.get("item", ""))
+	if key == "":
+		return ""
+	var d: Dictionary = items.get(key, {}).get("data", {})
+	var lines: Array[String] = [item_name(key)]
+	var tt: Variant = d.get("tooltip")
+	if tt is Dictionary and str(tt.get("category", "")) != "":
+		lines.append("[" + str(tt.category) + "]")
+	if str(d.get("description", "")) != "":
+		lines.append(str(d.description))
+	if tt is Dictionary:
+		for l in arr(tt.get("lines")):
+			lines.append(str(l))
+	for l in arr(slot.get("info")):
+		lines.append(str(l))
+	return "\n".join(lines)
 
 
 func item_name(item_key: String) -> String:

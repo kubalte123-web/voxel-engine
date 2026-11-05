@@ -55,7 +55,13 @@ func _ready() -> void:
 	mod_texts.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(mod_texts)
 
-	player.selection_changed.connect(func(_i): _rebuild_bar())
+	item_label = _outlined(16)
+	item_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	item_label.modulate.a = 0.0
+	add_child(item_label)
+	player.selection_changed.connect(func(_i):
+		_rebuild_bar()
+		_show_item())
 	player.health_changed.connect(func(v, _m):
 		if _last_health >= 0.0 and v < _last_health:
 			flash = 0.45
@@ -178,6 +184,26 @@ func _rebuild_mod_hud() -> void:
 			mod_texts.add_child(l)
 
 
+## Po zmianie przedmiotu w ręce: nazwa i pierwsze linie opisu nad paskiem przez 2 s.
+var item_label: Label
+var _item_tw: Tween
+
+
+func _show_item() -> void:
+	var it := player.current_item()
+	if it.is_empty():
+		item_label.modulate.a = 0.0
+		return
+	var lines := Mods.registry.tooltip(it).split("\n")
+	item_label.text = "\n".join(lines.slice(0, 3))
+	item_label.modulate.a = 1.0
+	if _item_tw:
+		_item_tw.kill()
+	_item_tw = create_tween()
+	_item_tw.tween_interval(2.0)
+	_item_tw.tween_property(item_label, "modulate:a", 0.0, 0.5)
+
+
 func notify(text: String) -> void:
 	var l := _outlined(16)
 	l.text = text
@@ -214,6 +240,8 @@ func _process(delta: float) -> void:
 		help.size = Vector2(size.x - 40, 24)
 		help.position = Vector2(20, 10)
 	mod_box.position = Vector2(bar.position.x, bar.position.y - mod_box.size.y - 10)
+	item_label.size = Vector2(size.x - 40, 0)
+	item_label.position = Vector2(20, mod_box.position.y - item_label.size.y - 6)
 	mod_texts.position = Vector2(14, info.position.y + info.size.y + 8)
 	flash = maxf(0.0, flash - delta)
 	toasts.size = Vector2(440, 0)

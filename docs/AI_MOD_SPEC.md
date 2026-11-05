@@ -1,18 +1,20 @@
 # Specyfikacja modów – Voxel Engine (dla AI)
 
 Ten plik wystarcza do napisania moda bez znajomości kodu gry. Zawiera: zasady i skrót (część 1),
-pełną instrukcję tworzenia modów (część 2), listę kluczy istniejących w grze (część 3) i dwa wzorcowe mody (część 4).
+pełną instrukcję tworzenia modów (część 2), listę kluczy istniejących w grze (część 3), najczęstsze
+pułapki (część 4) i dwa wzorcowe mody (część 5).
 
 ## Jak oddać mod
 
 Mod to folder `game/mods/<id>/` z plikami. Oddaj pełną treść każdego pliku, z nazwą pliku nad nim:
 - `mod.json` (obowiązkowo; `id` = nazwa folderu, małe litery i podkreślenia),
-- `content.lua` (rejestracja bloków, przedmiotów, dźwięków, cząsteczek, przepisów świata),
-- `main.lua` (logika: haki, zdarzenia, okna, aktualizacje bloków),
+- `content.lua` (rejestracja bloków, przedmiotów, dźwięków, cząsteczek, pocisków, przepisów świata),
+- `main.lua` (logika: haki, zdarzenia, okna, aktualizacje bloków, trafienia pocisków),
 - opcjonalnie tekstury PNG 16×16 – zamiast plików najlepiej używać wzorów (`{ pattern = "...", color = "#rrggbb" }`),
-  bo plików binarnych nie da się przekazać w tekście; dźwięki – istniejące z innych modów (`"base:sounds/pop.ogg"`).
+  bo plików binarnych nie da się przekazać w tekście; dźwięki – istniejące z innych modów.
 
 Najważniejsze zasady (szczegóły niżej):
+- Używaj WYŁĄCZNIE funkcji, pól i kluczy opisanych w tym pliku. Jeśli czegoś brakuje, nie zgaduj – napisz, czego brakuje.
 - Lua 5.4 w piaskownicy: brak `io`, `os`, `require`, `load`, `debug`. Tylko obiekt `engine` i biblioteki
   standardowe `string`, `table`, `math`, `utf8`, `coroutine`, `pcall`.
 - `register` działa tylko w plikach z pola `content`; reszta w plikach z pola `scripts`.
@@ -38,6 +40,8 @@ Zachowanie silnika zmienia się hakami `engine.hooks.before/after` (jak prefix i
 a mody mogą udostępniać sobie biblioteki przez `engine.export` i `engine.require`.
 
 ## Dokumentacja
+
+- [Pełna specyfikacja w jednym pliku](docs/AI_MOD_SPEC.md): skrót, instrukcja, lista kluczy i mody wzorcowe
 
 - [Tworzenie modów](docs/MODDING.md): mod.json, fazy, bloki, przedmioty, świat, haki, zdarzenia, pełne API `engine`
 - [Prelude API](game/scripts/mods/prelude.lua): implementacja obiektu `engine` po stronie Lua
@@ -81,6 +85,10 @@ a mody mogą udostępniać sobie biblioteki przez `engine.export` i `engine.requ
 - Blok z modelem: `shape = "model"`, `model = {file = "models/x.glb", parts, animations, emitters, collision, look}`;
   w skryptach `engine.blocks.look(pos, {colors, hide, anim, emitters})`, `engine.blocks.animate(pos, nazwa)`.
 - Cząsteczki: `engine.particles.register` (content), `engine.particles.spawn(nazwa, pos, opts)`.
+- Pociski: `engine.projectiles.register` (content), `spawn(rodzaj, {position, direction, data})`, `on_hit(rodzaj, fn)`.
+- Celowanie: `engine.player.eye_position()`, `look_direction()`, `raycast(zasięg)`; `engine.world.raycast(...)`.
+- Opis przedmiotu: pola `description` i `tooltip = {category, lines}`; dynamiczny: `engine.items.tooltip(klucz, fn)`.
+  Dane egzemplarza: `data` w miejscu kontenera, `engine.items.data/set_data`.
 - Dźwięki: `engine.sounds.register` (content), `engine.sound.play(nazwa, {pos = pos})`; pole bloku `sound` = grupa.
 - Pozycje jako `{x =, y =, z =}` albo wektor. Mod opcjonalny: `"after"` w mod.json i `engine.optional(id)`.
 - Przedmioty modów tools i crafting: stick, wooden_/stone_/iron_ + pickaxe/axe/shovel/sword, crafting_table, workbench.
@@ -364,6 +372,59 @@ Silnik sam gra:
 
 Gracz ustawia głośność w Opcjach.
 
+## Celowanie i promień
+
+```lua
+local eye = engine.player.eye_position()      -- Vector3: oczy gracza (w imieniu którego działa kod)
+local dir = engine.player.look_direction()    -- Vector3 o długości 1: kierunek celownika
+local hit = engine.player.raycast(100)        -- pierwszy blok na linii wzroku do 100 bloków albo nil
+-- to samo z dowolnego punktu: engine.world.raycast(skąd, kierunek, zasięg, { liquids = false, solid = true })
+if hit then
+	-- hit.position (blok), hit.normal (ściana trafienia), hit.place_pos (pole przed ścianą),
+	-- hit.point (dokładny punkt), hit.distance, hit.block (numer), hit.key (klucz)
+end
+```
+
+Domyślnie promień przechodzi przez rośliny, pochodnie i inne bloki bez kolizji oraz przez ciecze.
+`engine.player.target()` działa tylko w zasięgu kopania; do dalekiego celowania używaj `raycast`.
+
+## Pociski
+
+Fizykę i trafienia liczy silnik na serwerze (wzdłuż całej drogi w każdej klatce, więc szybki pocisk nie
+przenika przez bloki); klienci widzą lot. Mod opisuje rodzaj pocisku i reaguje na trafienie.
+
+```lua
+-- content.lua
+engine.projectiles.register("block_gun.shot", {
+	speed = 24, gravity = 9.8, radius = 0.15, lifetime = 5,              -- m/s, m/s², m, s
+	collision = { blocks = true, entities = true, players = true, liquids = false },
+	visual = { type = "block", size = 0.4, spin = true },               -- "block" | "item" | "none"
+	trail = "alchemy.ember",                                             -- cząsteczki za pociskiem (opcjonalnie)
+})
+
+-- main.lua
+local id = engine.projectiles.spawn("block_gun.shot", {
+	position = engine.player.eye_position(),
+	direction = engine.player.look_direction(),   -- albo velocity = {x, y, z}
+	speed = 30,                                    -- opcjonalnie zamiast speed z rodzaju
+	data = { block = "stone" },                    -- dowolne dane; data.block / data.item = wygląd w locie
+})                                                 -- owner = bieżący gracz (można podać inny)
+
+engine.projectiles.on_hit("block_gun.shot", function(ctx)
+	-- ctx.hit_type: "block" | "entity" | "player" | "expire" (skończył się czas lotu)
+	-- ctx.position (Vector3i trafionego bloku), ctx.normal, ctx.place_pos (= position + normal),
+	-- ctx.point (Vector3), ctx.entity / ctx.entity_type, ctx.player, ctx.owner, ctx.data, ctx.velocity
+	if ctx.hit_type == "block" and engine.world.get_block(ctx.place_pos) == 0 then
+		engine.world.set_block(ctx.place_pos, ctx.data.block)
+	elseif ctx.hit_type == "entity" then
+		engine.entities.damage(ctx.entity, 4, "pocisk")
+	end
+end)
+```
+
+Obsługa trafienia działa w imieniu strzelca (`engine.player.*` to on). Pocisk nie trafia strzelca przez
+pierwsze 0,3 s lotu. `engine.projectiles.remove(id)` usuwa pocisk bez trafienia.
+
 ## Cząsteczki
 
 ```lua
@@ -396,10 +457,41 @@ engine.items.register("apple", {
 	icon = { pattern = "food", color = "#d23a2a" },   -- albo "textures/apple.png"
 	max_stack = 64,
 	food = 4,              -- dowolne własne pola, czytane przez engine.items.def("apple").food
+	description = "Soczyste, czerwone.",                         -- opis w dymku
+	tooltip = { category = "Jedzenie", lines = { "Głód: +4" } },  -- kategoria i stałe linie dymka
 })
 ```
 
-Miejsce w kontenerze to `{ item = "apple", count = 3 }` albo pusta tabela `{}`.
+Miejsce w kontenerze to `{ item = "apple", count = 3 }` albo pusta tabela `{}`. Może mieć też
+`data` – dane tego egzemplarza (np. amunicja w broni) – i `info` – linie opisu policzone przez mod.
+
+### Dymek z opisem
+
+Gracz widzi opis po najechaniu na przedmiot w oknie (PC), w pasku u dołu okna po dotknięciu przedmiotu
+(telefon) i nad paskiem przez 2 s po wybraniu przedmiotu. Opis to: nazwa, `[kategoria]`, `description`,
+`tooltip.lines` i linie dynamiczne:
+
+```lua
+engine.items.tooltip("block_gun", function(slot)          -- slot = {item, count, data}
+	local d = slot.data or {}
+	return { "Załadowano: " .. (d.block or "nic"), "Amunicja: " .. (d.ammo or 0) }
+end)
+```
+
+Funkcja działa na serwerze przy każdej zmianie miejsca z tym przedmiotem, a wynik trafia do graczy razem
+z przedmiotem. Ma być szybka i nie może zmieniać ekwipunku.
+
+### Dane egzemplarza przedmiotu
+
+```lua
+local hb, i = engine.require("backpack").HOTBAR, engine.hotbar.selected()
+engine.items.set_data(hb, i, "ammo", 8)                  -- dopisuje pole do data tego miejsca
+local d = engine.items.data(hb, i)                        -- {ammo = 8} (kopia)
+engine.items.set(hb, i, { item = "block_gun", count = 1, data = { ammo = 8, block = "stone" } })
+```
+
+Stosy z różnymi `data` się nie łączą (`kit.inventory.add` dokłada tylko do stosów bez danych), a
+`kit.inventory.take` zachowuje dane. Przedmiot upuszczony na ziemię (np. z rozbitej skrzyni) traci dane.
 
 ## Świat
 
@@ -553,6 +645,10 @@ Pozycje można podawać jako wektor albo tabelę `{x = 1, y = 2, z = 3}`.
 | `engine.sound.play(nazwa, opts)`, `stop(id)`; `engine.sounds.register` | Dźwięki |
 | `engine.blocks.look(pos, wygląd)`, `get_look(pos)`, `animate(pos, nazwa)` | Model bloku: wygląd i animacje |
 | `engine.particles.register(nazwa, opis)`, `spawn(nazwa, pos, opts)` | Cząsteczki |
+| `engine.projectiles.register/spawn/on_hit/remove` | Pociski |
+| `engine.player.eye_position()`, `look_direction()`, `raycast(zasięg, opts)` | Celowanie |
+| `engine.world.raycast(skąd, kierunek, zasięg, opts)` | Promień przez świat |
+| `engine.items.data(c, i)`, `set_data(c, i, k, v)`, `tooltip(klucz, fn)` | Dane egzemplarza i opis dynamiczny |
 | `engine.world.biome(pos)`, `biome_key(pos)`, `height(x, z)`, `time()`, `set_time(h)` | Świat |
 | `engine.player.position()`, `teleport(pos)`, `velocity()`, `push(v)` | Ruch gracza |
 | `engine.player.set(stat, v)`, `get(stat)` | Statystyki: `speed`, `jump`, `gravity`, `reach`, `auto_jump`, `max_health`, `spawn`, `break_speed`, `swim_speed` |
@@ -737,7 +833,8 @@ a wspólnej metatabeli tekstów nie da się zmienić. Test: `godot --headless --
 
 Używaj tylko tych kluczy z innych modów (albo zarejestruj własne). Jeśli korzystasz z bloku/przedmiotu
 innego moda, dodaj ten mod do `"requires"` (twarda zależność) albo `"after"` i sprawdź istnienie
-przez `engine.items.def(klucz)` / `engine.blocks.id(klucz)` (miękka zależność).
+przez `engine.items.def(klucz)` (miękka zależność). Czego nie ma na liście, tego nie ma w grze
+(np. nie ma nici `string`, cukru, prochu, łuku ani strzał).
 
 - **Bloki** – base: grass, dirt, stone, planks, sand, log, leaves, snow, cactus, tall_grass, flower_red,
   flower_yellow, glass, bricks, gravel, ice, bedrock, torch, lamp, water (płynąca: water~1 .. water~8);
@@ -748,29 +845,58 @@ przez `engine.items.def(klucz)` / `engine.blocks.id(klucz)` (miękka zależnoś�
   ores: coal, raw_iron, ruby; animals: wool, mutton, beef, chicken_meat, leather, feather, egg, milk_bucket,
   wheat, shears; survival: apple, bread; tools: stick, wooden_/stone_/iron_ + pickaxe/axe/shovel/sword;
   farming: seeds, wooden_hoe, stone_hoe; smelting: iron_ingot, cooked_beef, cooked_mutton, cooked_chicken;
-  alchemy: glass_bottle, potion_speed, potion_jump, potion_feather, potion_heal (+ wersje _strong).
+  alchemy: glass_bottle, potion_speed, potion_jump, potion_feather, potion_heal (+ wersje _strong);
+  fishing: raw_fish, cooked_fish, fishing_rod.
 - **Stworzenia** (animals): sheep, cow, chicken.
 - **Biomy** (base): meadow, forest, desert, snowy.
 - **Grupy dźwięków bloków** (pole `sound`): stone, dirt, grass, sand, gravel, snow, leaves, wood, glass, water.
-- **Dźwięki**: `<grupa>.break/.place/.dig/.step`, water.splash, water.swim, item.pickup, player.hurt, ui.click,
-  sheep.say, cow.say, chicken.say, chest.open, furnace.fire, alchemy.bubbling, alchemy.done, alchemy.drink,
-  alchemy.fail, alchemy.fill, alchemy.plop. Pliki moda base (do użycia w innym modzie: `"base:sounds/..."`):
+- **Dźwięki** (nazwy do `engine.sound.play`): `<grupa>.break`, `<grupa>.place`, `<grupa>.dig`, `<grupa>.step`,
+  water.splash, water.swim, item.pickup, player.hurt, ui.click, sheep.say, cow.say, chicken.say, chest.open,
+  furnace.fire, alchemy.bubbling, alchemy.done, alchemy.drink, alchemy.fail, alchemy.fill, alchemy.plop,
+  fishing.splash. Pliki moda base (tylko do `engine.sounds.register`, jako `"base:sounds/..."`):
   sounds/<grupa>_break1..3.ogg, sounds/<grupa>_step1..3.ogg, sounds/pop.ogg, sounds/click.ogg, sounds/hurt.ogg,
-  sounds/water_splash1..2.ogg.
+  sounds/water_splash1..2.ogg, sounds/water_swim1..2.ogg.
 - **Cząsteczki** (alchemy): alchemy.fire, alchemy.ember, alchemy.bubble, alchemy.steam, alchemy.glint,
-  alchemy.splash, alchemy.sparkle, alchemy.smoke, alchemy.drink.
+  alchemy.splash, alchemy.sparkle, alchemy.smoke, alchemy.drink. Mod, który ich używa, dopisuje "alchemy" do "after".
 - **Animacje postaci** (emotes): wave, dance, idle_look; (animals): animals_happy.
-- **Biblioteki** (`engine.require`): modkit (kit), backpack (give, HOTBAR, BACKPACK, EQUIPMENT, add_section, open),
-  crafting_classic (shaped, shapeless), crafting_discovery (add), smelting (recipe, fuel), alchemy (recipes).
-- **Tekstury moda base** (`"base:textures/..."`): dirt.png, stone.png, planks.png, sand.png, leaves.png, snow.png,
-  grass_top.png, grass_side.png, log_side.png, log_top.png.
-
+- **Biblioteki** (`engine.require` / `engine.optional`) i ich funkcje:
+  - modkit: `kit.inventory.add(kontener, przedmiot, ile)` → ile się nie zmieściło; `add_many({kontenery}, przedmiot, ile)`;
+    `take(kontener, miejsce, ile)` → ile zabrano; `remove({kontenery}, przedmiot, ile)`; `count({kontenery}, przedmiot)`;
+    `kit.after(sekundy, fn)`, `kit.every(sekundy, fn)`, `kit.copy`, `kit.merge`, `kit.clamp`, `kit.patch`.
+  - backpack: `give(przedmiot, ile)` → ile się nie zmieściło (pasek, potem plecak; nadmiar przepada z komunikatem „Plecak jest pełny”), stałe `HOTBAR`, `BACKPACK`, `EQUIPMENT`
+    (id kontenerów gracza), `add_section(fn)`, `open()`.
+  - crafting_classic: `shaped(wzór, klucz, wynik, ile)`, `shapeless({przedmiot = ile}, wynik, ile)`.
+  - crafting_discovery: `add(id, {przedmiot = ile}, wynik, ile, sekundy)`.
+  - smelting: `recipe(surowiec, wynik, ile_sztuk_wyniku)`, `fuel(przedmiot, sekundy_palenia)`.
+  - alchemy: `recipes`, `ingredients`, `colors` (tabele tylko do odczytu).
+- **Tekstury moda base** (jako `"base:textures/..."`): dirt.png, stone.png, planks.png, sand.png, leaves.png, snow.png,
+  grass_top.png, grass_side.png, log_side.png, log_top.png, cactus_side.png, cactus_top.png, tall_grass.png,
+  flower_red.png, flower_yellow.png. Innych plików nie ma (cegły, szkło, rudy itp. są rysowane wzorami).
 
 ---
 
-# Część 4. Mody wzorcowe
+# Część 4. Najczęstsze pułapki
 
-### Mod `storage`
+- `engine.blocks.id(klucz)` zwraca **-1** (nie `nil`), gdy klucz nie jest blokiem. Sprawdzaj `id > 0`.
+- `engine.items.def(klucz)` zwraca `nil`, gdy przedmiotu nie ma – tak sprawdzaj miękkie zależności.
+- `engine.sound.play(nazwa)` przyjmuje **nazwę zarejestrowanego dźwięku**, nie ścieżkę pliku. Ścieżki plików
+  podaje się tylko w `engine.sounds.register`.
+- Tekstury: wzór (`pattern`) albo plik wymieniony w Części 3 albo PNG własnego moda. Plik, którego nie ma,
+  daje fioletową szachownicę.
+- Argumenty funkcji bibliotek – patrz Część 3 (np. trzeci argument `smelting.recipe` to liczba sztuk wyniku).
+- Zabieraj przedmioty z ekwipunku dopiero, gdy akcja się udała (najpierw sprawdź miejsce, cel, amunicję).
+- Gracz celuje dalej niż zasięg kopania? Używaj `engine.player.raycast(zasięg)`, a nie `engine.player.target()`.
+- Stan gracza w zmiennych Lua indeksuj `engine.player.id()` (gra wieloosobowa). W `tick` i licznikach czasu
+  nie ma „bieżącego gracza” – używaj `engine.players.each(fn)`.
+- Hak `before` przerywa działanie silnika tylko przez `ctx.cancel = true`. Hak na `slot.click` działa przy
+  każdym kliknięciu w dowolnym oknie – sprawdzaj `ctx.container`.
+- Każdy mod, którego klucze/cząsteczki/dźwięki/biblioteki używasz, wpisz do `"requires"` albo `"after"`.
+
+---
+
+# Część 5. Mody wzorcowe
+
+## Mod `storage`
 
 `mod.json`
 
@@ -848,7 +974,7 @@ engine.on("player.join", function()
 end)
 ```
 
-### Mod `farming`
+## Mod `farming`
 
 `mod.json`
 

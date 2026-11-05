@@ -125,7 +125,7 @@ func _open_lua() -> bool:
 		push_error(load_errors["_"])
 		lua = null
 		return false
-	for k in ["dispatch", "make_env", "input", "window_action", "finalize", "run_chunk", "block_update"]:
+	for k in ["dispatch", "make_env", "input", "window_action", "finalize", "run_chunk", "block_update", "projectile_hit", "item_tooltip"]:
 		_api[k] = res.get(k)
 	return true
 
@@ -274,6 +274,11 @@ func press_bind(id: String) -> void:
 		_api.input.invoke(id)
 
 
+func projectile_hit(type: String, ctx: Dictionary) -> void:
+	if _api.has("projectile_hit"):
+		_api.projectile_hit.invoke(type, ctx)
+
+
 func block_update(key: String, ctx: Dictionary) -> void:
 	if _api.has("block_update"):
 		_api.block_update.invoke(key, ctx)
@@ -304,7 +309,11 @@ func _mod_name(id: String) -> String:
 
 
 # ---------- przedmioty ----------
-# Miejsce w kontenerze: {} (puste) albo {"item": klucz, "count": n}.
+# Miejsce w kontenerze: {} (puste) albo {"item": klucz, "count": n, "data": {...}, "info": [...]}.
+# data – dane egzemplarza (np. amunicja w broni); stosy z różnymi danymi się nie łączą.
+# info – linie opisu policzone przez mod (engine.items.tooltip), wysyłane do graczy razem z miejscem.
+
+var tooltip_items := {}   # klucz przedmiotu -> true (mod liczy opis dynamiczny)
 
 func container_slots(id: String) -> Array:
 	return containers.get(id, {}).get("slots", [])
@@ -325,7 +334,14 @@ func set_slot(id: String, i: int, v: Dictionary) -> void:
 	if int(v.get("count", 0)) <= 0 or item == "" or (registry and not registry.items.has(item)):
 		s[i] = {}
 	else:
-		s[i] = {"item": item, "count": int(v.count)}
+		var ns := {"item": item, "count": int(v.count)}
+		if v.get("data") is Dictionary and not (v.data as Dictionary).is_empty():
+			ns["data"] = (v.data as Dictionary).duplicate(true)
+		if tooltip_items.has(item) and _api.has("item_tooltip"):
+			var lines: Variant = _api.item_tooltip.invoke(item, ns.duplicate(true))
+			if lines is Array and not lines.is_empty():
+				ns["info"] = lines
+		s[i] = ns
 	dirty_containers[id] = true
 	if id == hotbar.container:
 		hotbar_changed.emit()
@@ -495,26 +511,37 @@ func window_click(peer: int, real: String, i: int, right: bool) -> void:
 			if not cur.is_empty():
 				if right and int(cur.count) > 1:
 					var half := int(cur.count) / 2
-					_set_held(s, {"item": cur.item, "count": half})
-					set_slot(real, i, {"item": cur.item, "count": int(cur.count) - half})
+					_set_held(s, with_count(cur, half))
+					set_slot(real, i, with_count(cur, int(cur.count) - half))
 				else:
-					_set_held(s, cur.duplicate())
+					_set_held(s, cur.duplicate(true))
 					set_slot(real, i, {})
 		else:
 			var ms := max_stack(str(held.item))
 			if cur.is_empty():
 				var n := mini(ms, 1 if right else int(held.count))
-				set_slot(real, i, {"item": held.item, "count": n})
-				_set_held(s, {"item": held.item, "count": int(held.count) - n})
-			elif str(cur.item) == str(held.item):
+				set_slot(real, i, with_count(held, n))
+				_set_held(s, with_count(held, int(held.count) - n))
+			elif stackable(cur, held):
 				var n := mini(ms - int(cur.count), 1 if right else int(held.count))
-				set_slot(real, i, {"item": cur.item, "count": int(cur.count) + n})
-				_set_held(s, {"item": held.item, "count": int(held.count) - n})
+				set_slot(real, i, with_count(cur, int(cur.count) + n))
+				_set_held(s, with_count(held, int(held.count) - n))
 			elif not right:
 				set_slot(real, i, held.duplicate())
 				_set_held(s, cur.duplicate())
 		after("slot.click", ctxd)
 	ctx = prev
+
+
+## Ten sam przedmiot z tymi samymi danymi: można łączyć w jeden stos.
+static func stackable(a: Dictionary, b: Dictionary) -> bool:
+	return str(a.get("item", "")) == str(b.get("item", "")) and a.get("data", {}) == b.get("data", {})
+
+
+static func with_count(v: Dictionary, n: int) -> Dictionary:
+	var c := v.duplicate(true)
+	c["count"] = n
+	return c
 
 
 func _set_held(s: Session, v: Dictionary) -> void:
@@ -553,11 +580,11 @@ func window_closed(peer: int, id: String) -> void:
 			var ms := max_stack(str(s.held.item))
 			if sl.is_empty():
 				var n := mini(ms, left)
-				set_slot(c, i, {"item": s.held.item, "count": n})
+				set_slot(c, i, with_count(s.held, n))
 				left -= n
-			elif str(sl.item) == str(s.held.item) and int(sl.count) < ms:
+			elif stackable(sl, s.held) and int(sl.count) < ms:
 				var n := mini(ms - int(sl.count), left)
-				set_slot(c, i, {"item": sl.item, "count": int(sl.count) + n})
+				set_slot(c, i, with_count(sl, int(sl.count) + n))
 				left -= n
 	if left > 0 and main and s.node:
 		main.entities.drop_item(str(s.held.item), left, s.node.global_position + Vector3(0, 1, 0))
@@ -583,7 +610,8 @@ func _host_table() -> Dictionary:
 		"pstorage_get", "pstorage_set", "players_accept", "players_kick", "is_multiplayer", "hash",
 		"block_state", "block_set_state", "block_with_state", "block_base", "block_data", "block_set_data",
 		"block_clear_data", "block_container", "block_listen", "block_schedule", "sound_play", "sound_stop",
-		"particles_spawn", "block_look", "block_get_look", "block_animate"]
+		"particles_spawn", "block_look", "block_get_look", "block_animate",
+		"projectile_spawn", "projectile_remove", "player_eye", "player_look", "world_raycast", "item_tooltip_register"]
 	var t := {}
 	for n in names:
 		t[n] = Callable(self, "_h_" + n)
@@ -759,6 +787,47 @@ func _h_block_animate(pos, name) -> void:
 	var l := _logic()
 	if l:
 		l.animate(_v3i(pos), str(name))
+
+
+func _h_projectile_spawn(type, opts) -> int:
+	if main == null or main.get("projectiles") == null:
+		return -1
+	return main.projectiles.spawn(str(type), opts if opts is Dictionary else {})
+
+
+func _h_projectile_remove(id) -> void:
+	if main and main.get("projectiles"):
+		main.projectiles.remove(int(id))
+
+
+func _h_player_eye() -> Vector3:
+	var p := _pl()
+	return p.call("aim")[0] if p and p.has_method("aim") else Vector3.ZERO
+
+
+func _h_player_look() -> Vector3:
+	var p := _pl()
+	return p.call("aim")[1] if p and p.has_method("aim") else Vector3.FORWARD
+
+
+func _h_world_raycast(from, dir, dist, liquids, solid) -> Variant:
+	if main == null:
+		return null
+	var o := Vector3(from) if (from is Vector3 or from is Vector3i) else Vector3.ZERO
+	var d := Vector3(dir) if (dir is Vector3 or dir is Vector3i) else Vector3.FORWARD
+	if d.length() < 0.0001:
+		return null
+	var r: Dictionary = main.world.raycast(o, d.normalized(), clampf(float(dist), 0.0, 256.0), bool(liquids), bool(solid))
+	if not r.get("hit", false):
+		return null
+	var b: int = main.world.get_block(r.pos)
+	return {"position": r.pos, "normal": r.normal, "place_pos": (r.pos as Vector3i) + (r.normal as Vector3i),
+		"point": o + d.normalized() * float(r.dist), "distance": float(r.dist), "block": b,
+		"key": registry.block_key(b)}
+
+
+func _h_item_tooltip_register(key) -> void:
+	tooltip_items[str(key)] = true
 
 
 func _h_sound_stop(id) -> void:

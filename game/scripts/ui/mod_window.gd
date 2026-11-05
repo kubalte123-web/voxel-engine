@@ -105,6 +105,9 @@ func build(new_spec: Dictionary) -> void:
 				pb.value = float(s.get("value", 0.0))
 				pb.show_percentage = false
 				content.add_child(pb)
+	info_label = UI.wrap("", 15, UI.MUTED)
+	info_label.visible = false
+	content.add_child(info_label)
 	_update_slots()
 
 
@@ -207,7 +210,20 @@ func _press(action: String) -> void:
 		Mods.window_action(action, _fields())
 
 
+## Pasek u dołu okna z opisem ostatnio klikniętego przedmiotu (na telefonie nie ma dymków po najechaniu).
+var info_label: Label
+
+
+func _show_info(cid: String, i: int) -> void:
+	var sl := Mods.slot(cid, i)
+	if sl.is_empty() or info_label == null:
+		return
+	info_label.text = Mods.registry.tooltip(sl).replace("\n", " · ")
+	info_label.visible = true
+
+
 func _click(cid: String, i: int, right: bool) -> void:
+	_show_info(cid, i)
 	if Net.is_client():
 		Net.c_click.rpc_id(1, cid, i, right)
 	else:
@@ -225,7 +241,7 @@ func _update_slots() -> void:
 		else:
 			b.icon = Mods.registry.icon(str(sl.item))
 			b.text = str(sl.count) if int(sl.count) > 1 else ""
-			b.tooltip_text = Mods.registry.item_name(str(sl.item))
+			b.tooltip_text = Mods.registry.tooltip(sl)
 	var held: Dictionary = Mods.local_held
 	held_icon.visible = not held.is_empty()
 	if not held.is_empty():

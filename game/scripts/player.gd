@@ -448,6 +448,11 @@ func target_with_liquids() -> Dictionary:
 	return {}
 
 
+## Celowanie: punkt oczu i kierunek, w który patrzy celownik (kamera).
+func aim() -> Array:
+	return [global_position + Vector3(0, 1.55, 0), -camera.global_basis.z]
+
+
 func _update_target() -> void:
 	var origin := camera.global_position
 	var dir := -camera.global_basis.z

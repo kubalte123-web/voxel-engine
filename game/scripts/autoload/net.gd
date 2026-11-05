@@ -339,6 +339,18 @@ func s_block_anim(p: Vector3i, name: String) -> void:
 		main.world.models.play(p, name)
 
 
+@rpc("authority", "reliable")
+func s_proj_spawn(id: int, pos: Vector3, vel: Vector3, gravity: float, life: float, vis: Dictionary) -> void:
+	if main and main.get("projectiles"):
+		main.projectiles.client_spawn(id, pos, vel, gravity, life, vis)
+
+
+@rpc("authority", "reliable")
+func s_proj_end(id: int) -> void:
+	if main and main.get("projectiles"):
+		main.projectiles.client_end(id)
+
+
 @rpc("authority", "unreliable")
 func s_particles(name: String, pos: Vector3, opts: Dictionary) -> void:
 	Fx.burst_local(name, pos, opts)

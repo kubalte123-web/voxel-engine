@@ -108,6 +108,12 @@ func _process(delta: float) -> void:
 
 # ---------- ten sam interfejs co Player (dla modów i Actions na serwerze) ----------
 
+## Celowanie gracza zdalnego: oczy i kierunek z obrotu i pochylenia przysłanych przez klienta.
+func aim() -> Array:
+	var d := Vector3(-sin(yaw) * cos(pitch), sin(pitch), -cos(yaw) * cos(pitch))
+	return [global_position + Vector3(0, 1.55, 0), d.normalized()]
+
+
 func stat(name: String) -> Variant:
 	var defaults := {"speed": SPEED, "jump": JUMP, "gravity": GRAVITY, "reach": REACH, "auto_jump": true,
 		"max_health": MAX_HEALTH, "spawn": null, "break_speed": 1.0, "swim_speed": 1.0}
