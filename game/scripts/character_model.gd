@@ -30,11 +30,20 @@ const DEFAULT_COLORS := {
 }
 
 
+## Faktura każdej części postaci (SurfaceTex): tkanina, diagonal spodni, skóra, włosy, dzianina szalika…
+const SURFACES := {
+	"skin": "skin", "nose": "skin", "tunic": "fabric", "tunic_dark": "fabric", "trousers": "twill",
+	"boots": "leather", "leather": "leather", "strap": "leather", "scarf": "knit", "hair": "hair",
+	"bedroll": "plaid", "gold": "metal",
+}
+
+
 func _mat(slot: String) -> StandardMaterial3D:
 	if not mats.has(slot):
 		var m := StandardMaterial3D.new()
 		m.albedo_color = DEFAULT_COLORS.get(slot, Color.WHITE)
 		m.roughness = 0.9
+		SurfaceTex.apply(m, str(SURFACES.get(slot, "")), 2.0)
 		mats[slot] = m
 	return mats[slot]
 
@@ -121,11 +130,13 @@ func set_wear(wear: Dictionary) -> void:
 			if not b is Dictionary:
 				continue
 			var col := TexGen._col(b.get("color", "#888888"), Color.GRAY)
-			var key := "wear|" + col.to_html()
+			var tex := str(b.get("tex", "fabric"))
+			var key := "wear|" + col.to_html() + "|" + tex
 			if not mats.has(key):
 				var m := StandardMaterial3D.new()
 				m.albedo_color = col
 				m.roughness = 0.85
+				SurfaceTex.apply(m, tex, 2.0)
 				mats[key] = m
 			var mi := MeshInstance3D.new()
 			var bm := BoxMesh.new()

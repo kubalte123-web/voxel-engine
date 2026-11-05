@@ -110,13 +110,16 @@ static func vec(v: Variant, fallback: Vector3 = Vector3.ZERO) -> Vector3:
 	return fallback
 
 
-func _mat(color: String) -> StandardMaterial3D:
-	if not mats.has(color):
+## Materiał klocka: kolor i faktura (SurfaceTex; pole klocka `tex` albo `surface` stworzenia, np. "fur").
+func _mat(color: String, tex := "") -> StandardMaterial3D:
+	var key := color + "|" + tex
+	if not mats.has(key):
 		var m := StandardMaterial3D.new()
 		m.albedo_color = Color.from_string(color, Color.WHITE)
 		m.roughness = 0.9
-		mats[color] = m
-	return mats[color]
+		SurfaceTex.apply(m, tex, 2.0)
+		mats[key] = m
+	return mats[key]
 
 
 ## Części: {pivot = {x,y,z}, parent = "body", boxes = {{size, pos, color, tag}}, swing = 1|-1, wing = 1|-1, look = true}
@@ -148,7 +151,11 @@ func _build_model() -> void:
 				mi.mesh = bm
 				mi.position = vec(bd.get("pos"))
 				mi.rotation_degrees = vec(bd.get("rot"))
-				mi.material_override = _mat(str(bd.get("color", "#ffffff")))
+				# faktura: z klocka, inaczej ze stworzenia; drobne klocki (oczy, nozdrza) bez faktury
+				var tex := str(bd.get("tex", def.get("surface", "")))
+				if bm.size.x < 0.07 or bm.size.y < 0.07 or bm.size.z < 0.025:
+					tex = str(bd.get("tex", ""))
+				mi.material_override = _mat(str(bd.get("color", "#ffffff")), tex)
 				pivot.add_child(mi)
 				if bd.has("tag"):
 					var tg := str(bd.tag)

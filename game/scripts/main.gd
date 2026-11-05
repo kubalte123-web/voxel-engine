@@ -2588,6 +2588,59 @@ func _test_inventory(dir: String) -> void:
 	get_tree().quit()
 
 
+## Test wyglądu zwierząt (faktury, modele): zwierzęta w rzędzie przed kamerą, gracz z boku. Zrzut a1_animals.
+func _test_animals(dir: String) -> void:
+	await _wait_loaded()
+	await _wait(0.5)
+	time_of_day = 11.0
+	var reg := Mods.registry
+	# płaska platforma z kamienia, nad nią powietrze
+	var o := Vector3i(player.global_position.floor()) - Vector3i(0, 1, 0)
+	for x in range(-10, 11):
+		for z in range(-12, 4):
+			world.set_block(o + Vector3i(x, 0, z), reg.id_of("stone"))
+			for y in range(1, 6):
+				world.set_block(o + Vector3i(x, y, z), Blocks.AIR)
+	await _wait(1.0)
+	var kinds := ["sheep", "cow", "chicken", "horse", "horse_white"]
+	var spots := []
+	for i in kinds.size():
+		var p := Vector3(o.x - 8 + i * 4 + 0.5, o.y + 1.02, o.z - 8 + 0.5)
+		var id := entities.spawn_creature(kinds[i], p)
+		var e: Node3D = entities.get_entity(id)
+		if e:
+			e.rotation.y = PI - 0.75   # trzy czwarte z przodu
+			e.set_physics_process(false)   # stoją w miejscu do zdjęcia
+			e.global_position = p
+		spots.append(p)
+	# każde zwierzę z bliska (pierwsza osoba, bez modelu gracza w kadrze)
+	Mods.camera_stats.erase("mode")
+	player.first_person = true
+	Mods.player_stats["gravity"] = 0.0
+	for i in kinds.size():
+		var dist := 3.4 if kinds[i].begins_with("horse") else (1.5 if kinds[i] == "chicken" else 2.6)
+		player.global_position = spots[i] + Vector3(0, -0.4, dist)
+		player.velocity = Vector3.ZERO
+		player.yaw = 0.0
+		player.pitch = -0.55 if kinds[i] == "chicken" else -0.18
+		await _wait(0.6)
+		await _shot(dir, "a_%s" % kinds[i])
+	# postać od przodu
+	Mods.camera_stats["mode"] = "third"
+	player.first_person = false
+	Mods.camera_stats["distance"] = 2.6
+	player.global_position = Vector3(o) + Vector3(0.5, 1.0, 1.5)
+	player.yaw = PI
+	player.pitch = -0.1
+	await _wait(0.3)
+	player.model.rotation.y = 0.0   # twarzą do kamery
+	await _wait(0.4)
+	await _shot(dir, "a_player")
+	Mods.player_stats.erase("gravity")
+	print("ZWIERZĘTA na zdjęciach: ", kinds)
+	get_tree().quit()
+
+
 ## Test wchodzenia po schodach: 6 stopni schodów (po pół bloku), gracz idzie do przodu przez 4 s.
 ## Liczy skoki (prędkość w górę jak przy skoku) i największy przyrost wysokości kamery w jednej klatce.
 func _test_stairs(dir: String) -> void:
@@ -2929,6 +2982,9 @@ func _autotest(dir: String) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--seams-only"):
 		await _test_seams(dir)
+		return
+	if OS.get_cmdline_user_args().has("--animals-only"):
+		await _test_animals(dir)
 		return
 	if OS.get_cmdline_user_args().has("--inventory-only"):
 		await _test_inventory(dir)

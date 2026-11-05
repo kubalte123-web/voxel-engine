@@ -643,6 +643,12 @@ engine.entities.register("sheep", {
 Przód modelu to -Z. `pivot` to punkt obrotu części (względem rodzica), `pos` klocka jest względem punktu
 obrotu. `swing` kołysze nogą przy chodzie, `wing` trzepocze przy spadaniu, `look` obraca głowę do gracza
 i schyla ją przy skubaniu. `tag` pozwala ukryć albo przekolorować klocki (`engine.entities.show/color`).
+
+Faktura powierzchni: `surface = "fur"` w stworzeniu (dla wszystkich klocków) albo `tex = "wool"` w klocku.
+Faktury: `fabric`, `twill`, `leather`, `fur`, `wool`, `feathers`, `hide`, `hair`, `skin`, `knit`, `plaid`,
+`metal`, `scales`, `none`. To szary wzór mnożony przez `color`, więc przekolorowanie dalej działa. Drobne
+klocki (oczy, nozdrza) zostają bez faktury, chyba że mają własne `tex`. To samo pole `tex` działa w klockach
+rzeczy zakładanych na postać (domyślnie `fabric`).
 Animacje klatkowe (`engine.animation.register`) działają też na części stworzeń (`engine.entities.animate`).
 
 AI: stanie, wędrówka, skubanie (`graze` zmienia blok pod spodem i wysyła zdarzenie `entity.graze`),
