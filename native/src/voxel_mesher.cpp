@@ -18,7 +18,7 @@ constexpr int S = 32;
 constexpr int P = S + 2;
 
 constexpr uint8_t AIR = 0;
-constexpr int P_OPAQUE = 1, P_CROSS = 2, P_SOLID = 4, P_LIQUID = 8, P_THIN = 16;
+constexpr int P_OPAQUE = 1, P_CROSS = 2, P_SOLID = 4, P_LIQUID = 8, P_THIN = 16, P_MODEL = 32;
 // układ danych z game/scripts/content/worldgen_spec.gd
 constexpr int BS = 21, FS = 11, OS = 6;
 constexpr int CG = 11; // punkty siatki szumu jaskiń na oś
@@ -609,6 +609,7 @@ Array VoxelMesher::build(const PackedByteArray &padded, const PackedByteArray &p
 				const uint8_t b = p[ci];
 				if (b == 0) continue;
 				const int bp = prop(b);
+				if (bp & P_MODEL) continue;  // blok z modelem: rysuje go osobny węzeł (BlockModels)
 				if (bp & P_LIQUID) {
 					// ---------- ciecz: osobna siatka z gładką powierzchnią ----------
 					const int lv = lq(ci);

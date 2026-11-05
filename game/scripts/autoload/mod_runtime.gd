@@ -582,7 +582,8 @@ func _host_table() -> Dictionary:
 		"player_id", "player_name", "player_is_host", "players_list", "set_ctx", "get_ctx",
 		"pstorage_get", "pstorage_set", "players_accept", "players_kick", "is_multiplayer", "hash",
 		"block_state", "block_set_state", "block_with_state", "block_base", "block_data", "block_set_data",
-		"block_clear_data", "block_container", "block_listen", "block_schedule", "sound_play", "sound_stop"]
+		"block_clear_data", "block_container", "block_listen", "block_schedule", "sound_play", "sound_stop",
+		"particles_spawn", "block_look", "block_get_look", "block_animate"]
 	var t := {}
 	for n in names:
 		t[n] = Callable(self, "_h_" + n)
@@ -737,6 +738,27 @@ func _h_sound_play(name, opts) -> int:
 		pos = Vector3(_v3i(o.pos)) + Vector3(0.5, 0.5, 0.5) if o.pos is Dictionary or o.pos is Vector3i else Vector3(o.pos)
 	var peer := int(o.get("player", -1))
 	return Sfx.emit(str(name), pos, float(o.get("volume", 1.0)), float(o.get("pitch", 1.0)), bool(o.get("loop", false)), peer)
+
+
+func _h_particles_spawn(name, pos, opts) -> void:
+	Fx.emit(str(name), Vector3(pos) if pos is Vector3 else Vector3(_v3i(pos)), opts if opts is Dictionary else {})
+
+
+func _h_block_look(pos, look) -> void:
+	var l := _logic()
+	if l:
+		l.set_look(_v3i(pos), look if look is Dictionary else {})
+
+
+func _h_block_get_look(pos) -> Dictionary:
+	var l := _logic()
+	return l.looks.get(_v3i(pos), {}).duplicate(true) if l else {}
+
+
+func _h_block_animate(pos, name) -> void:
+	var l := _logic()
+	if l:
+		l.animate(_v3i(pos), str(name))
 
 
 func _h_sound_stop(id) -> void:

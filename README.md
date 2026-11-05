@@ -16,6 +16,8 @@ powietrze: bloki, przedmioty, biomy, woda, stworzenia, zasady, kamera i animacje
 PC: WASD ruch, Spacja skok i pływanie w górę, LPM kop (przytrzymaj) / uderz / kopnij obiekt,
 PPM postaw, użyj przedmiotu, podnieś obiekt albo użyj na zwierzęciu, 1–9 lub kółko wybór przedmiotu,
 V widok, Esc pauza. Klawisze z modów: E plecak, G machnięcie, H taniec, C tryb kamery.
+W oknach: lewy przycisk bierze/odkłada stos, prawy bierze połowę albo odkłada jedną sztukę
+(na telefonie: krótkie dotknięcie i przytrzymanie).
 Telefon: joystick po lewej, przeciąganie po prawej obraca kamerę, przyciski akcji i przyciski modów u góry.
 
 ## Testy lokalne
@@ -23,7 +25,9 @@ Telefon: joystick po lewej, przeciąganie po prawej obraca kamerę, przyciski ak
 - `godot --headless --path game -s tests/bench.gd` – czy generator i siatki w C++ dają to samo co GDScript.
 - `godot --headless --path game -s tests/lua_guard.gd` – zabezpieczenia Lua (pętle, pamięć, bajtkod).
 - `godot --path game -- --shots=FOLDER` – przejście przez menu i grę ze zrzutami ekranu
-  (`--craft-only --enable=crafting_discovery` – tylko test rzemiosła, `--blocks-only` – skrzynia, piec, uprawy).
+  (`--craft-only --enable=crafting_discovery` – tylko test rzemiosła, `--blocks-only` – skrzynia, piec, uprawy,
+  `--alchemy-only` – kocioł, model, cząsteczki i wydajność 40 kotłów, `--perf-only` – koszt stawiania bloku).
+- `godot --headless --path game -s tools/make_cauldron.gd` – generuje model kotła (GLB) dla moda alchemy.
 - `godot --headless --path game -s tests/parse_all.gd` – czy wszystkie skrypty się kompilują.
 - Sieć: `godot --headless --path game -- --server=mp_test --enable=accounts`, potem klient
   `godot --path game -- --join=127.0.0.1:7777 --name=Jacek --shots=FOLDER --login=Kacper --password=tajne1 [--register] [--place]`.

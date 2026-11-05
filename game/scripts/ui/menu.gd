@@ -377,7 +377,7 @@ func _autotest(dir: String) -> void:
 				if ModManager.manifests.has(id):
 					ModManager.enabled[id] = true
 	# testy wybranych funkcji: od razu świat testowy, bez zrzutów menu
-	if args.has("--craft-only") or args.has("--light-only") or args.has("--blocks-only"):
+	if args.has("--craft-only") or args.has("--light-only") or args.has("--blocks-only") or args.has("--perf-only") or args.has("--alchemy-only"):
 		GameState.start(GameState.create_world("Test", "42"))
 		return
 	await _shot(dir, "m1_menu")

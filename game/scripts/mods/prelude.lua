@@ -261,6 +261,7 @@ local R = {
 	animations = {},
 	entities = {},
 	sounds = {},
+	particles = {},
 }
 
 local function open_registry(what)
@@ -437,7 +438,7 @@ local function finalize()
 	for key, s in pairs(R.structures) do structures[key] = norm_structure(s) end
 	return to_godot({
 		blocks = blocks, items = items, animations = copy(R.animations), entities = copy(R.entities),
-		sounds = copy(R.sounds),
+		sounds = copy(R.sounds), particles = copy(R.particles),
 		worldgen = { config = copy(R.config), biomes = biomes, ores = ores, structures = structures },
 	})
 end
@@ -531,6 +532,10 @@ local function make_api(mod_id)
 				host.block_listen(k)
 			end
 		end,
+		-- model bloku: wygląd (anim, emitters, colors, hide) i jednorazowa animacja; widzą wszyscy gracze
+		look = function(pos, look) host.block_look(VI(pos), to_godot(look or {})) end,
+		get_look = function(pos) return to_lua(host.block_get_look(VI(pos))) or {} end,
+		animate = function(pos, name) host.block_animate(VI(pos), tostring(name)) end,
 		schedule = function(pos, seconds, tag) host.block_schedule(VI(pos), tonumber(seconds) or 1, tostring(tag or "")) end,
 	}
 
@@ -614,6 +619,16 @@ local function make_api(mod_id)
 	E.sound = {
 		play = function(name, opts) return host.sound_play(tostring(name), to_godot(opts or {})) end,
 		stop = function(id) host.sound_stop(tonumber(id) or 0) end,
+	}
+
+	-- cząsteczki: opis efektu w content.lua, wybuch w skryptach (słyszą... widzą gracze w pobliżu)
+	E.particles = {
+		register = function(name, def)
+			open_registry("particles.register")
+			R.particles[name] = copy(def or {})
+		end,
+		get = function(name) return R.particles[name] end,
+		spawn = function(name, pos, opts) host.particles_spawn(tostring(name), VF(pos), to_godot(opts or {})) end,
 	}
 
 	E.animation = {

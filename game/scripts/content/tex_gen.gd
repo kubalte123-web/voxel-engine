@@ -132,7 +132,7 @@ static func pattern(d: Dictionary) -> Image:
 					if (cx - 2) * (cx - 2) + (cy - 2) * (cy - 2) <= 1 + int(rng.randf() < 0.3):
 						c = spots.lerp(spots.lightened(0.3), rng.randf() * 0.5)
 			img.set_pixel(x, y, c)
-	if kind in ["gem", "ingot", "food", "plant", "torch", "stick", "pickaxe", "axe", "shovel", "sword", "hammer", "hoe", "seeds", "crop"]:
+	if kind in ["gem", "ingot", "food", "plant", "torch", "stick", "pickaxe", "axe", "shovel", "sword", "hammer", "hoe", "seeds", "crop", "potion", "cauldron"]:
 		_shape(img, kind, a, b, rng, clampi(int(d.get("stage", 4)), 1, 4))
 	return img
 
@@ -163,6 +163,35 @@ static func _shape(img: Image, kind: String, a: Color, b: Color, rng: RandomNumb
 				img.set_pixel(8, y, Color(0.35, 0.22, 0.1))
 			img.set_pixel(9, 2, Color(0.25, 0.55, 0.2))
 			img.set_pixel(10, 2, Color(0.25, 0.55, 0.2))
+		"potion":
+			# butelka: szkło (color2), ciecz (color; przezroczysta = pusta butelka), korek
+			var glass := b
+			for y in range(4, 15):
+				var w := 2 if y < 7 else (4 if y == 7 else 5)
+				for x in range(8 - w, 8 + w):
+					var edge := x == 8 - w or x == 7 + w or y == 14
+					var c := glass.darkened(0.3) if edge else (a if y >= 9 and a.a > 0.0 else Color(glass.r, glass.g, glass.b, 0.35))
+					if y >= 9 and not edge and a.a > 0.0 and x == 8 - w + 1:
+						c = a.lightened(0.35)
+					img.set_pixel(x, y, c)
+			for y in range(2, 4):
+				for x in range(6, 10):
+					img.set_pixel(x, y, Color(0.55, 0.38, 0.22))
+		"cauldron":
+			# kocioł: brzuch, brzeg, nóżki, ciecz na górze (color2)
+			for y in range(4, 14):
+				var w := 6 if y < 6 else (7 if y < 11 else 7 - (y - 10))
+				for x in range(8 - w, 8 + w):
+					img.set_pixel(x, y, a.lightened(0.15) if x < 6 else (a if x < 11 else a.darkened(0.3)))
+			for x in range(1, 15):
+				img.set_pixel(x, 4, a.lightened(0.35))
+			for x in range(3, 13):
+				img.set_pixel(x, 5, b)
+			for k in [3, 7, 11]:
+				img.set_pixel(k, 14, a.darkened(0.4))
+				img.set_pixel(k + 1, 15, a.darkened(0.4))
+			for x in range(5, 11):
+				img.set_pixel(x, 9, Color(0.72, 0.42, 0.2))
 		"seeds":
 			for i in 9:
 				var sx := 3 + (i * 5) % 10

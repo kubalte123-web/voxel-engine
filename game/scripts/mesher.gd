@@ -73,6 +73,8 @@ static func build(padded: PackedByteArray, tiles: PackedInt32Array, cols_n: int,
 				if b == 0:
 					continue
 				var pr := props[b]
+				if pr & Blocks.MODEL:
+					continue  # blok z modelem: rysuje go osobny węzeł (BlockModels)
 				if pr & Blocks.LIQUID:
 					_liquid(x, y, z, lq, op, props, padded, wv, wn, wu, wc, wi, wl, lt)
 					continue

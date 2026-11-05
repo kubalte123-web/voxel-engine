@@ -1,0 +1,14 @@
+{
+	"id": "alchemy",
+	"name": "Alchemia",
+	"version": "0.1.0",
+	"author": "Jakub Lewicki",
+	"description": "Kocioł alchemiczny: nalej wody wiadrem, wrzuć do 3 składników (pióra, kwiaty, jajka, jabłka, liście, rubin), zamieszaj patykiem. Pod kotłem rozpala się ogień, chochla miesza, ciecz bulgocze i paruje. Udana mikstura błyszczy – zbierz ją pustymi butelkami. Nieudana kończy się kłębem dymu. Mikstury: szybkość, skok, lekkość, leczenie; rubin wzmacnia. Przykład bloku z modelem GLB, animacji, emiterów cząsteczek i wyglądu zmienianego w grze.",
+	"requires": ["modkit", "backpack"],
+	"after": ["base", "ores", "animals", "survival", "crafting_classic", "crafting_discovery", "smelting"],
+	"content": ["content.lua"],
+	"scripts": ["main.lua"],
+	"settings": [
+		{"key": "brew_time", "label": "Czas warzenia (s)", "type": "int", "default": 10, "min": 3, "max": 60, "step": 1}
+	]
+}

@@ -171,12 +171,26 @@ func _slots(s: Dictionary, narrow: bool) -> Control:
 		b.add_theme_constant_override("icon_max_width", int(cell) - 16)
 		var idx := i
 		b.gui_input.connect(func(e: InputEvent) -> void:
-			if e is InputEventMouseButton and e.pressed:
+			if not e is InputEventMouseButton:
+				return
+			# dotyk (zdarzenie emulowane z ekranu): krótkie dotknięcie = lewy przycisk,
+			# przytrzymanie = prawy (połowa stosu / odłożenie jednej sztuki)
+			if e.device == InputEvent.DEVICE_ID_EMULATION:
+				if e.pressed:
+					b.set_meta("down", Time.get_ticks_msec())
+				elif b.has_meta("down"):
+					var held: int = Time.get_ticks_msec() - int(b.get_meta("down"))
+					b.remove_meta("down")
+					_click(cid, idx, held >= LONG_PRESS_MS)
+			elif e.pressed:
 				_click(cid, idx, e.button_index == MOUSE_BUTTON_RIGHT))
 		grid.add_child(b)
 		slot_views.append([cid, i, b])
 	box.add_child(grid)
 	return box
+
+
+const LONG_PRESS_MS := 400
 
 
 func _fields() -> Dictionary:

@@ -16,6 +16,7 @@ var world: World
 var main: Node
 var data := {}          # Vector3i -> Dictionary (dane modów)
 var containers := {}    # Vector3i -> id kontenera ("@x,y,z")
+var looks := {}         # Vector3i -> wygląd modelu ustawiony przez mod (engine.blocks.look)
 var scheduled := []     # [czas, pozycja, tag, klucz bazowy]
 var listen := PackedByteArray()      # id bloku -> 1 gdy jakiś mod obsługuje jego aktualizacje
 var random_rate := PackedFloat32Array()  # id bloku -> średni odstęp losowych aktualizacji (0 = brak)
@@ -83,7 +84,7 @@ func chunk_unloaded(c: Vector3i) -> void:
 
 func block_changed(p: Vector3i, old: int, id: int) -> void:
 	var reg := world.reg
-	if reg.base_of(old) != reg.base_of(id) and (data.has(p) or containers.has(p)):
+	if reg.base_of(old) != reg.base_of(id) and (data.has(p) or containers.has(p) or looks.has(p)):
 		_removed(p, old)
 	if _any_random:
 		var c := world.chunk_of(p)
@@ -104,6 +105,8 @@ func _removed(p: Vector3i, old: int) -> void:
 	var d: Dictionary = data.get(p, {})
 	Mods.emit_event("block.removed", {"pos": p, "block": old, "key": world.reg.block_key(world.reg.base_of(old)), "data": d})
 	data.erase(p)
+	if looks.has(p):
+		set_look(p, {}, true)
 	if containers.has(p):
 		var cid: String = containers[p]
 		containers.erase(p)
@@ -144,6 +147,37 @@ func container(mod_id: String, p: Vector3i, size: int) -> String:
 	while slots.size() < size:
 		slots.append({})
 	return cid
+
+
+# ---------- wygląd modeli ----------
+
+## Wygląd modelu bloku: {anim, emitters, colors, hide}. merge = false zastępuje cały wygląd.
+func set_look(p: Vector3i, look: Dictionary, replace := false) -> void:
+	var cur: Dictionary = {} if replace else looks.get(p, {}).duplicate(true)
+	for k in look:
+		if k == "colors" and cur.get("colors") is Dictionary and look[k] is Dictionary:
+			var c: Dictionary = cur.colors
+			c.merge(look[k], true)
+		elif look[k] == null:
+			cur.erase(k)
+		else:
+			cur[k] = look[k]
+	if cur.is_empty():
+		looks.erase(p)
+	else:
+		looks[p] = cur
+	world.models.set_look(p, cur)
+	if Net.online() and Net.is_server():
+		Net.s_block_look.rpc(p, cur)
+
+
+func animate(p: Vector3i, name: String) -> void:
+	world.models.play(p, name)
+	if Net.online() and Net.is_server():
+		for peer in Mods.sessions:
+			var s: Session = Mods.sessions[peer]
+			if not s.local and s.logged_in and s.node and s.node.global_position.distance_to(Vector3(p)) < 64.0:
+				Net.s_block_anim.rpc_id(peer, p, name)
 
 
 # ---------- aktualizacje ----------
@@ -215,7 +249,7 @@ func save(dir: String) -> void:
 		sched.append([float(s[0]) - clock, s[1], s[2], s[3]])
 	var f := FileAccess.open(dir.path_join(FILE), FileAccess.WRITE)
 	if f:
-		f.store_var({"version": 1, "data": data, "containers": containers, "scheduled": sched})
+		f.store_var({"version": 1, "data": data, "containers": containers, "scheduled": sched, "looks": looks})
 
 
 func load_from(dir: String) -> void:
@@ -227,6 +261,9 @@ func load_from(dir: String) -> void:
 		return
 	data = v.get("data", {})
 	containers = v.get("containers", {})
+	looks = v.get("looks", {})
+	for p in looks:
+		world.models.looks[p] = looks[p]
 	scheduled = []
 	for s in v.get("scheduled", []):
 		scheduled.append([clock + float(s[0]), s[1], s[2], s[3]])

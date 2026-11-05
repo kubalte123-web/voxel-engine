@@ -46,6 +46,9 @@ var center := Vector3i(999999, 0, 0)
 var extra_centers: Array[Vector3] = []  # serwer: pozycje graczy zdalnych (wokół nich też trzymamy chunki)
 var remote := false                     # klient gry wieloosobowej: stan świata przychodzi z serwera
 var logic: BlockLogic = null            # serwer: dane i aktualizacje bloków dla modów
+var models: BlockModels                 # modele bloków z polem `model`
+var apply_stats := {"full": 0, "light": 0, "us": 0}   # przebudowy z kolizją / tylko światło, czas w wątku głównym
+var geo_ver := {}                       # chunk -> wersja kształtu (rośnie przy każdej zmianie bloków, które go dotyczą)
 var offsets: Array[Vector3i] = []
 var mesh_ms_total := 0.0
 var mesh_count := 0
@@ -73,6 +76,10 @@ func _ready() -> void:
 	falling = Node3D.new()
 	falling.name = "Falling"
 	add_child(falling)
+	models = BlockModels.new()
+	models.name = "BlockModels"
+	models.setup(self)
+	add_child(models)
 	material = ShaderMaterial.new()
 	material.shader = load("res://scripts/shaders/terrain.gdshader")
 	material.set_shader_parameter("atlas", atlas)
@@ -135,7 +142,7 @@ func _collect_results() -> void:
 	results = []
 	mutex.unlock()
 	for r in ready:
-		_apply(r[0], r[1], r[2], r[3])
+		_apply(r[0], r[1], r[2], r[3], r[7] if r.size() > 7 else -1)
 		if r.size() > 4:
 			_apply_light(r[0], r[4], r[5], r[6])
 
@@ -212,7 +219,7 @@ func _schedule(c: Vector3i) -> void:
 			ensure_heightmap(Vector2i(c.x + dx, c.z + dz))
 	queued[c] = true
 	if threaded:
-		WorkerThreadPool.add_task(_job.bind(c))
+		WorkerThreadPool.add_task(_job.bind(c, int(geo_ver.get(c, 0))))
 	else:
 		sync_queue.append(c)
 
@@ -236,6 +243,7 @@ func _unload_far() -> void:
 			built.erase(c)
 			if logic:
 				logic.chunk_unloaded(c)
+			models.chunk_unloaded(c)
 			if nodes.has(c):
 				nodes[c].queue_free()
 				nodes.erase(c)
@@ -252,7 +260,9 @@ func _unload_far() -> void:
 
 
 ## Wykonywane w wątku roboczym: dane chunka z obwódką sąsiadów, potem budowa siatki.
-func _job(c: Vector3i) -> void:
+func _job(c: Vector3i, gv := -1) -> void:
+	if gv < 0 and not threaded:
+		gv = int(geo_ver.get(c, 0))   # przeglądarka: budowa w wątku głównym
 	var t0 := Time.get_ticks_usec()
 	mutex.lock()
 	var own: Variant = data.get(c)
@@ -303,7 +313,7 @@ func _job(c: Vector3i) -> void:
 		arrays = GDMesher.build(padded, tiles, Registry.ATLAS_COLS, reg.atlas_rows, props, reg.liquid, lres[0])
 	var ms := (Time.get_ticks_usec() - t0) / 1000.0
 	mutex.lock()
-	results.append([c, arrays, blocks, ms, lres[1], lres[2], exact])
+	results.append([c, arrays, blocks, ms, lres[1], lres[2], exact, gv])
 	mutex.unlock()
 
 
@@ -384,7 +394,8 @@ static func _copy_border(padded: PackedByteArray, nd: PackedByteArray, face: int
 			padded[dst] = nd[src]
 
 
-func _apply(c: Vector3i, arrays: Array, blocks: PackedByteArray, ms: float) -> void:
+func _apply(c: Vector3i, arrays: Array, blocks: PackedByteArray, ms: float, gv := -1) -> void:
+	var t_apply := Time.get_ticks_usec()
 	queued.erase(c)
 	mesh_ms_total += ms
 	mesh_count += 1
@@ -394,12 +405,14 @@ func _apply(c: Vector3i, arrays: Array, blocks: PackedByteArray, ms: float) -> v
 		if not edited.has(c):
 			data.erase(c)
 		return
-	if logic and not built.has(c):
-		logic.chunk_loaded(c)
+	if not built.has(c):
+		if logic:
+			logic.chunk_loaded(c)
+		# nowy sąsiad może zmienić ściany na granicy: następna przebudowa sąsiadów odświeży też kolizję
+		for n in GDMesher.NORMALS:
+			geo_ver[c + n] = int(geo_ver.get(c + n, 0)) + 1
 	built[c] = true
-	if nodes.has(c):
-		nodes[c].queue_free()
-		nodes.erase(c)
+	models.sync_chunk(c)
 	if water_nodes.has(c):
 		water_nodes[c].queue_free()
 		water_nodes.erase(c)
@@ -423,7 +436,11 @@ func _apply(c: Vector3i, arrays: Array, blocks: PackedByteArray, ms: float) -> v
 		add_child(wmi)
 		water_nodes[c] = wmi
 	var verts: PackedVector3Array = arrays[0]
-	if not verts.is_empty():
+	if verts.is_empty():
+		if nodes.has(c):
+			nodes[c].queue_free()
+			nodes.erase(c)
+	else:
 		var arr := []
 		arr.resize(Mesh.ARRAY_MAX)
 		arr[Mesh.ARRAY_VERTEX] = verts
@@ -434,20 +451,35 @@ func _apply(c: Vector3i, arrays: Array, blocks: PackedByteArray, ms: float) -> v
 		var mesh := ArrayMesh.new()
 		mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 		mesh.surface_set_material(0, material)
-		var mi := MeshInstance3D.new()
+		# węzły zostają; przy zmianie samego światła (ten sam kształt) nie przebudowujemy kolizji
+		var mi: MeshInstance3D = nodes.get(c)
+		var same_shape := mi != null and gv >= 0 and int(mi.get_meta("geo", -2)) == gv
+		if mi == null:
+			mi = MeshInstance3D.new()
+			mi.position = Vector3(c * S)
+			add_child(mi)
+			nodes[c] = mi
 		mi.mesh = mesh
-		mi.position = Vector3(c * S)
-		var faces: PackedVector3Array = arrays[5]
-		if not faces.is_empty():
-			var body := StaticBody3D.new()
-			var shape := ConcavePolygonShape3D.new()
-			shape.set_faces(faces)
-			var cs := CollisionShape3D.new()
-			cs.shape = shape
-			body.add_child(cs)
-			mi.add_child(body)
-		add_child(mi)
-		nodes[c] = mi
+		if not same_shape:
+			var faces: PackedVector3Array = arrays[5]
+			var body: StaticBody3D = mi.get_node_or_null("Body")
+			if faces.is_empty():
+				if body:
+					body.queue_free()
+			else:
+				var shape := ConcavePolygonShape3D.new()
+				shape.set_faces(faces)
+				if body == null:
+					body = StaticBody3D.new()
+					body.name = "Body"
+					var cs := CollisionShape3D.new()
+					cs.name = "Shape"
+					body.add_child(cs)
+					mi.add_child(body)
+				(body.get_node("Shape") as CollisionShape3D).shape = shape
+		mi.set_meta("geo", gv)
+		apply_stats["light" if same_shape else "full"] += 1
+	apply_stats.us += Time.get_ticks_usec() - t_apply
 	if dirty.has(c):
 		dirty.erase(c)
 		_schedule(c)
@@ -483,21 +515,31 @@ func set_block_quiet(p: Vector3i, id: int) -> bool:
 	d[l.x + S * (l.y + S * l.z)] = id
 	data[c] = d
 	mutex.unlock()
-	if logic and old != id:
-		logic.block_changed(p, old, id)
+	if old != id:
+		if logic:
+			logic.block_changed(p, old, id)
+		if models:
+			models.block_changed(p, old, id)
 	var first := not edited.has(c)
 	edited[c] = true
 	unsaved[c] = true
 	pending[c] = true
 	if not remote:
 		Net.block_changed(p, id, c, first)
-	if l.x == 0: pending[c + Vector3i(-1, 0, 0)] = true
-	if l.x == S - 1: pending[c + Vector3i(1, 0, 0)] = true
-	if l.y == 0: pending[c + Vector3i(0, -1, 0)] = true
-	if l.y == S - 1: pending[c + Vector3i(0, 1, 0)] = true
-	if l.z == 0: pending[c + Vector3i(0, 0, -1)] = true
-	if l.z == S - 1: pending[c + Vector3i(0, 0, 1)] = true
+	_bump_geo(c)
+	if l.x == 0: _bump_geo(c + Vector3i(-1, 0, 0))
+	if l.x == S - 1: _bump_geo(c + Vector3i(1, 0, 0))
+	if l.y == 0: _bump_geo(c + Vector3i(0, -1, 0))
+	if l.y == S - 1: _bump_geo(c + Vector3i(0, 1, 0))
+	if l.z == 0: _bump_geo(c + Vector3i(0, 0, -1))
+	if l.z == S - 1: _bump_geo(c + Vector3i(0, 0, 1))
 	return true
+
+
+## Kształt chunka się zmienił: do przebudowy razem z kolizją.
+func _bump_geo(c: Vector3i) -> void:
+	geo_ver[c] = int(geo_ver.get(c, 0)) + 1
+	pending[c] = true
 
 
 func flush_pending() -> void:
@@ -511,6 +553,7 @@ func is_loaded(p: Vector3i) -> bool:
 
 
 func set_block(p: Vector3i, id: int) -> bool:
+	var old := get_block(p)
 	if not set_block_quiet(p, id):
 		return false
 	flush_pending()
@@ -519,7 +562,7 @@ func set_block(p: Vector3i, id: int) -> bool:
 		var above := p + Vector3i(0, 1, 0)
 		if Blocks.props(get_block(above)) & Blocks.CROSS:
 			set_block(above, Blocks.AIR)
-	_update_light_after_edit(p, id)
+	_update_light_after_edit(p, id, old)
 	if remote:
 		return true
 	# ciecze w pobliżu ruszają, bloki z grawitacją spadają
@@ -549,8 +592,9 @@ func apply_remote(p: Vector3i, id: int) -> void:
 		rc[l.x + S * (l.y + S * l.z)] = id
 		Net.remote_chunks[c] = rc
 	if data.has(c) and built.has(c):
+		var old := get_block(p)
 		set_block_quiet(p, id)
-		_update_light_after_edit(p, id)
+		_update_light_after_edit(p, id, old)
 
 
 ## Klient: cały chunk od serwera (zmieniony po raz pierwszy).
@@ -561,13 +605,18 @@ func apply_remote_chunk(c: Vector3i, d: PackedByteArray) -> void:
 	data[c] = d.duplicate()
 	mutex.unlock()
 	edited[c] = true
+	_bump_geo(c)
 	_remesh(c)
 	for n in GDMesher.NORMALS:
+		_bump_geo(c + n)
 		_remesh(c + n)
 
 
 ## Po zmianie bloku: mapa wysokości nieba i przeliczenie światła w chunkach w zasięgu światła.
-func _update_light_after_edit(p: Vector3i, id: int) -> void:
+func _update_light_after_edit(p: Vector3i, id: int, old := -1) -> void:
+	# ta sama przepuszczalność i świecenie: światło się nie zmienia, sąsiednich chunków nie ruszamy
+	if old >= 0 and reg.lprops[old] == reg.lprops[id]:
+		return
 	var col := Vector2i(floori(p.x / float(S)), floori(p.z / float(S)))
 	var hm: Variant = heightmap.get(col)
 	if hm != null:

@@ -325,6 +325,25 @@ static func _kb(n: int) -> String:
 	return "%.1f MB" % (n / 1048576.0) if n >= 1048576 else "%d KB" % maxi(1, n / 1024)
 
 
+# ---------- modele bloków i cząsteczki ----------
+
+@rpc("authority", "reliable")
+func s_block_look(p: Vector3i, look: Dictionary) -> void:
+	if main:
+		main.world.models.set_look(p, look)
+
+
+@rpc("authority", "reliable")
+func s_block_anim(p: Vector3i, name: String) -> void:
+	if main:
+		main.world.models.play(p, name)
+
+
+@rpc("authority", "unreliable")
+func s_particles(name: String, pos: Vector3, opts: Dictionary) -> void:
+	Fx.burst_local(name, pos, opts)
+
+
 # ---------- dźwięki ----------
 
 @rpc("authority", "unreliable")

@@ -133,6 +133,9 @@ func _ready() -> void:
 	if Net.is_client():
 		player.frozen = true
 		player.waiting_login = true
+		var lk: Variant = Net.welcome.get("looks", {})
+		if lk is Dictionary:
+			world.models.looks = lk.duplicate(true)
 		if not Net.client_ready(reg.content_hash()):
 			Mods.stop()
 			GameState.back_to_menu()
@@ -151,6 +154,9 @@ func _ready() -> void:
 	if touch:
 		touch.refresh_binds()
 
+	# test sieci: serwer stawia warzący kocioł z kolorem cieczy obok punktu startu
+	if Net.mode == "dedicated" and OS.get_cmdline_user_args().has("--test-cauldron") and Mods.registry.id_of("cauldron") > 0:
+		_test_cauldron_server.call_deferred()
 	if not GameState.autotest_dir.is_empty():
 		if Net.is_client():
 			_autotest_client(GameState.autotest_dir)
@@ -319,6 +325,7 @@ func world_info_for_client() -> Dictionary:
 				settings[id][k] = info.mods[id][k]
 	return {"name": info.get("name", "Serwer"), "seed": int(info.get("seed", 1337)), "mods": info.get("mods", {}),
 		"palette": Mods.registry.keys, "time": time_of_day, "content_hash": Mods.registry.content_hash(),
+		"looks": world.logic.looks if world.logic else {},
 		"versions": Net.mods_signature(), "chunks": chunks,
 		"profile": {"order": ModManager.effective_order(), "enabled": enabled, "settings": settings}}
 
@@ -1075,6 +1082,18 @@ func _autotest_client(dir: String) -> void:
 	print("KLIENT mody=", Mods.loaded, " z serwera=", ModManager.server_mods.keys(), " blok crystal=", Blocks.id("crystal"))
 	await _wait_loaded()
 	await _wait(2.0)
+	if opt.has("expect-cauldron"):
+		await _wait(1.0)
+		for ch in world.models.by_chunk.values():
+			for p in ch:
+				var m: BlockModel = ch[p]
+				var lq: Array = m.tagged.get("liquid", [])
+				var col := ""
+				if not lq.is_empty():
+					var mat: Variant = (lq[0] as MeshInstance3D).get_surface_override_material(0)
+					if mat is StandardMaterial3D and mat.has_meta("base"):
+						col = (mat.get_meta("base") as Color).to_html(false)
+				print("KLIENT model kotła w ", p, " stan=", world.reg.state_of(m.block), " animacja=", m.loop_anim, " ciecz=", col)
 	print("KLIENT pozycja=", player.global_position.snapped(Vector3(0.1, 0.1, 0.1)), " zdrowie=", player.health,
 		" pasek[0]=", Mods.hotbar_item(0), " gracze=", players.keys().size())
 	if opt.has("place"):
@@ -1115,6 +1134,181 @@ func _autotest_client(dir: String) -> void:
 	print("KLIENT koniec ", Settings.player_name, " konto=", my_account, " pozycja=", player.global_position.snapped(Vector3(0.1, 0.1, 0.1)), " pasek[0]=", Mods.hotbar_item(0))
 	Net.leave()
 	await _wait(0.5)
+	get_tree().quit()
+
+
+## Test alchemii: blok z modelem GLB, stany, wygląd, animacje, cząsteczki, mikstury, wydajność wielu modeli.
+func _test_alchemy(dir: String) -> void:
+	await _wait_loaded()
+	await _wait(0.5)
+	var me := Net.my_id()
+	var hb := Mods.cid("hotbar")
+	var reg := Mods.registry
+	Mods.camera_stats.erase("mode")
+	player.first_person = true
+	var look := func(from: Vector3, at: Vector3) -> void:
+		player.global_position = from
+		player.velocity = Vector3.ZERO
+		var d := at - (from + Vector3(0, 1.6, 0))
+		player.yaw = atan2(-d.x, -d.z)
+		player.pitch = atan2(d.y, Vector2(d.x, d.z).length())
+	var use_on := func(p: Vector3i, item: String) -> void:
+		Mods.set_slot(hb, 0, {"item": item, "count": 1} if item != "" else {})
+		player.select(0)
+		Mods.as_player(me, func(): return Mods.before("block.use", {"pos": p, "normal": Vector3i.UP, "block": world.get_block(p), "item": item, "slot": 1}))
+	var state := func(p: Vector3i) -> String: return str(reg.state_of(world.get_block(p)).get("content", "?"))
+	# kocioł na płaskim miejscu obok gracza
+	var c := Vector3i(player.global_position.floor()) + Vector3i(0, 0, -3)
+	for y in range(c.y + 4, c.y - 6, -1):
+		if (reg.props[world.get_block(Vector3i(c.x, y, c.z))] & Registry.SOLID) != 0:
+			c.y = y + 1
+			break
+	world.set_block(c, reg.id_of("cauldron"))
+	world.set_block(c + Vector3i(0, 1, 0), Blocks.AIR)
+	await _wait(0.5)
+	var m: BlockModel = world.models.model_at(c)
+	var tris := 0
+	if m:
+		for n in m.find_children("*", "MeshInstance3D", true, false):
+			var mi := n as MeshInstance3D
+			for sidx in mi.mesh.get_surface_count():
+				var ia: int = mi.mesh.surface_get_array_index_len(sidx)
+				tris += (ia if ia > 0 else mi.mesh.surface_get_array_len(sidx)) / 3
+	print("ALCH model=", m != null, " części=", m.parts.keys() if m else [], " trójkątów=", tris, " emitery=", m.emitters.keys() if m else [])
+	use_on.call(c, "water_bucket")
+	print("ALCH woda: ", state.call(c), " w ręce=", Mods.slot(hb, 0), " ciecz widoczna=", m.tagged["liquid"][0].visible)
+	for it in ["feather", "flower_yellow", "ruby"]:
+		use_on.call(c, it)
+		await _wait(0.3)
+	print("ALCH składniki=", world.logic.get_data(c).get("ingredients"), " kolor=", world.logic.looks.get(c, {}).get("colors"))
+	use_on.call(c, "stick")
+	await _wait(1.5)
+	print("ALCH warzenie: ", state.call(c), " światło=", world.light_at(Vector3(c) + Vector3(0.5, 1.2, 0.5)), " emitery aktywne=", m.emitters.keys().filter(func(k): return m.emitters[k].emitting), " animacja=", m.loop_anim)
+	look.call(Vector3(c) + Vector3(0.5, 0.0, 2.3), Vector3(c) + Vector3(0.5, 0.55, 0.5))
+	await _wait(1.0)
+	await _shot(dir, "a1_brewing_day")
+	time_of_day = 22.5
+	await _wait(1.0)
+	await _shot(dir, "a2_brewing_night")
+	time_of_day = 10.0
+	await _wait(float(Mods.registry.defs[reg.id_of("cauldron")].get("brew", 10.0)) + 0.5)
+	print("ALCH po warzeniu: ", state.call(c), " dane=", world.logic.get_data(c))
+	await _shot(dir, "a3_ready")
+	use_on.call(c, "glass_bottle")
+	use_on.call(c, "glass_bottle")
+	print("ALCH butelki: ", state.call(c), " plecak mikstur=", _count_item("potion_speed_strong"))
+	var speed_before := float(player.stat("speed"))
+	Mods.set_slot(hb, 1, {"item": "potion_speed_strong", "count": 1})
+	Mods.as_player(me, func(): return Mods.before("item.use", {"item": "potion_speed_strong", "slot": 2}))
+	await _wait(0.6)
+	print("ALCH wypita: szybkość ", speed_before, " -> ", player.stat("speed"), " napis=", hud.texts.keys() if hud.get("texts") != null else "?")
+	# nieudana mikstura: węgiel i piasek
+	var c2 := c + Vector3i(2, 0, 0)
+	world.set_block(c2, reg.id_of("cauldron"))
+	world.set_block(c2 + Vector3i(0, 1, 0), Blocks.AIR)
+	await _wait(0.3)
+	use_on.call(c2, "water_bucket")
+	use_on.call(c2, "coal")
+	use_on.call(c2, "sand")
+	use_on.call(c2, "stick")
+	world.logic.scheduled[world.logic.scheduled.size() - 1][0] = world.logic.clock + 0.5
+	await _wait(1.0)
+	print("ALCH nieudana: ", state.call(c2))
+	await _shot(dir, "a4_fail_smoke")
+
+	# wydajność: 40 warzących kotłów naraz
+	await _wait(1.0)
+	var frame_ms := func(n: int) -> Array:
+		var a := []
+		for i in n:
+			await get_tree().process_frame
+			a.append(Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
+		a.sort()
+		return [a[n / 2], Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME), Performance.get_monitor(Performance.RENDER_TOTAL_PRIMITIVES_IN_FRAME)]
+	look.call(Vector3(c) + Vector3(0.5, 3.0, 9.0), Vector3(c) + Vector3(0.5, 0.0, -4.0))
+	await _wait(1.0)
+	BlockModel.force_fx = true
+	var before: Array = await frame_ms.call(60)
+	var brewing := reg.with_state(reg.id_of("cauldron"), {"content": "brewing"})
+	var t0 := Time.get_ticks_usec()
+	for i in 40:
+		var q := c + Vector3i(-6 + (i % 8) * 2, 2 + (i / 8) % 2 * 0, -2 - (i / 8) * 2)
+		world.set_block(q, brewing)
+		world.logic.set_look(q, {"colors": {"liquid": ["#40c8f0", "#70e060", "#f04060", "#e8e8ff"][i % 4]}})
+	var build_ms := (Time.get_ticks_usec() - t0) / 1000.0
+	await _wait(2.0)
+	var after: Array = await frame_ms.call(60)
+	print("ALCH wydajność: 40 kotłów postawione w %.1f ms; klatka (logika) %.1f -> %.1f ms; wywołania rysowania %d -> %d; trójkąty %d -> %d" % [build_ms, before[0], after[0], before[1], after[1], before[2], after[2]])
+	await _shot(dir, "a5_many")
+	get_tree().quit()
+
+
+func _test_cauldron_server() -> void:
+	while not (world.is_loaded(Vector3i(3, 0, 0)) and world.is_loaded(Vector3i(3, 31, 0)) and world.is_loaded(Vector3i(3, 40, 0))):
+		await _wait(0.2)
+	var c := Vector3i(3, 0, 0)
+	for y in range(40, -20, -1):
+		if (Mods.registry.props[world.get_block(Vector3i(3, y, 0))] & Registry.SOLID) != 0:
+			c.y = y + 1
+			break
+	world.set_block(c, Mods.registry.with_state(Mods.registry.id_of("cauldron"), {"content": "brewing"}))
+	world.logic.set_look(c, {"colors": {"liquid": "#70e060"}})
+	print("SERWER kocioł w ", c)
+
+
+func _count_item(item: String) -> int:
+	var n := 0
+	for cn in ["hotbar", "backpack"]:
+		for sl in Mods.container_slots(Mods.cid(cn)):
+			if sl is Dictionary and str(sl.get("item", "")) == item:
+				n += int(sl.count)
+	return n
+
+
+## Pomiar: ile kosztuje postawienie bloku (czas wywołania, najdłuższa klatka, czas do nowej siatki).
+func _test_perf() -> void:
+	await _wait_loaded()
+	await _wait(2.0)
+	var stone := Mods.registry.id_of("stone")
+	var idle := []
+	for i in 120:
+		await get_tree().process_frame
+		idle.append(Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
+	idle.sort()
+	print("PERF bez zmian: klatka (logika) mediana %.1f ms, max %.1f ms" % [idle[60], idle[119]])
+	var base := Vector3i(player.global_position.floor()) + Vector3i(2, 1, 0)
+	world.apply_stats = {"full": 0, "light": 0, "us": 0}
+	var calls := []
+	var rebuild := []
+	var worst := []
+	for i in 30:
+		var p := base + Vector3i(i % 6, i / 6, (i % 2) * 3)
+		var t0 := Time.get_ticks_usec()
+		var tl := Time.get_ticks_usec()
+		world.set_block(p, stone if i % 3 != 2 else Blocks.AIR)
+		calls.append((Time.get_ticks_usec() - t0) / 1000.0)
+		var c := World.chunk_of(p)
+		var max_frame := 0.0
+		var t1 := Time.get_ticks_usec()
+		while world.queued.has(c) or world.dirty.has(c):
+			var f0 := Time.get_ticks_usec()
+			await get_tree().process_frame
+			max_frame = maxf(max_frame, Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0)
+			if Time.get_ticks_usec() - t1 > 2000000:
+				break
+		rebuild.append((Time.get_ticks_usec() - t1) / 1000.0)
+		worst.append(max_frame)
+		await _wait(0.1)
+	var avg := func(a: Array) -> float:
+		var sum := 0.0
+		for x in a: sum += x
+		return sum / maxf(1, a.size())
+	print("PERF siatka: ", world.mesher_name, " wątki=", world.threaded)
+	var st := world.apply_stats
+	print("PERF przebudowy chunków na 30 zmian: z kolizją=%d, tylko światło=%d, wątek główny razem %.1f ms (%.2f ms na zmianę)" % [st.full, st.light, st.us / 1000.0, st.us / 30000.0])
+	print("PERF set_block: średnio %.2f ms, max %.2f ms" % [avg.call(calls), calls.max()])
+	print("PERF nowa siatka po: średnio %.1f ms, max %.1f ms" % [avg.call(rebuild), rebuild.max()])
+	print("PERF najdłuższa klatka (logika) w tym czasie: średnio %.1f ms, max %.1f ms" % [avg.call(worst), worst.max()])
 	get_tree().quit()
 
 
@@ -1305,6 +1499,12 @@ func _autotest(dir: String) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--craft-only"):
 		await _test_craft(dir)
+		return
+	if OS.get_cmdline_user_args().has("--alchemy-only"):
+		await _test_alchemy(dir)
+		return
+	if OS.get_cmdline_user_args().has("--perf-only"):
+		await _test_perf()
 		return
 	if OS.get_cmdline_user_args().has("--blocks-only"):
 		await _test_blocks(dir)

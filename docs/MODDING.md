@@ -131,6 +131,58 @@ engine.ui.window({ id = "chest", sections = { { type = "slots", container = c, c
 Gdy blok zniknie, przedmioty z jego kontenera wypadają na ziemię, a mody dostają zdarzenie `block.removed`
 z danymi bloku.
 
+### Bloki z modelem
+
+Blok z polem `model` nie jest sześcianem: silnik rysuje dla niego osobny model (np. kocioł, skrzynia
+z wiekiem, maszyna). Model to plik GLB/glTF (np. z Blendera) i/lub części z prostopadłościanów opisane w Lua.
+
+```lua
+engine.blocks.register("cauldron", {
+	shape = "model",
+	icon = { pattern = "cauldron", color = "#3a3a42" },      -- ikona przedmiotu (wzór albo PNG)
+	model = {
+		file = "models/cauldron.glb",          -- nazwane węzły pliku są częściami (pot, liquid, ...)
+		scale = 1, offset = { 0, 0, 0 },       -- środek dolnej ściany bloku to (0, 0, 0), blok ma 1 × 1 × 1
+		parts = {                              -- części z klocków: jak w stworzeniach
+			ladle = { pivot = { 0, 0.72, 0 }, boxes = {
+				{ size = { 0.035, 0.6, 0.035 }, pos = { 0.17, 0.2, 0 }, rot = { 0, 0, -22 }, color = "#6a4424" },
+				{ size = { 0.2, 0.03, 0.2 }, pos = { 0, 0, 0 }, color = "#ff7a20", tag = "embers", glow = true },
+			} },
+		},
+		animations = {                         -- klatki: czas, rot (stopnie), pos (przesunięcie), scale
+			stir = { length = 2.4, loop = true, tracks = {
+				ladle = { { 0, rot = { 0, 0, 0 } }, { 1.2, rot = { 0, 180, 0 } }, { 2.4, rot = { 0, 360, 0 } } },
+			} },
+		},
+		emitters = {                           -- ciągłe cząsteczki przypięte do modelu (włącza je wygląd)
+			bubbles = { particle = "alchemy.bubble", pos = { 0, 0.73, 0 }, rate = 1, color_from = "liquid" },
+		},
+		collision = { { min = { 0.06, 0, 0.06 }, max = { 0.94, 0.87, 0.94 } } },
+		look = { hide = { "liquid" }, colors = { liquid = "#3a78d8" } },   -- wygląd domyślny
+	},
+	states = { content = { "empty", "brewing" } },
+	variant = function(s)                      -- wygląd zależny od stanu bloku
+		if s.content == "brewing" then return { light = 11, look = { anim = "stir", emitters = { "bubbles" }, hide = {} } } end
+	end,
+})
+```
+
+- **Wygląd** (`look`): `anim` (zapętlona animacja), `emitters` (włączone emitery), `colors` (tag albo nazwa
+  węzła pliku → kolor), `hide` (ukryte tagi i węzły). Składa się z `model.look`, `look` wariantu (stanu)
+  i wyglądu ustawionego w skrypcie: `engine.blocks.look(pos, { colors = { liquid = "#70e060" } })`
+  (dokłada zmiany; `nil` usuwa pole). Wygląd zapisuje się ze światem i trafia do wszystkich graczy.
+- **Animacja jednorazowa**: `engine.blocks.animate(pos, "plop")` – potem wraca animacja z wyglądu.
+- **Obrót**: model patrzy na północ (-Z); stan `facing` obraca go jak teksturę.
+- Prostopadłościany bez tagu łączą się w jedną siatkę (mało wywołań rysowania), `glow = true` świeci
+  w ciemności, tag pozwala zmieniać kolor i ukrywać.
+- Światło: model jest oświetlany jak stworzenia (noc, pochodnie); świecenie bloku daje pole `light` wariantu.
+
+**Model z Blendera**: zrób obiekty z nazwami (np. `pot`, `liquid`, `lid`), środek dołu bloku w (0, 0, 0),
+blok to 1 × 1 × 1 m, przód w stronę -Y w Blenderze (po eksporcie -Z). Eksport: File → Export → glTF 2.0,
+format „glTF Binary (.glb)”, z materiałami. Plik połóż w folderze moda, np. `models/`. Nazwy obiektów
+to części: animacje z Lua nimi ruszają, `colors`/`hide` zmieniają ich wygląd. Przykład wygenerowany
+skryptem: `game/tools/make_cauldron.gd` (kocioł toczony z profilu, 4096 trójkątów).
+
 ### Aktualizacje bloków
 
 ```lua
@@ -179,7 +231,7 @@ Tekstura to plik PNG 16x16 w folderze moda albo wzór opisany danymi (bez rysowa
 texture = { pattern = "ore", color = "#7f7f84", color2 = "#96969b", spots = "#d0203a" }
 ```
 
-Wzory: `solid`, `noise`, `speckle`, `bricks`, `planks`, `stripes`, `ore`, `glass`, `lamp`, `chest`, `furnace`,
+Wzory: `potion` (butelka, `color` = ciecz), `cauldron` (ikona kotła), `solid`, `noise`, `speckle`, `bricks`, `planks`, `stripes`, `ore`, `glass`, `lamp`, `chest`, `furnace`,
 `furrows` (bloki), `crop` (uprawa, `stage` 1..4) oraz `gem`, `ingot`, `food`, `plant`, `seeds`, `torch`, `stick`,
 `pickaxe`, `axe`, `shovel`, `sword`, `hoe`, `hammer` (ikony przedmiotów). Kolory w formacie `#rrggbb` albo `#rrggbbaa`.
 Piksele z przezroczystością poniżej 50% są niewidoczne.
@@ -218,6 +270,28 @@ Silnik sam gra:
 - odgłosy stworzeń z pola `sounds = { idle = "sheep.say", idle_every = 18, hurt = "..." }` (młode wyżej).
 
 Gracz ustawia głośność w Opcjach.
+
+## Cząsteczki
+
+```lua
+-- content.lua: opis efektu
+engine.particles.register("alchemy.splash", {
+	amount = 16,              -- sztuk w wybuchu (w emiterze: na sekundę)
+	life = 0.6,               -- sekundy życia
+	speed = { 1.0, 2.2 }, direction = { 0, 1, 0 }, spread = 40,   -- prędkość, kierunek, rozrzut (stopnie)
+	gravity = 7,              -- w dół; ujemna unosi (dym, para)
+	size = { 0.06, 0.02 },    -- rozmiar na początku i na końcu
+	color = { "#4a8ae0", "#ffffff" },   -- kolory przez życie (na końcu zanika)
+	box = { 0.1, 0, 0.1 },    -- obszar narodzin (pół-wymiary)
+	shape = "round",          -- "round", "square", "spark"
+	glow = false,             -- true: świeci (ogień, iskry)
+	damping = 0,
+})
+-- skrypt: wybuch widziany przez graczy w pobliżu; opts: color (lista kolorów), amount (mnożnik)
+engine.particles.spawn("alchemy.splash", pos, { color = { "#70e060" } })
+```
+
+Ciągłe efekty (ogień, para) robi się emiterami modelu bloku (opis wyżej).
 
 ## Przedmioty
 
@@ -384,6 +458,8 @@ Pozycje można podawać jako wektor albo tabelę `{x = 1, y = 2, z = 3}`.
 | `engine.blocks.data/set_data/clear_data/container` | Dane i kontener bloku |
 | `engine.blocks.on_update(klucze, fn)`, `schedule(pos, s, tag)` | Aktualizacje bloków |
 | `engine.sound.play(nazwa, opts)`, `stop(id)`; `engine.sounds.register` | Dźwięki |
+| `engine.blocks.look(pos, wygląd)`, `get_look(pos)`, `animate(pos, nazwa)` | Model bloku: wygląd i animacje |
+| `engine.particles.register(nazwa, opis)`, `spawn(nazwa, pos, opts)` | Cząsteczki |
 | `engine.world.biome(pos)`, `biome_key(pos)`, `height(x, z)`, `time()`, `set_time(h)` | Świat |
 | `engine.player.position()`, `teleport(pos)`, `velocity()`, `push(v)` | Ruch gracza |
 | `engine.player.set(stat, v)`, `get(stat)` | Statystyki: `speed`, `jump`, `gravity`, `reach`, `auto_jump`, `max_health`, `spawn`, `break_speed`, `swim_speed` |
@@ -543,6 +619,7 @@ Mod „Plecak i postać” udostępnia `engine.require("backpack").give(przedmio
 | `crafting_discovery` | rzemiosło odkrywcze: przycisk z polami, pasek postępu, dane gracza, `engine.as_player` |
 | `farming` | stany (wiek uprawy, wilgotność), losowe aktualizacje, aktualizacja od sąsiada, `item.use` z pozycją |
 | `storage` | skrzynia: kontener bloku, stan `facing`, mody opcjonalne (`after`, `engine.optional`) |
+| `alchemy` | kocioł: blok z modelem GLB i klocków, animacje, emitery cząsteczek, wygląd z gry, mikstury na czas |
 | `smelting` | piec: dane bloku, zaplanowane aktualizacje, wariant świecący, okno odświeżane wszystkim patrzącym |
 
 ## Bezpieczeństwo
@@ -555,7 +632,7 @@ a wspólnej metatabeli tekstów nie da się zmienić. Test: `godot --headless --
 
 ## Co będzie dalej
 
-- Kształty bloków (półbloki, schody, drzwi), modele z Blendera (glb), cząsteczki.
+- Kształty bloków w siatce chunka (półbloki, schody), modele z plików dla stworzeń i przedmiotów w ręce.
 - Czat i komendy, uprawnienia na serwerze.
 - Przedmioty z danymi (zużycie narzędzi), konsola modera i przeładowanie modów bez restartu.
 - Pobieranie brakujących modów z serwera przy dołączaniu.

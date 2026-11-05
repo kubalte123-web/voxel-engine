@@ -9,6 +9,7 @@ const CROSS := 2
 const SOLID := 4
 const LIQUID := 8
 const THIN := 16           # cienki słupek (pochodnia)
+const MODEL := 32          # blok z własnym modelem (bez ścian w siatce chunka)
 const LEVELS := 8          # poziomy cieczy: 1 (cienka warstwa) .. 8 (pełny blok)
 const MAX_BLOCKS := 256
 const ATLAS_COLS := 16
@@ -34,6 +35,7 @@ var item_keys: Array[String] = []
 var placeable: Array[String] = []  # przedmioty-bloki do stawiania (tryb kreatywny)
 var worldgen := {}
 var animations := {}
+var particles := {}                # nazwa efektu cząsteczek -> opis
 var sounds := {}                   # nazwa dźwięku -> {file|files, volume, pitch, pitch_random, range, mod}
 var entities := {}                 # rodzaj stworzenia -> definicja (części modelu, AI, łup, pojawianie się)
 var errors: Array[String] = []
@@ -124,6 +126,10 @@ func build(content: Dictionary, paths: Dictionary = {}) -> void:
 			p = CROSS if shape == "cross" else THIN
 			if bool(d.get("solid", false)):
 				p |= SOLID
+		elif shape == "model" or d.get("model") is Dictionary:
+			p = MODEL
+			if bool(d.get("solid", true)):
+				p |= SOLID
 		else:
 			if not transparent:
 				p |= OPAQUE
@@ -146,6 +152,7 @@ func build(content: Dictionary, paths: Dictionary = {}) -> void:
 	animations = content.get("animations", {}) if content.get("animations") is Dictionary else {}
 	entities = content.get("entities", {}) if content.get("entities") is Dictionary else {}
 	sounds = content.get("sounds", {}) if content.get("sounds") is Dictionary else {}
+	particles = content.get("particles", {}) if content.get("particles") is Dictionary else {}
 	_build_atlas()
 
 
@@ -346,7 +353,10 @@ func icon(item_key: String) -> Texture2D:
 	var it: Dictionary = items.get(item_key, {})
 	var img: Image
 	var b := int(it.get("block", -1))
-	if b > 0:
+	var bicon: Variant = defs[b].get("icon") if b > 0 else null
+	if b > 0 and bicon != null:
+		img = TexGen.load_spec(bicon, _mod_path(str(defs[b].get("mod", ""))))   # ikona z definicji (np. blok z modelem)
+	elif b > 0:
 		if props[b] & (CROSS | THIN):
 			img = tile_images[tiles[b * 6]]
 		else:
