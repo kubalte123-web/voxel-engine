@@ -1327,6 +1327,43 @@ func _test_fishing(dir: String) -> void:
 	get_tree().quit()
 
 
+## Test moda „Blokomiot” (napisanego przez inne AI).
+func _test_gun(dir: String) -> void:
+	await _wait_loaded()
+	await _wait(0.5)
+	var me := Net.my_id()
+	var hb := Mods.cid("hotbar")
+	var reg := Mods.registry
+	print("GUN wczytany=", Mods.loaded.has("block_gun"), " błąd=", Mods.load_errors.get("block_gun", "brak"), " blok ammo_brick=", reg.id_of("ammo_brick"))
+	print("GUN dźwięk 'base:sounds/pop.ogg' zarejestrowany=", Sfx.has("base:sounds/pop.ogg"))
+	player.pitch = -0.8
+	player.yaw = 0.0
+	await _wait(0.5)
+	var scen := func(label: String, slots: Array) -> void:
+		for i in 8:
+			Mods.set_slot(hb, i, slots[i] if i < slots.size() else {})
+		await _wait(0.3)
+		var t: Dictionary = player.target.duplicate()
+		var at: Vector3i = t.pos + t.normal if not t.is_empty() else Vector3i.ZERO
+		var gun_slot := 0
+		for i in slots.size():
+			if str(slots[i].get("item", "")) == "block_gun":
+				gun_slot = i
+		Mods.as_player(me, func(): return Mods.before("item.use", {"item": "block_gun", "slot": gun_slot + 1, "pos": t.get("pos"), "normal": t.get("normal")}))
+		await _wait(0.3)
+		var now := []
+		for i in 8:
+			var sl := Mods.slot(hb, i)
+			now.append(("%s×%d" % [sl.item, sl.count]) if not sl.is_empty() else "-")
+		print("GUN ", label, ": pasek po strzale=", now.slice(0, slots.size()), " blok w celu=", reg.block_key(world.get_block(at)))
+		world.set_block(at, Blocks.AIR)
+	await scen.call("A (blokomiot w 1. miejscu, cegły w 2.)", [{"item": "block_gun", "count": 1}, {"item": "ammo_brick", "count": 5}])
+	await scen.call("B (patyk w 1., blokomiot w 2., ziemia w 3.)", [{"item": "stick", "count": 3}, {"item": "block_gun", "count": 1}, {"item": "dirt", "count": 5}])
+	await scen.call("C (ziemia w 1., blokomiot w 2.)", [{"item": "dirt", "count": 5}, {"item": "block_gun", "count": 1}])
+	print("GUN tekstura cegły: ", "brak pliku (fioletowa szachownica)" if not FileAccess.file_exists("res://mods/base/textures/bricks.png") else "jest")
+	get_tree().quit()
+
+
 func _count_item(item: String) -> int:
 	var n := 0
 	for cn in ["hotbar", "backpack"]:
@@ -1570,6 +1607,9 @@ func _autotest(dir: String) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--craft-only"):
 		await _test_craft(dir)
+		return
+	if OS.get_cmdline_user_args().has("--gun-only"):
+		await _test_gun(dir)
 		return
 	if OS.get_cmdline_user_args().has("--fishing-only"):
 		await _test_fishing(dir)
