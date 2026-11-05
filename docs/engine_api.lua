@@ -147,6 +147,9 @@ function engine.items.register(key, def) end
 ---@param key any
 function engine.items.def(key) end
 
+--- klucze wszystkich przedmiotów w kolejności rejestracji
+function engine.items.list() end
+
 ---@param key any
 function engine.items.name(key) end
 
@@ -657,6 +660,8 @@ engine.ui = {}
 
 --- okno opisane danymi: {id, title, sections = {{type="character"|"slots"|"text"|"button"|"input"|"progress", ...}}}
 --- przycisk dostaje tabelę wartości pól "input": on_press(fields), np. fields.login
+--- więcej rodzajów sekcji: image, row, tabs, list, slider, toggle, dropdown, item_button, separator, space
+--- (opis w docs/MODDING.md); on_change(fields) przy suwaku, przełączniku, liście, zakładkach
 ---@param spec any
 function engine.ui.window(spec) end
 
@@ -673,9 +678,14 @@ function engine.ui.notify(text) end
 ---@param spec any
 function engine.ui.bar(spec) end
 
---- napis na ekranie gry: {id, text, color}
+--- napis na ekranie gry: {id, text, color, font_size}
 ---@param spec any
 function engine.ui.text(spec) end
+
+--- obrazek na ekranie gry: {id, item | image, size = {w, h}, text, alpha}
+--- każdy element może mieć anchor ("top_left" .. "bottom_right", "center") i offset = {x, y}
+---@param spec any
+function engine.ui.image(spec) end
 
 ---@param id any
 function engine.ui.remove(id) end

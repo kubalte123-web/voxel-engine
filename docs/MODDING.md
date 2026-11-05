@@ -745,6 +745,41 @@ engine.ui.window({
 
 Okno o tym samym `id` otwarte ponownie odświeża się na miejscu (tekst wpisany w pola zostaje).
 
+Więcej sekcji (wszystkie można zagnieżdżać w `row`, `column` i zakładkach):
+
+```lua
+{ type = "tabs", id = "tab", selected = 1, on_change = fn, tabs = {
+	{ title = "Przedmioty", sections = { ... } },
+	{ title = "Ustawienia", sections = { ... } },
+} },
+{ type = "row", sections = { ... } },          -- obok siebie (na telefonie jedna pod drugą; wrap = false zostawia w rzędzie)
+{ type = "column", sections = { ... } },       -- jedna pod drugą, np. kolumna w wierszu
+{ type = "image", item = "ruby", size = { 96, 96 }, caption = "Rubin" },   -- albo image = "textures/mapa.png" / wzór
+{ type = "list", id = "wybor", items = { { text = "Miecz", item = "iron_sword" }, "Tarcza" }, selected = 1, height = 200, on_change = fn },
+{ type = "slider", id = "glosnosc", label = "Głośność", min = 0, max = 1, step = 0.05, value = 0.8, on_change = fn },
+{ type = "toggle", id = "noc", text = "Tryb nocny", value = false, on_change = fn },
+{ type = "dropdown", id = "trudnosc", label = "Trudność", options = { "Łatwy", "Normalny" }, selected = 2, on_change = fn },
+{ type = "item_button", id = "kup", item = "bread", count = 3, text = "Kup chleb", on_press = fn },
+{ type = "text", text = "Uwaga!", size = 22, color = "#ffd060", align = "center" },
+{ type = "separator" }, { type = "space", size = 16 },
+```
+
+`fields` w `on_press` i `on_change` zawiera wartości wszystkich pól okna po `id`: tekst pól, liczby suwaków,
+`true/false` przełączników, numer wybranej pozycji listy, listy rozwijanej i zakładki (od 1). `on_change`
+wywołuje się po zmianie (suwak: po puszczeniu). Przykład: mod `handbook` (klawisz J).
+
+### Elementy na ekranie gry
+
+```lua
+engine.ui.bar({ id = "mana", label = "Mana", value = 30, max = 50, color = "#4a8ae0" })
+engine.ui.text({ id = "wynik", text = "Punkty: 12", color = "#ffffff", font_size = 18 })
+engine.ui.image({ id = "kompas", item = "compass", size = { 28, 28 }, text = "N", alpha = 0.8,
+	anchor = "top", offset = { 0, 12 } })   -- anchor: top_left, top, top_right, left, center, right, bottom_left, bottom, bottom_right
+engine.ui.remove("kompas")
+```
+
+Bez `anchor` paski i obrazki stoją w lewym górnym rogu jeden pod drugim, napisy po prawej.
+
 ## Czat, polecenia i uprawnienia
 
 T albo Enter otwiera czat (na telefonie: pauza → Czat). Tekst od `/` to polecenie. Wbudowane: `/help`, `/list`,
@@ -873,6 +908,7 @@ Mod „Plecak i postać” udostępnia `engine.require("backpack").give(przedmio
 | `alchemy` | kocioł: blok z modelem GLB i klocków, animacje, emitery cząsteczek, wygląd z gry, mikstury na czas |
 | `monsters` | zombie: wróg (`ai.hostile`), model GLB z animacjami z pliku, mózg w Lua, pojawianie się nocą |
 | `horses` | konie: jazda (`ride`), oswajanie przez hak `entity.interact`, ukryte siodło (tag) |
+| `handbook` | bogatsze okna: zakładki, lista z ikonami, obrazek, suwak, przełącznik, lista rozwijana; kompas z `anchor` |
 | `building` | kształty z prostopadłościanów: półbloki, schody, płot, murek, szyba, własny kształt (stolik) |
 | `smelting` | piec: dane bloku, zaplanowane aktualizacje, wariant świecący, okno odświeżane wszystkim patrzącym |
 

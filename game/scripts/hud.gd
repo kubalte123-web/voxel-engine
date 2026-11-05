@@ -141,8 +141,36 @@ func _rebuild_bar() -> void:
 
 
 ## Paski i napisy z modów: pasek {label, value, max, color}, napis {text, color}.
+## Z polem anchor ("top_left", "top", "top_right", "left", "center", "right", "bottom_left", "bottom",
+## "bottom_right") i offset {x, y} element stoi w wybranym miejscu ekranu zamiast na liście.
+var mod_free: Control
+var free_items: Array = []   # [Control, anchor, offset]
+
+const ANCHORS := {"top_left": Vector2(0, 0), "top": Vector2(0.5, 0), "top_right": Vector2(1, 0),
+	"left": Vector2(0, 0.5), "center": Vector2(0.5, 0.5), "right": Vector2(1, 0.5),
+	"bottom_left": Vector2(0, 1), "bottom": Vector2(0.5, 1), "bottom_right": Vector2(1, 1)}
+
+
+func _place_free() -> void:
+	var vs := get_viewport_rect().size
+	for f in free_items:
+		var c: Control = f[0]
+		if not is_instance_valid(c):
+			continue
+		var a: Vector2 = f[1]
+		var sz := c.get_combined_minimum_size()
+		c.size = sz
+		c.position = (vs - sz) * a + (f[2] as Vector2) + Vector2(12, 12) * (Vector2.ONE - a * 2.0)   # margines od krawędzi
+
+
 func _rebuild_mod_hud() -> void:
-	for box in [mod_box, mod_texts]:
+	if mod_free == null:
+		mod_free = Control.new()
+		mod_free.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		mod_free.set_anchors_preset(Control.PRESET_FULL_RECT)
+		add_child(mod_free)
+	free_items.clear()
+	for box in [mod_box, mod_texts, mod_free]:
 		for c in box.get_children():
 			box.remove_child(c)
 			c.queue_free()
@@ -151,41 +179,74 @@ func _rebuild_mod_hud() -> void:
 	for id in ids:
 		var d: Dictionary = Mods.hud[id]
 		var col: Color = d.color if d.get("color") is Color else Color.from_string(str(d.get("color", "#e0e0e0")), Color(0.9, 0.9, 0.9))
-		if d.type == "bar":
-			var row := HBoxContainer.new()
-			row.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			row.add_theme_constant_override("separation", 8)
-			var l := _outlined(14)
-			l.text = str(d.get("label", ""))
-			l.custom_minimum_size = Vector2(70, 0)
-			row.add_child(l)
-			var bar_bg := Panel.new()
-			bar_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			bar_bg.custom_minimum_size = Vector2(180, 14)
-			var bg := StyleBoxFlat.new()
-			bg.bg_color = Color(0, 0, 0, 0.5)
-			bg.set_corner_radius_all(4)
-			bar_bg.add_theme_stylebox_override("panel", bg)
-			var mx := maxf(0.0001, float(d.get("max", 1.0)))
-			var fill := Panel.new()
-			fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
-			var fs := StyleBoxFlat.new()
-			fs.bg_color = col
-			fs.set_corner_radius_all(4)
-			fill.add_theme_stylebox_override("panel", fs)
-			fill.position = Vector2(2, 2)
-			fill.size = Vector2(176.0 * clampf(float(d.get("value", 0.0)) / mx, 0.0, 1.0), 10)
-			bar_bg.add_child(fill)
-			row.add_child(bar_bg)
-			var v := _outlined(13)
-			v.text = "%d/%d" % [roundi(float(d.get("value", 0.0))), roundi(mx)]
-			row.add_child(v)
-			mod_box.add_child(row)
+		var w := _mod_hud_item(d, col)
+		if d.has("anchor"):
+			var off := Registry.arr(d.get("offset"))
+			mod_free.add_child(w)
+			free_items.append([w, ANCHORS.get(str(d.anchor), Vector2.ZERO), Vector2(float(off[0]) if off.size() > 0 else 0.0, float(off[1]) if off.size() > 1 else 0.0)])
+		elif d.type == "bar" or d.type == "image":
+			mod_box.add_child(w)
 		else:
-			var l := _outlined(15)
-			l.text = str(d.get("text", ""))
+			mod_texts.add_child(w)
+	_place_free.call_deferred()
+
+
+func _mod_hud_item(d: Dictionary, col: Color) -> Control:
+	if d.type == "image":
+		var row := HBoxContainer.new()
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_theme_constant_override("separation", 6)
+		var tr := TextureRect.new()
+		tr.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		tr.texture = ModWindow.load_image(d, str(d.get("mod", "")))
+		tr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		var sz := Registry.arr(d.get("size"))
+		var w := float(sz[0]) if sz.size() > 0 else 40.0
+		tr.custom_minimum_size = Vector2(w, float(sz[1]) if sz.size() > 1 else w)
+		tr.modulate = Color(1, 1, 1, float(d.get("alpha", 1.0)))
+		row.add_child(tr)
+		if str(d.get("text", "")) != "":
+			var l := _outlined(int(d.get("font_size", 15)))
+			l.text = str(d.text)
 			l.add_theme_color_override("font_color", col)
-			mod_texts.add_child(l)
+			row.add_child(l)
+		return row
+	if d.type == "bar":
+		var row := HBoxContainer.new()
+		row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_theme_constant_override("separation", 8)
+		var l := _outlined(14)
+		l.text = str(d.get("label", ""))
+		l.custom_minimum_size = Vector2(70, 0)
+		row.add_child(l)
+		var bar_bg := Panel.new()
+		bar_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		bar_bg.custom_minimum_size = Vector2(180, 14)
+		var bg := StyleBoxFlat.new()
+		bg.bg_color = Color(0, 0, 0, 0.5)
+		bg.set_corner_radius_all(4)
+		bar_bg.add_theme_stylebox_override("panel", bg)
+		var mx := maxf(0.0001, float(d.get("max", 1.0)))
+		var fill := Panel.new()
+		fill.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var fs := StyleBoxFlat.new()
+		fs.bg_color = col
+		fs.set_corner_radius_all(4)
+		fill.add_theme_stylebox_override("panel", fs)
+		fill.position = Vector2(2, 2)
+		fill.size = Vector2(176.0 * clampf(float(d.get("value", 0.0)) / mx, 0.0, 1.0), 10)
+		bar_bg.add_child(fill)
+		row.add_child(bar_bg)
+		var v := _outlined(13)
+		v.text = "%d/%d" % [roundi(float(d.get("value", 0.0))), roundi(mx)]
+		row.add_child(v)
+		return row
+	var l := _outlined(int(d.get("font_size", 15)))
+	l.text = str(d.get("text", ""))
+	l.add_theme_color_override("font_color", col)
+	return l
 
 
 ## Efekty gracza: ikona, nazwa i pozostały czas (prawy górny róg).
@@ -250,6 +311,8 @@ func notify(text: String) -> void:
 
 func _process(delta: float) -> void:
 	size = get_viewport_rect().size
+	if not free_items.is_empty():
+		_place_free()
 	_timer -= delta
 	if _timer <= 0.0:
 		_timer = 0.25

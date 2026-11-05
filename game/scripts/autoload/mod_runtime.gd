@@ -607,10 +607,7 @@ func window_closed(peer: int, id: String) -> void:
 	if s.held.is_empty():
 		ctx = prev
 		return
-	var conts := []
-	for sec in spec.get("sections", []):
-		if sec is Dictionary and sec.get("type") == "slots":
-			conts.append(str(sec.container))
+	var conts := ModWindow.slot_containers(spec)
 	if s.hotbar.container != "":
 		conts.append(s.hotbar.container)
 	var left := int(s.held.count)
@@ -648,7 +645,7 @@ func _host_table() -> Dictionary:
 		"hud_text", "hud_remove", "ui_held", "ui_set_held", "input_bind", "randf", "randi",
 		"entity_spawn", "entity_remove", "entity_exists", "entity_get", "entity_list", "entity_set",
 		"entity_damage", "entity_tag", "entity_data", "item_drop", "entity_brain", "entity_mount", "entity_dismount",
-		"entity_nearest_player", "world_light", "command_register", "chat_send", "role_get", "role_set",
+		"entity_nearest_player", "world_light", "command_register", "chat_send", "role_get", "role_set", "hud_image",
 		"player_id", "player_name", "player_is_host", "players_list", "set_ctx", "get_ctx",
 		"pstorage_get", "pstorage_set", "players_accept", "players_kick", "is_multiplayer", "hash",
 		"block_state", "block_set_state", "block_with_state", "block_base", "block_data", "block_set_data",
@@ -1258,9 +1255,9 @@ func _h_hotbar_selected() -> int:
 func _h_ui_window(mod_id, spec) -> void:
 	var d: Dictionary = spec if spec is Dictionary else {}
 	d["mod"] = str(mod_id)
-	for sec in d.get("sections", []):
-		if sec is Dictionary and sec.get("type") == "slots":
-			sec["container"] = cid(str(sec.get("container", "")))
+	ModWindow.each_section(d.get("sections"), func(sec: Dictionary):
+		if sec.get("type") == "slots":
+			sec["container"] = cid(str(sec.get("container", ""))))
 	var s := S()
 	s.windows[str(d.get("id", mod_id))] = d
 	if s.local:
@@ -1310,6 +1307,17 @@ func _h_hud_bar(mod_id, spec) -> void:
 func _h_hud_text(mod_id, spec) -> void:
 	var d: Dictionary = spec if spec is Dictionary else {}
 	d["type"] = "text"
+	d["mod"] = str(mod_id)
+	var s := S()
+	s.hud[str(d.get("id", mod_id))] = d
+	s.mark("hud")
+	if s.local:
+		hud_changed.emit()
+
+
+func _h_hud_image(mod_id, spec) -> void:
+	var d: Dictionary = spec if spec is Dictionary else {}
+	d["type"] = "image"
 	d["mod"] = str(mod_id)
 	var s := S()
 	s.hud[str(d.get("id", mod_id))] = d

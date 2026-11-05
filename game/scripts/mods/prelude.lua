@@ -712,6 +712,8 @@ local function make_api(mod_id)
 			return put(R.items, R.item_list, key, d)
 		end,
 		def = function(key) return R.items[key] end,
+		-- klucze wszystkich przedmiotów w kolejności rejestracji
+		list = function() local t = {} for i, k in ipairs(R.item_list) do t[i] = k end return t end,
 		name = function(key) return host.item_name(key) end,
 		block_of = function(key) local b = host.item_block(key); if b <= 0 then return nil end; return b end,
 		-- per_player = true: każdy gracz ma własną kopię (ekwipunek); funkcje działają na kopii bieżącego gracza
@@ -1058,13 +1060,24 @@ local function make_api(mod_id)
 	E.ui = {
 		-- okno opisane danymi: {id, title, sections = {{type="character"|"slots"|"text"|"button"|"input"|"progress", ...}}}
 		-- przycisk dostaje tabelę wartości pól "input": on_press(fields), np. fields.login
+		-- więcej rodzajów sekcji: image, row, tabs, list, slider, toggle, dropdown, item_button, separator, space
+		-- (opis w docs/MODDING.md); on_change(fields) przy suwaku, przełączniku, liście, zakładkach
 		window = function(spec)
-			for _, s in ipairs(spec.sections or {}) do
-				if s.type == "button" and type(s.on_press) == "function" then
-					s.action = mod_id .. ":" .. (s.id or s.text)
-					window_actions[s.action] = { fn = s.on_press, owner = mod_id }
+			local n = 0
+			local function walk(list)
+				for _, s in ipairs(list or {}) do
+					n = n + 1
+					local fn = s.on_press or s.on_change
+					if type(fn) == "function" then
+						s.action = mod_id .. ":" .. tostring(s.id or s.text or s.item or n)
+						window_actions[s.action] = { fn = fn, owner = mod_id }
+						s.on_press, s.on_change = nil, nil
+					end
+					walk(s.sections)
+					for _, t in ipairs(s.tabs or {}) do walk(t.sections) end
 				end
 			end
+			walk(spec.sections)
 			host.ui_window(mod_id, to_godot(spec))
 		end,
 		close = function(id) host.ui_close(id) end,
@@ -1072,8 +1085,11 @@ local function make_api(mod_id)
 		notify = function(text) host.notify(tostring(text)) end,
 		-- pasek na ekranie gry: {id, label, value, max, color}
 		bar = function(spec) host.hud_bar(mod_id, to_godot(spec)) end,
-		-- napis na ekranie gry: {id, text, color}
+		-- napis na ekranie gry: {id, text, color, font_size}
 		text = function(spec) host.hud_text(mod_id, to_godot(spec)) end,
+		-- obrazek na ekranie gry: {id, item | image, size = {w, h}, text, alpha}
+		-- każdy element może mieć anchor ("top_left" .. "bottom_right", "center") i offset = {x, y}
+		image = function(spec) host.hud_image(mod_id, to_godot(spec)) end,
 		remove = function(id) host.hud_remove(id) end,
 		-- przedmiot trzymany kursorem w oknie: {item, count} albo {}
 		held = function() return to_lua(host.ui_held()) end,

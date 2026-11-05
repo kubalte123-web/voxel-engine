@@ -500,9 +500,7 @@ func flush_sessions() -> void:
 			continue
 		var watched := [s.hotbar.container]
 		for w in s.windows.values():
-			for sec in w.get("sections", []):
-				if sec is Dictionary and sec.get("type") == "slots":
-					watched.append(str(sec.container))
+			watched.append_array(ModWindow.slot_containers(w))
 		for real in watched:
 			if Mods.dirty_containers.has(real) and Mods.containers.has(real):
 				Net.s_container.rpc_id(p, real, Mods.container_slots(real))
@@ -516,9 +514,8 @@ func may_access(p: int, real: String) -> bool:
 	if s.hotbar.container == real:
 		return true
 	for w in s.windows.values():
-		for sec in w.get("sections", []):
-			if sec is Dictionary and sec.get("type") == "slots" and str(sec.container) == real:
-				return true
+		if ModWindow.slot_containers(w).has(real):
+			return true
 	return false
 
 
@@ -1700,6 +1697,32 @@ func _test_perf() -> void:
 
 
 ## Test logiki bloków: skrzynia (kierunek, kontener), piec (dane, plan, świecenie), uprawy (losowe, sąsiad), dźwięki.
+## Bogatsze okna (mod handbook): zakładki, lista z ikonami, obrazek, suwak, przełącznik, lista rozwijana;
+## element ekranu w wybranym miejscu (kompas u góry).
+func _test_ui(dir: String) -> void:
+	await _wait_loaded()
+	await _wait(0.8)
+	var me := Mods.local_peer
+	print("UI kompas na ekranie: ", Mods.hud.has("handbook.compass"), " ", Mods.hud.get("handbook.compass", {}).get("text", ""))
+	Mods.press_bind("handbook:open")
+	await _wait(0.5)
+	print("UI okno=", windows.has("handbook"))
+	Mods.as_player(me, func(): Mods.window_action("handbook:items", {"tab": 1, "items": 5}))
+	await _wait(0.5)
+	var w: ModWindow = windows.get("handbook")
+	print("UI pola okna: ", w._fields() if w else {})
+	await _shot(dir, "u1_items")
+	Mods.as_player(me, func(): Mods.window_action("handbook:tab", {"tab": 3, "compass": true, "alpha": 0.6, "place": 3}))
+	await _wait(0.5)
+	w = windows.get("handbook")
+	print("UI zakładka 3 pola: ", w._fields() if w else {}, " kompas: ", Mods.hud.get("handbook.compass", {}).get("anchor", ""))
+	await _shot(dir, "u2_settings")
+	_close_mod_window("handbook")
+	await _wait(0.4)
+	await _shot(dir, "u3_hud")
+	get_tree().quit()
+
+
 ## Czat i polecenia: wiadomość, /help, /give, /time, /tp, polecenie moda, hak chat.message.
 func _test_chat(dir: String) -> void:
 	await _wait_loaded()
@@ -2093,6 +2116,9 @@ func _autotest(dir: String) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--creatures-only"):
 		await _test_creatures(dir)
+		return
+	if OS.get_cmdline_user_args().has("--ui-only"):
+		await _test_ui(dir)
 		return
 	if OS.get_cmdline_user_args().has("--chat-only"):
 		await _test_chat(dir)

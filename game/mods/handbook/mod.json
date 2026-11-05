@@ -1,0 +1,12 @@
+{
+	"id": "handbook",
+	"name": "Poradnik",
+	"version": "0.1.0",
+	"author": "Jakub Lewicki",
+	"description": "Poradnik pod klawiszem J: zakładki z listą przedmiotów (ikona, opis, stos), stworzeniami i ustawieniami kompasu na ekranie. Przykład bogatszych okien (tabs, list, row, image, slider, toggle, dropdown, item_button) i elementów ekranu w wybranym miejscu (anchor).",
+	"requires": [],
+	"after": ["base", "backpack"],
+	"content": [],
+	"scripts": ["main.lua"],
+	"settings": []
+}
