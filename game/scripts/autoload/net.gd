@@ -717,9 +717,9 @@ func s_entity_anim(id: int, name: String) -> void:
 
 
 @rpc("authority", "unreliable_ordered")
-func s_entities(states: PackedFloat32Array) -> void:
+func s_entities(states: PackedFloat32Array, t: float) -> void:
 	if main:
-		main.entities.puppet_states(states)
+		main.entities.puppet_states(states, t)
 
 
 # ---------- pętla serwera: rozsyłanie zmian ----------
@@ -757,4 +757,4 @@ func _physics_process(delta: float) -> void:
 		_ent_t = ENTITY_DT
 		var st: PackedFloat32Array = main.entities.snapshot()
 		if not st.is_empty():
-			s_entities.rpc(st)
+			s_entities.rpc(st, NetInterp.now())

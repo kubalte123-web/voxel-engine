@@ -554,7 +554,9 @@ func players_snapshot() -> Array:
 		if s == null or not s.logged_in:
 			continue
 		var n: Node3D = players[p]
-		out.append({"peer": p, "name": s.account, "pos": n.global_position, "vel": n.velocity,
+		# czas stanu: dla gracza zdalnego jego własny (z klienta), dla gracza na serwerze czas serwera
+		var t: float = n.net_t if n is RemotePlayer else NetInterp.now()
+		out.append({"peer": p, "name": s.account, "t": t, "pos": n.global_position, "vel": n.velocity,
 			"yaw": n.yaw, "pitch": n.pitch, "floor": n.is_on_floor() if n is Player else n.on_floor,
 			"mount": s.mount, "seat": s.mount_seat, "held": str(n.current_item().get("item", "")),
 			"pose": n.pose, "sprint": n.sprinting, "dig": n.model.digging, "liquid": n.in_liquid, "act": [n.act_n, n.act_name]})
@@ -591,7 +593,7 @@ func players_state(list: Array, time: float) -> void:
 func send_my_state() -> void:
 	if player.waiting_login:
 		return
-	Net.c_move.rpc_id(1, {"pos": player.global_position, "vel": player.velocity, "yaw": player.yaw,
+	Net.c_move.rpc_id(1, {"t": NetInterp.now(), "pos": player.global_position, "vel": player.velocity, "yaw": player.yaw,
 		"pitch": player.pitch, "floor": player.is_on_floor(), "target": Player._net_target(player.target),
 		"target_liq": Player._net_target(player.target_with_liquids()), "liquid": player.in_liquid,
 		"eyes": player.eyes_in_liquid, "cam": player.camera_mode(), "pose": player.pose, "sprint": player.sprinting,
@@ -1358,6 +1360,10 @@ func _autotest_client(dir: String) -> void:
 	if opt.has("walk"):
 		player.global_position += Vector3(float(opt.walk), 1.0, 0.0)
 		await _wait(1.0)
+	if opt.has("walk-circle"):
+		await _test_walk_circle(float(opt["walk-circle"]))
+	if opt.has("measure-remote"):
+		await _test_measure_remote(float(opt["measure-remote"]))
 	var stay := float(opt.get("stay", "3"))
 	var until := Time.get_ticks_msec() + int(stay * 1000)
 	var shot_done := false
@@ -1381,6 +1387,70 @@ func _autotest_client(dir: String) -> void:
 	Net.leave()
 	await _wait(0.5)
 	get_tree().quit()
+
+
+## Test sieci: gracz chodzi w kółko (promień 6 bloków, 5 bloków/s) przez podany czas.
+func _test_walk_circle(sec: float) -> void:
+	var c := player.global_position + Vector3(-6.0, 0.0, 0.0)
+	var a := 0.0
+	var until := Time.get_ticks_msec() + int(sec * 1000)
+	print("KLIENT ", Settings.player_name, " chodzi w kółko ", sec, " s")
+	while Time.get_ticks_msec() < until:
+		await get_tree().physics_frame
+		a += 5.0 / 6.0 / Engine.physics_ticks_per_second
+		player.global_position = c + Vector3(cos(a) * 6.0, 0.0, sin(a) * 6.0)
+		player.velocity = Vector3(-sin(a), 0.0, cos(a)) * 5.0
+		player.yaw = atan2(sin(a), -cos(a))
+
+
+## Test sieci: jak równo porusza się u nas inny gracz (co klatkę ekranu). Przy ruchu w kółko
+## ze stałą prędkością 5 bloków/s idealnie każda klatka przesuwa go o 5 * czas klatki.
+func _test_measure_remote(sec: float) -> void:
+	var other: RemotePlayer = null
+	var t0 := Time.get_ticks_msec()
+	while other == null and Time.get_ticks_msec() - t0 < 20000:
+		for p in players:
+			if players[p] is RemotePlayer:
+				other = players[p]
+		await _wait(0.1)
+	if other == null:
+		print("KLIENT płynność: brak innego gracza")
+		return
+	await _wait(1.0)
+	var speeds := []
+	var stalls := 0
+	var max_step := 0.0
+	var last := other.global_position
+	var lt := Time.get_ticks_usec()
+	var until := Time.get_ticks_msec() + int(sec * 1000)
+	while Time.get_ticks_msec() < until:
+		await get_tree().process_frame
+		var now := Time.get_ticks_usec()
+		var dt := (now - lt) / 1000000.0
+		lt = now
+		var pos := other.global_position
+		var step := Vector2(pos.x - last.x, pos.z - last.z).length()
+		last = pos
+		if dt <= 0.0:
+			continue
+		speeds.append(step / dt)
+		max_step = maxf(max_step, step)
+		if step < 0.0005:
+			stalls += 1
+	var n := speeds.size()
+	var mean := 0.0
+	for s in speeds:
+		mean += s
+	mean /= maxf(1, n)
+	var var_sum := 0.0
+	var off := 0
+	for s in speeds:
+		var_sum += (s - mean) * (s - mean)
+		if absf(s - mean) > 0.5 * mean:
+			off += 1
+	var sd := sqrt(var_sum / maxf(1, n))
+	print("KLIENT płynność: interpolacja=%s klatki=%d prędkość średnio %.2f bloków/s, odchylenie %.2f (%.0f%%), klatki odbiegające o >50%%: %.1f%%, klatki bez ruchu: %.1f%%, największy skok %.3f bloku" %
+		["wyłączona" if NetInterp.disabled else "bufor %.2f s" % other.interp.delay, n, mean, sd, 100.0 * sd / maxf(0.001, mean), 100.0 * off / maxf(1, n), 100.0 * stalls / maxf(1, n), max_step])
 
 
 ## Test alchemii: blok z modelem GLB, stany, wygląd, animacje, cząsteczki, mikstury, wydajność wielu modeli.

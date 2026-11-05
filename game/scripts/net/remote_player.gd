@@ -34,6 +34,8 @@ var act_n := 0
 var act_name := ""
 var _seen_act := -1
 var net_pos := Vector3.ZERO
+var net_t := -1.0            # czas klienta tego gracza z ostatniego stanu (serwer przekazuje go dalej)
+var interp := NetInterp.new()
 var label_timer := 0.0
 var _step := 0.0
 var light_timer := 0.0
@@ -78,6 +80,10 @@ func apply_state(st: Dictionary) -> void:
 	yaw = float(st.get("yaw", yaw))
 	pitch = float(st.get("pitch", pitch))
 	velocity = st.get("vel", velocity)
+	var t := float(st.get("t", -1.0))
+	if t >= 0.0:
+		net_t = t
+		interp.push(t, net_pos, Vector3(pitch, yaw, 0.0), velocity)
 	on_floor = bool(st.get("floor", on_floor))
 	pose = str(st.get("pose", pose))
 	sprinting = bool(st.get("sprint", false))
@@ -112,19 +118,32 @@ static func _target(t: Variant) -> Dictionary:
 
 
 func _process(delta: float) -> void:
-	if not is_server_side:
-		global_position = global_position.lerp(net_pos, minf(1.0, delta * 12.0))
-	speed = Vector2(velocity.x, velocity.z).length()
+	# pozycja z bufora interpolacji (stan sprzed 0,1 s, płynnie między dwoma stanami z sieci);
+	# na serwerze pozycja w grze zostaje najnowsza, wygładzamy tylko wygląd (model i podpis)
+	var vis_vel := velocity
+	var vis_pitch := pitch
+	var shift := Vector3.ZERO
+	var s := interp.sample()
+	if not s.is_empty():
+		vis_vel = s[2]
+		vis_pitch = (s[1] as Vector3).x
+		if is_server_side:
+			shift = (s[0] as Vector3) - global_position
+		else:
+			global_position = s[0]
+	elif not is_server_side:
+		global_position = global_position.lerp(net_pos, minf(1.0, delta * 12.0))   # stan bez czasu (stary serwer)
+	speed = Vector2(vis_vel.x, vis_vel.z).length()
 	if speed > 0.3:
-		model.rotation.y = lerp_angle(model.rotation.y, atan2(-velocity.x, -velocity.z), minf(1.0, delta * 10.0))
-	model.position.y = mount_seat
+		model.rotation.y = lerp_angle(model.rotation.y, atan2(-vis_vel.x, -vis_vel.z), minf(1.0, delta * 10.0))
+	model.position = shift + Vector3(0, mount_seat, 0)
 	model.sitting = mount_id >= 0
 	model.pose = pose
 	model.sprinting = sprinting
 	model.swimming = in_liquid and not on_floor
-	model.vertical = velocity.y
-	label.position.y = 2.25 + mount_seat
-	model.animate(delta, speed, on_floor or in_liquid, pitch)
+	model.vertical = vis_vel.y
+	label.position = shift + Vector3(0, 2.25 + mount_seat, 0)
+	model.animate(delta, speed, on_floor or in_liquid, vis_pitch)
 	# kroki innego gracza słyszymy u siebie (bez wysyłania przez sieć)
 	if on_floor and not in_liquid and world:
 		_step += speed * delta
@@ -177,6 +196,7 @@ func reset_fall() -> void:
 func teleport(p: Vector3) -> void:
 	global_position = p
 	net_pos = p
+	interp.reset()
 	Net.s_teleport.rpc_id(peer, p)
 
 

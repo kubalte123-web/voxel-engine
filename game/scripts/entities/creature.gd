@@ -48,6 +48,8 @@ var light_value := Vector2(1, 0)
 var puppet := false          # kukła u klienta gry wieloosobowej: pozycja z serwera, bez AI i fizyki
 var net_pos := Vector3.ZERO
 var net_rot := Vector3.ZERO
+var interp := NetInterp.new(0.15)   # stany stworzeń co 0,1 s
+var _puppet_vel := Vector3.ZERO
 var hidden_tags := {}
 # model z pliku GLB
 var anim_player: AnimationPlayer = null
@@ -481,6 +483,13 @@ func _graze() -> void:
 
 # ---------- ruch i animacja ----------
 
+## Kukła u klienta: płynnie z bufora interpolacji, co klatkę ekranu (jazda gracza lokalnego ustawia pozycję sama).
+func _process(delta: float) -> void:
+	if not puppet or dying > 0.0 or (manager.player and manager.player.mount_id == id):
+		return
+	_puppet_vel = EntityManager.puppet_follow(self, interp, net_pos, net_rot, delta, false)
+
+
 func _physics_process(delta: float) -> void:
 	t += delta
 	if dying > 0.0:
@@ -510,11 +519,7 @@ func _physics_process(delta: float) -> void:
 	if collision_layer == 0 and rider < 0:
 		collision_layer = LAYER
 	if puppet:
-		var before := global_position
-		global_position = global_position.lerp(net_pos, minf(1.0, delta * 10.0))
-		rotation.y = lerp_angle(rotation.y, net_rot.y, minf(1.0, delta * 10.0))
-		var v := (global_position - before) / maxf(delta, 0.0001)
-		_animate(delta, Vector2(v.x, v.z).length())
+		_animate(delta, Vector2(_puppet_vel.x, _puppet_vel.z).length())   # pozycja i obrót w _process
 		return
 	if not world.is_loaded(Vector3i(global_position.floor())):
 		return  # chunk jeszcze niegotowy: stoimy w miejscu

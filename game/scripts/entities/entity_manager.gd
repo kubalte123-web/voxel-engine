@@ -476,9 +476,32 @@ func snapshot() -> PackedFloat32Array:
 	return out
 
 
-func puppet_states(st: PackedFloat32Array) -> void:
+## Klient: stany obiektów od serwera; t = czas serwera (do bufora interpolacji).
+func puppet_states(st: PackedFloat32Array, t: float) -> void:
 	for i in range(0, st.size(), 8):
 		var e := get_entity(int(st[i]))
 		if e and "net_pos" in e:
 			e.net_pos = Vector3(st[i + 1], st[i + 2], st[i + 3])
 			e.net_rot = Vector3(st[i + 4], st[i + 5], st[i + 6])
+			if "interp" in e:
+				e.interp.push(t, e.net_pos, e.net_rot)
+
+
+## Kukła u klienta: pozycja i obrót z bufora interpolacji (bez bufora: dochodzenie do ostatniego stanu).
+static func puppet_follow(e: Node3D, interp: NetInterp, net_pos: Vector3, net_rot: Vector3, delta: float, full_rot: bool) -> Vector3:
+	var s := interp.sample()
+	if s.is_empty():
+		e.global_position = e.global_position.lerp(net_pos, minf(1.0, delta * 10.0))
+		var k := minf(1.0, delta * 10.0)
+		if full_rot:
+			e.rotation = Vector3(lerp_angle(e.rotation.x, net_rot.x, k), lerp_angle(e.rotation.y, net_rot.y, k), lerp_angle(e.rotation.z, net_rot.z, k))
+		else:
+			e.rotation.y = lerp_angle(e.rotation.y, net_rot.y, k)
+		return Vector3.ZERO
+	e.global_position = s[0]
+	var r: Vector3 = s[1]
+	if full_rot:
+		e.rotation = r
+	else:
+		e.rotation.y = r.y
+	return s[2]

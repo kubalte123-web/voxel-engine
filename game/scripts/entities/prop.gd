@@ -21,6 +21,7 @@ var light_timer := 0.0
 var puppet := false
 var net_pos := Vector3.ZERO
 var net_rot := Vector3.ZERO
+var interp := NetInterp.new(0.15)   # stany obiektów co 0,1 s
 
 
 func setup(p_manager: Node, p_world: World, p_id: int, p_block: int) -> void:
@@ -96,13 +97,15 @@ func _update_light(delta: float) -> void:
 		EntityLight.apply([mesh_node.material_override], l)
 
 
+func _process(delta: float) -> void:
+	if puppet:
+		EntityManager.puppet_follow(self, interp, net_pos, net_rot, delta, true)
+
+
 func _physics_process(delta: float) -> void:
 	_update_light(delta)
 	if puppet:
 		freeze = true
-		global_position = global_position.lerp(net_pos, minf(1.0, delta * 10.0))
-		rotation = Vector3(lerp_angle(rotation.x, net_rot.x, minf(1.0, delta * 10.0)),
-			lerp_angle(rotation.y, net_rot.y, minf(1.0, delta * 10.0)), lerp_angle(rotation.z, net_rot.z, minf(1.0, delta * 10.0)))
 		return
 	var cell := Vector3i(global_position.floor())
 	# chunk pod spodem niegotowy albo usunięty: zamrażamy, żeby nie spaść przez świat

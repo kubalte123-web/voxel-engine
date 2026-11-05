@@ -15,6 +15,7 @@ var sprite: Sprite3D
 var puppet := false
 var net_pos := Vector3.ZERO
 var net_rot := Vector3.ZERO
+var interp := NetInterp.new(0.15)   # stany obiektów co 0,1 s
 
 
 func _ready() -> void:
@@ -27,11 +28,19 @@ func _ready() -> void:
 	add_child(sprite)
 
 
+func _process(delta: float) -> void:
+	if puppet:
+		var s := interp.sample()
+		if s.is_empty():
+			global_position = global_position.lerp(net_pos, minf(1.0, delta * 10.0))
+		else:
+			global_position = s[0]
+		sprite.rotation.y += delta * 2.0
+
+
 func _physics_process(delta: float) -> void:
 	age += delta
 	if puppet:
-		global_position = global_position.lerp(net_pos, minf(1.0, delta * 10.0))
-		sprite.rotation.y += delta * 2.0
 		return
 	var below := Vector3i((global_position - Vector3(0, 0.15, 0)).floor())
 	var bb := world.get_block(below)
