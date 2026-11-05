@@ -18,9 +18,18 @@ uniform float hand_light = 0.0;
 uniform vec2 light_override = vec2(-1.0, -1.0);  // obiekty poza chunkami (własna kopia materiału)
 
 varying vec3 wpos;
+// prostokąt kafelka w atlasie (w pikselach atlasu: początek x, y, rozmiar), stały dla całej ściany.
+// Przy MSAA piksele na krawędzi ściany są liczone w środku piksela, który leży już poza ścianą:
+// UV wychodzi wtedy poza kafelek i bez przycięcia na krawędziach bloków widać kolor sąsiada z atlasu (jasne linie).
+varying flat vec3 tile;
 
 void vertex() {
 	wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	// kafelki leżą w atlasie na siatce swojego rozmiaru (16 * 2^poziom), poziom podaje lod_map;
+	// UV wierzchołka jest zawsze wewnątrz kafelka, więc stąd wiadomo, do którego należy ściana
+	float lv = round(textureLod(lod_map, UV, 0.0).r * 255.0 / 32.0);
+	float px = 16.0 * exp2(lv);
+	tile = vec3(floor(UV * atlas_size / px) * px, px);
 }
 
 float curve(float l) {
@@ -30,15 +39,17 @@ float curve(float l) {
 
 void fragment() {
 	vec4 tex;
+	// UV przycięte do kafelka tej ściany (kafelki są wyrównane, więc wystarcza w poziomie 0 także dla mipmap)
+	vec2 uv = clamp(UV * atlas_size, tile.xy + 0.01, tile.xy + tile.z - 0.01) / atlas_size;
 	if (max_lod > 0.0) {
 		vec2 px = UV * atlas_size;
 		vec2 dx = dFdx(px);
 		vec2 dy = dFdy(px);
 		float lod = 0.5 * log2(max(dot(dx, dx), dot(dy, dy)));
-		float lim = texture(lod_map, UV).r * 255.0 / 32.0;
-		tex = textureLod(atlas, UV, clamp(lod, 0.0, lim));
+		float lim = log2(tile.z / 16.0);
+		tex = textureLod(atlas, uv, clamp(lod, 0.0, lim));
 	} else {
-		tex = textureLod(atlas, UV, 0.0);
+		tex = textureLod(atlas, uv, 0.0);
 	}
 	float sky = COLOR.g;
 	float blk = COLOR.b;

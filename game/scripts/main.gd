@@ -1935,6 +1935,73 @@ func _bench_write(dir: String, results: Array) -> void:
 		f.store_string(JSON.stringify(results, "  "))
 
 
+## Test szczelin między blokami: niebo jednolicie purpurowe (bez mgły), kamera nad terenem patrzy w dół
+## w 8 kierunkach i z 2 wysokości; każdy purpurowy piksel w dolnych 55% obrazu to dziura w terenie.
+## Porównanie ustawień: domyślne, bez cieni, bez MSAA, bez obu. Wiersze SEAMS w konsoli.
+func _test_seams(dir: String) -> void:
+	time_of_day = 12.0
+	daynight = false
+	await _wait_loaded()
+	await _wait(1.0)
+	Mods.camera_stats.erase("mode")
+	player.first_person = true
+	env.background_mode = Environment.BG_COLOR
+	env.background_color = Color(1, 0, 1)
+	env.fog_enabled = false
+	var vp := get_viewport()
+	var base_msaa := vp.msaa_3d
+	var start := player.global_position
+	var views := []
+	for h in [24.0, 4.0]:
+		for i in 8:
+			views.append([h, TAU * i / 8.0, -0.75 if h > 10.0 else -0.4])
+	var configs := [["domyślne", true, base_msaa], ["bez_cieni", false, base_msaa], ["bez_msaa", true, Viewport.MSAA_DISABLED], ["bez_obu", false, Viewport.MSAA_DISABLED]]
+	for cfg in configs:
+		Settings.shadows = cfg[1]
+		_apply_settings()
+		env.fog_enabled = false
+		vp.msaa_3d = cfg[2]
+		var total := 0
+		var worst := 0
+		var per := []
+		for vi in views.size():
+			var v: Array = views[vi]
+			for k in 4:
+				player.global_position = start + Vector3(0, v[0], 0)
+				player.velocity = Vector3.ZERO
+				player.yaw = v[1]
+				player.pitch = v[2]
+				await get_tree().process_frame
+			await RenderingServer.frame_post_draw
+			var img := vp.get_texture().get_image()
+			var n := _count_magenta(img, 0.45)
+			per.append(n)
+			total += n
+			if n > worst:
+				worst = n
+				img.save_png(dir.path_join("seams_%s_najgorszy.png" % cfg[0]))
+			if vi == 2 or vi == 10:
+				img.save_png(dir.path_join("seams_%s_widok%d.png" % [cfg[0], vi]))
+		print("SEAMS %s: dziury razem %d pikseli, najgorszy widok %d, widoki %s" % [cfg[0], total, worst, str(per)])
+	get_tree().quit()
+
+
+## Liczba czysto purpurowych pikseli w dolnej części obrazu (od from_y * wysokość w dół).
+static func _count_magenta(img: Image, from_y: float) -> int:
+	img.convert(Image.FORMAT_RGBA8)
+	var w := img.get_width()
+	var h := img.get_height()
+	var data := img.get_data()
+	var n := 0
+	for y in range(int(h * from_y), h):
+		var row := y * w * 4
+		for x in w:
+			var i := row + x * 4
+			if data[i] > 200 and data[i + 1] < 60 and data[i + 2] > 200:
+				n += 1
+	return n
+
+
 ## Mediana czasów części klatki (ms): skrypty main/world/far, fizyka.
 func _bench_parts(n: int) -> Dictionary:
 	var acc := {}
@@ -2640,6 +2707,9 @@ func _autotest(dir: String) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--render-bench"):
 		await _test_render_bench(dir)
+		return
+	if OS.get_cmdline_user_args().has("--seams-only"):
+		await _test_seams(dir)
 		return
 	if OS.get_cmdline_user_args().has("--blocks-only"):
 		await _test_blocks(dir)
