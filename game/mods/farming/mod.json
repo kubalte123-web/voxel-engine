@@ -1,0 +1,14 @@
+{
+	"id": "farming",
+	"name": "Uprawy",
+	"version": "0.1.0",
+	"author": "Jakub Lewicki",
+	"description": "Motyka zamienia trawę i ziemię w pole uprawne, na którym rosną posiane nasiona pszenicy (nasiona wypadają z wysokiej trawy). Pole przy wodzie jest wilgotne i uprawy rosną na nim szybciej. Przykład stanów bloku (wiek uprawy, wilgotność pola), losowych aktualizacji i aktualizacji od sąsiada.",
+	"requires": ["modkit", "backpack"],
+	"after": ["animals", "tools", "crafting_classic", "crafting_discovery"],
+	"content": ["content.lua"],
+	"scripts": ["main.lua"],
+	"settings": [
+		{"key": "growth", "label": "Szybkość wzrostu", "type": "float", "default": 1.0, "min": 0.25, "max": 8.0}
+	]
+}

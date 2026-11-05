@@ -325,6 +325,18 @@ static func _kb(n: int) -> String:
 	return "%.1f MB" % (n / 1048576.0) if n >= 1048576 else "%d KB" % maxi(1, n / 1024)
 
 
+# ---------- dźwięki ----------
+
+@rpc("authority", "unreliable")
+func s_sound(name: String, pos: Vector3, has_pos: bool, volume: float, pitch: float, loop_id: int) -> void:
+	Sfx.play_local(name, pos if has_pos else null, volume, pitch, loop_id)
+
+
+@rpc("authority", "reliable")
+func s_sound_stop(id: int) -> void:
+	Sfx.stop_local(id)
+
+
 @rpc("authority", "reliable")
 func s_reject(reason: String) -> void:
 	last_error = reason

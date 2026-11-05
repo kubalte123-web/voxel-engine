@@ -30,6 +30,9 @@ a mody mogą udostępniać sobie biblioteki przez `engine.export` i `engine.requ
 - [Narzędzia](game/mods/tools/content.lua): przedmioty-narzędzia, pole `tool` bloków ([skrypt](game/mods/tools/main.lua): hak `block.dig`)
 - [Rzemiosło klasyczne](game/mods/crafting_classic/main.lua): siatki 2×2/3×3, przepisy kształtowe, hak `slot.click`
 - [Rzemiosło odkrywcze](game/mods/crafting_discovery/main.lua): ukryte przepisy, wykuwanie w czasie, dane gracza
+- [Uprawy](game/mods/farming/content.lua): stany bloku (wiek, wilgotność) ([skrypt](game/mods/farming/main.lua): losowe aktualizacje, sąsiad)
+- [Skrzynie](game/mods/storage/main.lua): kontener bloku, stan facing
+- [Piec](game/mods/smelting/main.lua): dane bloku, zaplanowane aktualizacje, wariant świecący ([treść](game/mods/smelting/content.lua))
 
 ## Zasady dla generowanego moda
 
@@ -44,5 +47,10 @@ a mody mogą udostępniać sobie biblioteki przez `engine.export` i `engine.requ
 - Gra może być sieciowa: skrypty działają na serwerze w imieniu gracza. Dane gracza trzymaj w `engine.player.storage`
   albo kontenerach `engine.items.container(id, n, true, true)` tworzonych w zdarzeniu `player.join`;
   w `tick` i licznikach czasu używaj `engine.players.each(fn)`.
+- Stan bloku = osobny wariant: `states = {...}` i `variant = function(state) return zmiany end` w definicji;
+  w skryptach `engine.blocks.state/set_state`. Dane i kontener bloku: `engine.blocks.data/set_data/container`.
+  Aktualizacje: `engine.blocks.on_update(klucz, fn)` (reason: random / scheduled / neighbor), `engine.blocks.schedule`.
+- Dźwięki: `engine.sounds.register` (content), `engine.sound.play(nazwa, {pos = pos})`; pole bloku `sound` = grupa.
+- Pozycje jako `{x =, y =, z =}` albo wektor. Mod opcjonalny: `"after"` w mod.json i `engine.optional(id)`.
 - Przedmioty modów tools i crafting: stick, wooden_/stone_/iron_ + pickaxe/axe/shovel/sword, crafting_table, workbench.
 - Klucze biomów moda base: meadow, forest, desert, snowy.

@@ -28,6 +28,7 @@ var speed := 0.0
 var health := 20.0
 var net_pos := Vector3.ZERO
 var label_timer := 0.0
+var _step := 0.0
 var light_timer := 0.0
 
 const SPEED := 4.6
@@ -93,6 +94,12 @@ func _process(delta: float) -> void:
 	if speed > 0.3:
 		model.rotation.y = lerp_angle(model.rotation.y, atan2(-velocity.x, -velocity.z), minf(1.0, delta * 10.0))
 	model.animate(delta, speed, on_floor or in_liquid, pitch)
+	# kroki innego gracza słyszymy u siebie (bez wysyłania przez sieć)
+	if on_floor and not in_liquid and world:
+		_step += speed * delta
+		if _step > 1.9:
+			_step = 0.0
+			Sfx.block_local(world.get_block(Vector3i((global_position - Vector3(0, 0.2, 0)).floor())), "step", global_position)
 	light_timer -= delta
 	if light_timer <= 0.0 and world:
 		light_timer = 0.25
@@ -156,6 +163,7 @@ func damage(amount: float, cause: String) -> void:
 	if ctx.get("cancel", false):
 		return
 	set_health(health - float(ctx.get("amount", amount)))
+	Sfx.emit("player.hurt", global_position)
 	Mods.after("player.damage", ctx)
 	if health <= 0.0:
 		die(cause)

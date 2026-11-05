@@ -1,0 +1,11 @@
+{
+	"id": "smelting",
+	"name": "Piec",
+	"version": "0.1.0",
+	"author": "Jakub Lewicki",
+	"description": "Piec przetapia rudy, piasek i pieczenie mięso. Wkładasz surowiec i paliwo (węgiel, drewno), a piec pracuje sam, także gdy odejdziesz. Rozpalony świeci. Przykład danych bloku, zaplanowanych aktualizacji i stanu zmieniającego światło. Inne mody dodają przepisy: engine.require(\"smelting\").recipe(...).",
+	"requires": ["modkit", "backpack"],
+	"after": ["ores", "animals", "crafting_classic", "crafting_discovery", "tools"],
+	"content": ["content.lua"],
+	"scripts": ["main.lua"]
+}

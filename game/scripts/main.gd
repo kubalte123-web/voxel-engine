@@ -138,6 +138,8 @@ func _ready() -> void:
 			GameState.back_to_menu()
 			return
 	else:
+		world.logic = BlockLogic.new(world, self)
+		world.logic.load_from(GameState.current_dir)
 		Mods.start_scripts(self)
 		entities.load_from(GameState.current_dir)
 		if Net.mode != "dedicated":
@@ -560,6 +562,8 @@ func _process(delta: float) -> void:
 	if tick_timer <= 0.0 and not Net.is_client():
 		tick_timer = 0.1
 		Mods.emit_event("tick", {"dt": 0.1, "time": time_of_day})
+		if world.logic:
+			world.logic.tick(0.1)
 	autosave_timer -= delta
 	if autosave_timer <= 0.0 and not GameState.current_dir.is_empty() and not Net.is_client():
 		autosave_timer = 60.0
@@ -1114,6 +1118,126 @@ func _autotest_client(dir: String) -> void:
 	get_tree().quit()
 
 
+## Test logiki bloków: skrzynia (kierunek, kontener), piec (dane, plan, świecenie), uprawy (losowe, sąsiad), dźwięki.
+func _test_blocks(dir: String) -> void:
+	await _wait_loaded()
+	await _wait(0.5)
+	var me := Net.my_id()
+	var hb := Mods.cid("hotbar")
+	var reg := Mods.registry
+	print("BLOKI mody=", Mods.loaded, " bloki=", reg.count())
+	var place := func(item: String, yaw: float) -> Vector3i:
+		Mods.set_slot(hb, 0, {"item": item, "count": 5})
+		player.select(0)
+		player.yaw = yaw
+		player.pitch = -0.9
+		await _wait(0.4)
+		if player.target.is_empty():
+			return Vector3i(0, -999, 0)
+		var at: Vector3i = player.target.pos + player.target.normal
+		player.use_item()
+		await _wait(0.4)
+		return at
+	var key_at := func(p: Vector3i) -> String: return reg.block_key(world.get_block(p))
+
+	# skrzynia: przodem do gracza
+	var c1: Vector3i = await place.call("chest", 0.0)
+	var dir_name := str(reg.state_of(world.get_block(c1)).get("facing", "?"))
+	print("SKRZYNIA ", key_at.call(c1), " facing=", dir_name, " (gracz patrzy na północ, więc przód na południe)")
+	Mods.as_player(me, func(): return Mods.before("block.use", {"pos": c1, "normal": Vector3i.UP, "block": world.get_block(c1), "item": "", "slot": 1}))
+	var cid := "@%d,%d,%d" % [c1.x, c1.y, c1.z]
+	print("SKRZYNIA okno=", windows.has("chest"), " kontener=", Mods.containers.has(cid), " miejsc=", Mods.container_slots(cid).size())
+	Mods.set_slot(cid, 3, {"item": "ruby", "count": 7})
+	await _wait(0.3)
+	await _shot(dir, "b1_chest_window")
+	_close_mod_window("chest")
+	var drops_before := entities.entities.size()
+	Actions.break_at(player, world, c1)
+	await _wait(0.3)
+	print("SKRZYNIA zniszczona: kontener=", Mods.containers.has(cid), " nowe przedmioty na ziemi=", entities.entities.size() - drops_before)
+
+	# piec: dane bloku, zaplanowane aktualizacje, wariant „lit” świeci
+	var f1: Vector3i = await place.call("furnace", PI / 2)
+	print("PIEC ", key_at.call(f1), " stan=", reg.state_of(world.get_block(f1)))
+	Mods.as_player(me, func(): return Mods.before("block.use", {"pos": f1, "normal": Vector3i.UP, "block": world.get_block(f1), "item": "", "slot": 1}))
+	var fc := "@%d,%d,%d" % [f1.x, f1.y, f1.z]
+	Mods.set_slot(fc, 0, {"item": "raw_iron", "count": 2})
+	Mods.set_slot(fc, 1, {"item": "coal", "count": 1})
+	Mods.as_player(me, func(): Mods.after("slot.click", {"container": fc, "index": 1, "right": false, "held": {}}))
+	await _wait(3.0)
+	var lit_key: String = key_at.call(f1)
+	var front := f1 + Vector3i(1, 0, 0)
+	print("PIEC po 3 s: ", lit_key, " dane=", world.logic.get_data(f1), " światło obok=", world.light_at(Vector3(front) + Vector3(0.5, 0.5, 0.5)))
+	await _shot(dir, "b2_furnace_window")
+	_close_mod_window("furnace")
+	Mods.camera_stats.erase("mode")
+	player.first_person = true
+	var look := func(from: Vector3, at: Vector3) -> void:
+		player.global_position = from
+		player.velocity = Vector3.ZERO
+		var d := at - (from + Vector3(0, 1.6, 0))
+		player.yaw = atan2(-d.x, -d.z)
+		player.pitch = atan2(d.y, Vector2(d.x, d.z).length())
+	time_of_day = 22.5
+	look.call(Vector3(f1) + Vector3(3.5, 0.0, 0.5), Vector3(f1) + Vector3(0.5, 0.5, 0.5))
+	await _wait(1.5)
+	await _shot(dir, "b3_furnace_lit_night")
+	time_of_day = 10.0
+	await _wait(9.0)
+	print("PIEC po 12 s: wynik=", Mods.slot(fc, 2), " surowiec=", Mods.slot(fc, 0), " ", key_at.call(f1))
+
+	# uprawy: motyka, nasiona, wzrost (przyspieszamy losowe aktualizacje), sąsiad
+	var soil := Vector3i(f1.x - 3, 0, f1.z + 3)
+	soil.y = f1.y - 1
+	# szukamy powierzchni trawy w pobliżu
+	for y in range(f1.y + 3, f1.y - 6, -1):
+		var b: String = key_at.call(Vector3i(soil.x, y, soil.z))
+		if b == "grass" or b == "dirt":
+			soil.y = y
+			break
+	world.set_block(soil + Vector3i(0, 1, 0), Blocks.AIR)
+	world.set_block(soil, reg.id_of("grass"))
+	Mods.set_slot(hb, 0, {"item": "wooden_hoe", "count": 1})
+	player.select(0)
+	Mods.as_player(me, func(): return Mods.before("item.use", {"item": "wooden_hoe", "slot": 1, "pos": soil, "normal": Vector3i.UP, "block": world.get_block(soil)}))
+	print("UPRAWY po motyce: ", key_at.call(soil))
+	Mods.set_slot(hb, 0, {"item": "seeds", "count": 3})
+	Mods.as_player(me, func(): return Mods.before("item.use", {"item": "seeds", "slot": 1, "pos": soil, "normal": Vector3i.UP, "block": world.get_block(soil)}))
+	var crop := soil + Vector3i(0, 1, 0)
+	print("UPRAWY zasiane: ", key_at.call(crop), " nasion=", Mods.slot(hb, 0))
+	for id in reg.count():
+		if reg.block_key(reg.base_of(id)) == "wheat_crop":
+			world.logic.random_rate[id] = 0.4
+	await _wait(6.0)
+	print("UPRAWY po wzroście: ", key_at.call(crop))
+	# rząd upraw w każdym wieku na wilgotnym polu (normalna szybkość wzrostu)
+	for id in reg.count():
+		if reg.block_key(reg.base_of(id)) == "wheat_crop":
+			world.logic.random_rate[id] = 30.0
+	var moist := reg.with_state(reg.id_of("farmland"), {"moist": true})
+	for i in 4:
+		var q := soil + Vector3i(i + 1, 0, 0)
+		world.set_block(q + Vector3i(0, 1, 0), Blocks.AIR)
+		world.set_block(q, moist)
+		world.set_block(q + Vector3i(0, 1, 0), reg.with_state(reg.id_of("wheat_crop"), {"age": i}))
+	look.call(Vector3(soil) + Vector3(3.0, 1.0, 3.2), Vector3(soil) + Vector3(3.0, 1.2, 0.5))
+	await _wait(1.5)
+	await _shot(dir, "b4_crop")
+	var before_e := entities.entities.size()
+	world.set_block(soil, reg.id_of("stone"))
+	await _wait(0.5)
+	print("UPRAWY pole zamienione w kamień: uprawa=", key_at.call(crop), " łup=", entities.entities.size() - before_e)
+
+	# zapis danych bloków i odczyt
+	world.logic.set_data(f1, "test", 42)
+	world.logic.save(GameState.current_dir)
+	var copy := BlockLogic.new(world, self)
+	copy.load_from(GameState.current_dir)
+	print("ZAPIS dane=", copy.get_data(f1).get("test"), " kontenery=", copy.containers.size(), " plan=", copy.scheduled.size())
+	print("DŹWIĘKI zarejestrowane=", reg.sounds.size(), " stone.break plików=", Sfx._load("stone.break").size(), " sheep.say=", Sfx._load("sheep.say").size(), " chest.open=", Sfx._load("chest.open").size())
+	get_tree().quit()
+
+
 ## Test rzemiosła: siatka 3x3 (kilof), lustrzana siekiera, bezkształtne deski, warsztat odkrywczy.
 func _test_craft(dir: String) -> void:
 	await _wait_loaded()
@@ -1181,6 +1305,9 @@ func _autotest(dir: String) -> void:
 		return
 	if OS.get_cmdline_user_args().has("--craft-only"):
 		await _test_craft(dir)
+		return
+	if OS.get_cmdline_user_args().has("--blocks-only"):
+		await _test_blocks(dir)
 		return
 	Settings.render_distance = 4
 	_apply_settings()

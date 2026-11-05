@@ -8,3 +8,4 @@ engine.blocks.register("workbench", {
 	hardness = 2.0,
 	tool = "axe",
 })
+engine.blocks.get("workbench").sound = "wood"

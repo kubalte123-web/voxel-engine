@@ -45,6 +45,7 @@ var mutex := Mutex.new()
 var center := Vector3i(999999, 0, 0)
 var extra_centers: Array[Vector3] = []  # serwer: pozycje graczy zdalnych (wokół nich też trzymamy chunki)
 var remote := false                     # klient gry wieloosobowej: stan świata przychodzi z serwera
+var logic: BlockLogic = null            # serwer: dane i aktualizacje bloków dla modów
 var offsets: Array[Vector3i] = []
 var mesh_ms_total := 0.0
 var mesh_count := 0
@@ -233,6 +234,8 @@ func _unload_far() -> void:
 			if queued.has(c):
 				continue
 			built.erase(c)
+			if logic:
+				logic.chunk_unloaded(c)
 			if nodes.has(c):
 				nodes[c].queue_free()
 				nodes.erase(c)
@@ -391,6 +394,8 @@ func _apply(c: Vector3i, arrays: Array, blocks: PackedByteArray, ms: float) -> v
 		if not edited.has(c):
 			data.erase(c)
 		return
+	if logic and not built.has(c):
+		logic.chunk_loaded(c)
 	built[c] = true
 	if nodes.has(c):
 		nodes[c].queue_free()
@@ -474,9 +479,12 @@ func set_block_quiet(p: Vector3i, id: int) -> bool:
 	var l := p - c * S
 	mutex.lock()
 	var d: PackedByteArray = data[c]
+	var old := d[l.x + S * (l.y + S * l.z)]
 	d[l.x + S * (l.y + S * l.z)] = id
 	data[c] = d
 	mutex.unlock()
+	if logic and old != id:
+		logic.block_changed(p, old, id)
 	var first := not edited.has(c)
 	edited[c] = true
 	unsaved[c] = true
@@ -714,6 +722,8 @@ func migrate_palette(lut: PackedByteArray) -> int:
 
 
 func save_all() -> int:
+	if logic:
+		logic.save(save_dir)
 	var n := unsaved.size()
 	for c in unsaved.keys():
 		_save_chunk(c)

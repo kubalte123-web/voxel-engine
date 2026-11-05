@@ -30,3 +30,7 @@ for key, on in pairs(chosen) do
 		b.loose = { shape = "box", size = 0.95, mass = 10, density = floaty[key] or 1.8 }
 	end
 end
+
+engine.blocks.get("crate").sound = "wood"
+engine.blocks.get("barrel").sound = "wood"
+engine.blocks.get("ball").sound = "leaves"

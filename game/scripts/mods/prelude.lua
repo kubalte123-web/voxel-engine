@@ -202,6 +202,20 @@ local function input(id)
 	end
 end
 
+-- aktualizacje bloków: base klucz -> lista {fn, owner}
+local block_handlers = {}
+
+local function block_update(key, ctx)
+	local list = block_handlers[key]
+	if not list then return end
+	if guard.depth == 0 then guard.tripped = false end
+	local c = to_lua(ctx)
+	for _, h in ipairs(list) do
+		local ok, err = guarded(h.owner, LIMIT_CALL, h.fn, c)
+		if not ok and err ~= nil then host.report_error(h.owner, "blok " .. key .. ": " .. tostring(err)) end
+	end
+end
+
 local function window_action(id, fields)
 	local a = window_actions[id]
 	if a then
@@ -224,6 +238,18 @@ end
 -- Definicje są zwykłymi tabelami Lua, więc mod wczytany później może je zmienić
 -- (np. podmienić teksturę kamienia albo dodać drzewo do cudzego biomu).
 ---------------------------------------------------------------------------
+-- Pozycje z Lua: tabela {x =, y =, z =} albo wektor. Bloki: liczby całkowite (w dół), obiekty: ułamki.
+local function VI(p)
+	if type(p) == "table" then
+		return Vector3i(math.floor(p.x or p[1] or 0), math.floor(p.y or p[2] or 0), math.floor(p.z or p[3] or 0))
+	end
+	return p
+end
+local function VF(p)
+	if type(p) == "table" then return Vector3(p.x or p[1] or 0, p.y or p[2] or 0, p.z or p[3] or 0) end
+	return p
+end
+
 local R = {
 	frozen = false,
 	blocks = {}, block_list = {},
@@ -234,6 +260,7 @@ local R = {
 	config = { biome_scale = 1.0, beach_height = 7 },
 	animations = {},
 	entities = {},
+	sounds = {},
 }
 
 local function open_registry(what)
@@ -293,11 +320,98 @@ local function norm_structure(def)
 	return s
 end
 
+-- Stany bloku: states = { facing = {"north", "east", "south", "west"}, lit = {false, true} } daje osobny
+-- wariant (osobne id) dla każdej kombinacji. Pierwsza kombinacja nosi klucz bloku, pozostałe
+-- "klucz[facing=east,lit=true]". variant(state) zwraca zmiany definicji dla wariantu (np. światło, tekstury),
+-- a stan facing obraca tekstury: front (przód), back (tył), side (boki).
+local OPPOSITE = { north = "south", south = "north", east = "west", west = "east" }
+
+local function orient(tex, facing)
+	if type(tex) ~= "table" or tex.front == nil or OPPOSITE[facing] == nil then return tex end
+	local t = copy(tex)
+	local side = tex.side or tex.all
+	for f in pairs(OPPOSITE) do t[f] = side end
+	t[facing] = tex.front
+	t[OPPOSITE[facing]] = tex.back or side
+	t.front, t.back, t.side = nil, nil, nil
+	return t
+end
+
+local function state_names(states)
+	local names = {}
+	for n in pairs(states) do names[#names + 1] = n end
+	table.sort(names)
+	return names
+end
+
+local function expand_states(key, b)
+	local names = state_names(b.states)
+	local combos = { {} }
+	for _, n in ipairs(names) do
+		local next_c = {}
+		for _, c in ipairs(combos) do
+			for _, v in ipairs(b.states[n]) do
+				local x = copy(c)
+				x[n] = v
+				next_c[#next_c + 1] = x
+			end
+		end
+		combos = next_c
+	end
+	local out = {}
+	for i, st in ipairs(combos) do
+		local v = copy(b)
+		v.variant = nil
+		if type(b.variant) == "function" then
+			local ok, ch = pcall(b.variant, copy(st))
+			if ok and type(ch) == "table" then
+				for k, val in pairs(ch) do
+					if k == "textures" and type(val) == "table" and type(v.textures) == "table" then
+						local t = copy(v.textures)
+						for f, spec in pairs(val) do t[f] = spec end
+						v.textures = t
+					else
+						v[k] = val
+					end
+				end
+			elseif not ok then
+				host.report_error(b.mod or "?", "variant " .. key .. ": " .. tostring(ch))
+			end
+		end
+		if v.texture and not v.textures then v.textures = { all = v.texture } v.texture = nil end
+		if st.facing ~= nil then v.textures = orient(v.textures, st.facing) end
+		v.base = key
+		v.state = st
+		if i == 1 then
+			v.key = key
+			v.state_names = names
+		else
+			local parts = {}
+			for _, n in ipairs(names) do parts[#parts + 1] = n .. "=" .. tostring(st[n]) end
+			v.key = key .. "[" .. table.concat(parts, ",") .. "]"
+			v.item = false
+			v.variant_of = key
+		end
+		out[#out + 1] = v
+	end
+	return out
+end
+
 local function finalize()
 	R.frozen = true
 	local blocks = {}
+	local list = {}
 	for _, key in ipairs(R.block_list) do
 		local b = R.blocks[key]
+		if type(b.states) == "table" and next(b.states) ~= nil and not b.liquid then
+			for _, v in ipairs(expand_states(key, b)) do list[#list + 1] = v end
+		else
+			list[#list + 1] = b
+		end
+	end
+	for _, b in ipairs(list) do
+		local key = b.key
+		local base = b.variant_of and R.blocks[b.variant_of] or b
 		local has_item = b.item ~= false
 		if has_item and R.items[key] == nil then
 			put(R.items, R.item_list, key, {
@@ -305,7 +419,8 @@ local function finalize()
 			})
 		end
 		local out = copy(b)
-		out.drops = norm_drops(key, b.drops, has_item)
+		out.variant = nil
+		out.drops = norm_drops(b.variant_of or key, b.drops, base.item ~= false)
 		if out.texture then
 			out.textures = out.textures or { all = out.texture }
 			out.texture = nil
@@ -322,6 +437,7 @@ local function finalize()
 	for key, s in pairs(R.structures) do structures[key] = norm_structure(s) end
 	return to_godot({
 		blocks = blocks, items = items, animations = copy(R.animations), entities = copy(R.entities),
+		sounds = copy(R.sounds),
 		worldgen = { config = copy(R.config), biomes = biomes, ores = ores, structures = structures },
 	})
 end
@@ -351,6 +467,9 @@ local function make_api(mod_id)
 
 	-- biblioteki: mod udostępnia tabelę, inne mody ją pobierają (wymagają go w mod.json)
 	function E.export(t) exports[mod_id] = t end
+	-- biblioteka innego moda albo nil, gdy mod jest wyłączony (w mod.json: "after": [id])
+	function E.optional(id) return exports[id] end
+
 	function E.require(id)
 		local t = exports[id]
 		if t == nil then
@@ -390,6 +509,29 @@ local function make_api(mod_id)
 		key = function(id) return host.block_key(id) end,
 		name = function(id) return host.block_name(id) end,
 		list = function() return to_lua(host.block_list()) end,
+		-- stany: tabela stanu bloku w świecie, zmiana stanu (inny wariant tego samego bloku)
+		state = function(pos) return to_lua(host.block_state(VI(pos))) or {} end,
+		set_state = function(pos, changes) return host.block_set_state(VI(pos), to_godot(changes or {})) end,
+		with_state = function(block, changes) return host.block_with_state(block, to_godot(changes or {})) end,
+		base = function(block) return host.block_base(block) end,
+		-- dane bloku: znikają razem z blokiem (zdarzenie block.removed)
+		data = function(pos) return to_lua(host.block_data(VI(pos))) or {} end,
+		set_data = function(pos, key, value) host.block_set_data(VI(pos), tostring(key), to_godot(value)) end,
+		clear_data = function(pos) host.block_clear_data(VI(pos)) end,
+		-- kontener przypisany do bloku (skrzynia): po zniszczeniu bloku przedmioty wypadają
+		container = function(pos, size) return host.block_container(mod_id, VI(pos), size or 9) end,
+		-- aktualizacje: fn(ctx) z ctx.reason = "random" | "scheduled" | "neighbor"
+		on_update = function(keys, fn)
+			if type(keys) == "string" then keys = { keys } end
+			assert(type(fn) == "function", "blocks.on_update: drugi argument musi być funkcją")
+			for _, k in ipairs(keys) do
+				block_handlers[k] = block_handlers[k] or {}
+				local l = block_handlers[k]
+				l[#l + 1] = { fn = fn, owner = mod_id }
+				host.block_listen(k)
+			end
+		end,
+		schedule = function(pos, seconds, tag) host.block_schedule(VI(pos), tonumber(seconds) or 1, tostring(tag or "")) end,
 	}
 
 	E.items = {
@@ -456,6 +598,24 @@ local function make_api(mod_id)
 		end,
 	}
 
+	-- dźwięki: rejestracja w content.lua ({file = "sounds/x.ogg"} albo {files = {...}}, volume, pitch,
+	-- pitch_random, range), odtwarzanie w skryptach
+	E.sounds = {
+		register = function(name, def)
+			open_registry("sounds.register")
+			local d = copy(def or {})
+			d.mod = mod_id
+			R.sounds[name] = d
+		end,
+		get = function(name) return R.sounds[name] end,
+	}
+	-- opts: pos (dźwięk w miejscu, słyszą gracze w pobliżu; bez pos słyszy tylko ten gracz), volume, pitch,
+	-- loop (zwraca id do engine.sound.stop), player (id gracza: tylko on słyszy)
+	E.sound = {
+		play = function(name, opts) return host.sound_play(tostring(name), to_godot(opts or {})) end,
+		stop = function(id) host.sound_stop(tonumber(id) or 0) end,
+	}
+
 	E.animation = {
 		-- {length = 1.0, loop = false, tracks = {arm_right = {{0, {0,0,0}}, {0.5, {-90,0,0}}}, ...}}
 		register = function(name, def)
@@ -477,7 +637,7 @@ local function make_api(mod_id)
 			return d
 		end,
 		def = function(type) return R.entities[type] end,
-		spawn = function(type, pos, data, scale) return host.entity_spawn(type, pos, to_godot(data or {}), scale or 1.0) end,
+		spawn = function(type, pos, data, scale) return host.entity_spawn(type, VF(pos), to_godot(data or {}), scale or 1.0) end,
 		remove = function(id) host.entity_remove(id) end,
 		exists = function(id) return host.entity_exists(id) end,
 		type = function(id) return host.entity_get(id, "type") end,
@@ -486,8 +646,8 @@ local function make_api(mod_id)
 		state = function(id) return host.entity_get(id, "state") end,
 		scale = function(id) return host.entity_get(id, "scale") end,
 		list = function(type, radius) return to_lua(host.entity_list(type or "", radius or 0)) end,
-		teleport = function(id, pos) host.entity_set(id, "pos", pos) end,
-		move_to = function(id, pos) host.entity_set(id, "target", pos) end,
+		teleport = function(id, pos) host.entity_set(id, "pos", VF(pos)) end,
+		move_to = function(id, pos) host.entity_set(id, "target", VF(pos)) end,
 		set_scale = function(id, s) host.entity_set(id, "scale", s) end,
 		damage = function(id, amount, cause) host.entity_damage(id, amount, cause or "mod") end,
 		animate = function(id, name) host.entity_set(id, "animate", name) end,
@@ -496,17 +656,17 @@ local function make_api(mod_id)
 		data = function(id) return to_lua(host.entity_get(id, "data")) or {} end,
 		set_data = function(id, key, value) host.entity_data(id, key, to_godot(value)) end,
 		-- przedmiot leżący na ziemi; gracz podnosi go, podchodząc (hak item.pickup)
-		drop = function(item, count, pos) return host.item_drop(item, count or 1, pos) end,
+		drop = function(item, count, pos) return host.item_drop(item, count or 1, VF(pos)) end,
 	}
 
 	E.world = {
-		get_block = function(pos) return host.get_block(pos) end,
+		get_block = function(pos) return host.get_block(VI(pos)) end,
 		set_block = function(pos, id)
 			if type(id) == "string" then id = host.block_id(id) end
-			return host.set_block(pos, id)
+			return host.set_block(VI(pos), id)
 		end,
-		biome = function(pos) return host.biome(pos) end,
-		biome_key = function(pos) return host.biome_key(pos) end,
+		biome = function(pos) return host.biome(VI(pos)) end,
+		biome_key = function(pos) return host.biome_key(VI(pos)) end,
 		height = function(x, z) return host.height(x, z) end,
 		time = function() return host.time_of_day() end,
 		set_time = function(h) host.set_time(h) end,
@@ -559,9 +719,9 @@ local function make_api(mod_id)
 			set = function(key, value) host.pstorage_set(mod_id, key, to_godot(value)) end,
 		},
 		position = function() return host.player_position() end,
-		teleport = function(pos) host.player_teleport(pos) end,
+		teleport = function(pos) host.player_teleport(VF(pos)) end,
 		velocity = function() return host.player_velocity() end,
-		push = function(v) host.player_push(v) end,
+		push = function(v) host.player_push(VF(v)) end,
 		set = function(stat, value) host.player_set(stat, value) end,
 		get = function(stat) return host.player_get(stat) end,
 		health = function() return host.player_health() end,
@@ -665,4 +825,4 @@ local function make_env(mod_id)
 	return env
 end
 
-return { dispatch = dispatch, make_env = make_env, input = input, window_action = window_action, finalize = finalize, run_chunk = run_chunk }
+return { dispatch = dispatch, make_env = make_env, input = input, window_action = window_action, finalize = finalize, run_chunk = run_chunk, block_update = block_update }

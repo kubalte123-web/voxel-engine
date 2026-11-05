@@ -332,6 +332,7 @@ func _physics_process(delta: float) -> void:
 			die("void")
 
 	var hspeed := Vector2(velocity.x, velocity.z).length()
+	_sounds(delta, hspeed)
 	if hspeed > 0.3:
 		var target_yaw := atan2(-velocity.x, -velocity.z)
 		model.rotation.y = lerp_angle(model.rotation.y, target_yaw, minf(1.0, delta * 10.0))
@@ -352,6 +353,28 @@ func reset_fall() -> void:
 	fall_top = global_position.y
 
 
+## Kroki, plusk przy wejściu do wody i pływanie (słyszy je tylko ten gracz; inni grają je dla jego postaci sami).
+var _step := 0.0
+var _swim := 0.0
+var _was_liquid := false
+
+
+func _sounds(delta: float, hspeed: float) -> void:
+	if in_liquid and not _was_liquid and velocity.y < -2.0:
+		Sfx.play_local("water.splash", global_position)
+	_was_liquid = in_liquid
+	if in_liquid:
+		_swim += hspeed * delta
+		if _swim > 2.2:
+			_swim = 0.0
+			Sfx.play_local("water.swim", global_position, 0.6)
+	elif is_on_floor():
+		_step += hspeed * delta
+		if _step > 1.9:
+			_step = 0.0
+			Sfx.block_local(world.get_block(Vector3i((global_position - Vector3(0, 0.2, 0)).floor())), "step", global_position)
+
+
 ## Upadek: silnik tylko mierzy wysokość i wysyła zdarzenie "player.land"; obrażenia zadają mody.
 func _track_fall(speed: float) -> void:
 	var on := is_on_floor()
@@ -359,6 +382,8 @@ func _track_fall(speed: float) -> void:
 		fall_top = maxf(fall_top, global_position.y)
 	elif not was_on_floor:
 		var fall := fall_top - global_position.y
+		if fall > 1.2:
+			Sfx.block_local(world.get_block(Vector3i((global_position - Vector3(0, 0.2, 0)).floor())), "step", global_position)
 		if fall > 0.6:
 			if Net.is_client():
 				Net.c_action.rpc_id(1, "land", {"fall": fall, "speed": speed})
@@ -384,6 +409,7 @@ func damage(amount: float, cause: String) -> void:
 	if ctx.get("cancel", false):
 		return
 	set_health(health - float(ctx.get("amount", amount)))
+	Sfx.emit("player.hurt", global_position)
 	Mods.after("player.damage", ctx)
 	if health <= 0.0:
 		die(cause)
@@ -510,6 +536,7 @@ func _update_digging(delta: float) -> void:
 	if swing_timer <= 0.0:
 		swing_timer = 0.3
 		model.do_swing()
+		Sfx.block_local(world.get_block(dig_pos), "dig", Vector3(dig_pos) + Vector3(0.5, 0.5, 0.5))
 	dig_progress += delta / maxf(dig_time, 0.0001)
 	if dig_progress >= 1.0 or dig_time <= 0.05:
 		break_block()

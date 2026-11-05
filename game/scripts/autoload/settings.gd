@@ -17,6 +17,7 @@ var water_waves := true
 var player_name := "Gracz"  # nazwa gracza (konto w grze wieloosobowej, podpis nad głową)
 var last_address := "127.0.0.1"
 var last_port := 7777
+var sound_volume := 0.8  # głośność dźwięków 0..1
 var brightness := 0.3    # jasność w ciemności (jaskinie, noc): 0 = prawie czarno, 1 = jaśniej
 
 
@@ -45,6 +46,7 @@ func load_settings() -> void:
 	far_view = clampi(cfg.get_value("video", "far_view", far_view), 0, 4)
 	water_waves = cfg.get_value("video", "water_waves", water_waves)
 	brightness = cfg.get_value("video", "brightness", brightness)
+	sound_volume = cfg.get_value("audio", "volume", sound_volume)
 	player_name = cfg.get_value("player", "name", player_name)
 	last_address = cfg.get_value("player", "address", last_address)
 	last_port = cfg.get_value("player", "port", last_port)
@@ -62,6 +64,7 @@ func save_settings() -> void:
 	cfg.set_value("video", "far_view", far_view)
 	cfg.set_value("video", "water_waves", water_waves)
 	cfg.set_value("video", "brightness", brightness)
+	cfg.set_value("audio", "volume", sound_volume)
 	cfg.set_value("player", "name", player_name)
 	cfg.set_value("player", "address", last_address)
 	cfg.set_value("player", "port", last_port)

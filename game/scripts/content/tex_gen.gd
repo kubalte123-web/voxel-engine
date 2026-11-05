@@ -1,7 +1,8 @@
 class_name TexGen
 ## Tekstury bloków i przedmiotów 16x16: z pliku PNG moda albo z prostego wzoru opisanego danymi.
 ##
-## Wzory (pole "pattern"): solid, noise, speckle, bricks, planks, stripes, ore, glass, lamp, gem, ingot, food, plant, torch.
+## Wzory (pole "pattern"): solid, noise, speckle, bricks, planks, stripes, ore, glass, lamp, chest, furnace,
+## furrows, gem, ingot, food, plant, torch, seeds, stick, pickaxe, axe, shovel, sword, hoe, hammer.
 ## Kolory: "color" (główny), "color2" (drugi), "spots" (plamki, np. ruda), "seed" (losowość).
 
 const PX := 16
@@ -97,6 +98,33 @@ static func pattern(d: Dictionary) -> Image:
 					var edge := x == 0 or y == 0 or x == PX - 1 or y == PX - 1
 					var grid := x == 7 or x == 8 or y == 7 or y == 8
 					c = b if edge else (a.darkened(0.25) if grid else a.lerp(a.lightened(0.3), rng.randf()))
+				"chest":
+					# deski z okuciem i zamkiem pośrodku przodu
+					c = a.lerp(b, rng.randf() * 0.4)
+					if y % 5 == 4:
+						c = a.darkened(0.35)
+					if y == 6 or y == 7:
+						c = Color(0.25, 0.2, 0.15)
+					if x >= 7 and x <= 8 and y >= 5 and y <= 9:
+						c = spots
+					if x == 0 or y == 0 or x == PX - 1 or y == PX - 1:
+						c = a.darkened(0.45)
+				"furnace":
+					# kamień z paleniskiem; color2 = wnętrze (ciemne albo żarzące się)
+					c = a.lerp(a.darkened(0.25), rng.randf())
+					if x >= 4 and x <= 11 and y >= 8 and y <= 13:
+						c = b.lerp(b.lightened(0.3), rng.randf() * 0.6) if y > 9 else b.darkened(0.2)
+					if (x == 3 or x == 12) and y >= 7 and y <= 14 or (y == 7 or y == 14) and x >= 3 and x <= 12:
+						c = a.darkened(0.5)
+					if y == 3 and x >= 4 and x <= 11:
+						c = a.darkened(0.4)
+				"furrows":
+					# zaorana ziemia: bruzdy
+					c = a.lerp(b, rng.randf() * 0.4)
+					if y % 4 == 0:
+						c = a.darkened(0.3)
+					elif y % 4 == 1:
+						c = a.lightened(0.08)
 				"ore":
 					c = a.lerp(b, rng.randf() * 0.5)
 					var cx := (x + 3) % 6
@@ -104,13 +132,13 @@ static func pattern(d: Dictionary) -> Image:
 					if (cx - 2) * (cx - 2) + (cy - 2) * (cy - 2) <= 1 + int(rng.randf() < 0.3):
 						c = spots.lerp(spots.lightened(0.3), rng.randf() * 0.5)
 			img.set_pixel(x, y, c)
-	if kind in ["gem", "ingot", "food", "plant", "torch", "stick", "pickaxe", "axe", "shovel", "sword", "hammer"]:
-		_shape(img, kind, a, b, rng)
+	if kind in ["gem", "ingot", "food", "plant", "torch", "stick", "pickaxe", "axe", "shovel", "sword", "hammer", "hoe", "seeds", "crop"]:
+		_shape(img, kind, a, b, rng, clampi(int(d.get("stage", 4)), 1, 4))
 	return img
 
 
 ## Kształty przedmiotów rysowane na przezroczystym tle.
-static func _shape(img: Image, kind: String, a: Color, b: Color, rng: RandomNumberGenerator) -> void:
+static func _shape(img: Image, kind: String, a: Color, b: Color, rng: RandomNumberGenerator, stage := 4) -> void:
 	img.fill(Color(0, 0, 0, 0))
 	match kind:
 		"gem":
@@ -135,7 +163,25 @@ static func _shape(img: Image, kind: String, a: Color, b: Color, rng: RandomNumb
 				img.set_pixel(8, y, Color(0.35, 0.22, 0.1))
 			img.set_pixel(9, 2, Color(0.25, 0.55, 0.2))
 			img.set_pixel(10, 2, Color(0.25, 0.55, 0.2))
-		"stick", "pickaxe", "axe", "shovel", "sword", "hammer":
+		"seeds":
+			for i in 9:
+				var sx := 3 + (i * 5) % 10
+				var sy := 4 + (i * 7) % 9
+				img.set_pixel(sx, sy, a)
+				img.set_pixel(sx + 1, sy, b)
+				img.set_pixel(sx, sy + 1, b)
+		"crop":
+			# łodygi z kłosami; color = łodyga, color2 = kłosy (dojrzałe: złote), seed > 0 = wysokość 1..4
+			var h := stage
+			for i in 5:
+				var bx := 2 + i * 3
+				var top := 16 - (3 + h * 3) + (i % 2)
+				for y in range(top, 16):
+					img.set_pixel(bx, y, a)
+				for y in range(top, mini(top + h + 1, 16)):
+					img.set_pixel(bx + 1, y, b)
+					img.set_pixel(bx - 1 if bx > 0 else bx, y + 1 if y < 15 else y, b.darkened(0.15))
+		"stick", "pickaxe", "axe", "shovel", "sword", "hammer", "hoe":
 			# narzędzia: trzonek po przekątnej i głowica w kolorze materiału (color)
 			var wood := Color(0.55, 0.38, 0.2)
 			var wood2 := Color(0.42, 0.28, 0.14)
@@ -166,6 +212,11 @@ static func _shape(img: Image, kind: String, a: Color, b: Color, rng: RandomNumb
 						img.set_pixel(k + 4, 12 - k, b)
 					for k in range(-2, 3):
 						img.set_pixel(4 + k, 11 + k, Color(0.4, 0.3, 0.15))
+				"hoe":
+					for x in range(6, 14):
+						img.set_pixel(x, 2, a)
+						img.set_pixel(x, 3, b if x > 9 else a)
+					img.set_pixel(13, 4, b)
 				"hammer":
 					for y in range(1, 6):
 						for x in range(8, 15):

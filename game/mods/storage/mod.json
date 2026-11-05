@@ -1,0 +1,11 @@
+{
+	"id": "storage",
+	"name": "Skrzynie",
+	"version": "0.1.0",
+	"author": "Jakub Lewicki",
+	"description": "Skrzynia na 27 przedmiotów. Stawia się przodem do gracza, a po zniszczeniu jej zawartość wypada na ziemię. W grze wieloosobowej kilku graczy może korzystać z tej samej skrzyni. Przykład kontenera bloku i stanu facing.",
+	"requires": ["backpack"],
+	"after": ["crafting_classic", "crafting_discovery"],
+	"content": ["content.lua"],
+	"scripts": ["main.lua"]
+}

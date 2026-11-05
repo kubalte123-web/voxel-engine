@@ -153,3 +153,14 @@ engine.animation.register("animals_happy", {
 	length = 0.6,
 	tracks = { head = { { 0, { 0, 0, 0 } }, { 0.15, { -25, 0, 0 } }, { 0.3, { 10, 0, 0 } }, { 0.6, { 0, 0, 0 } } } },
 })
+
+---------------------------------------------------------------------------
+-- Odgłosy: silnik gra sounds.idle co jakiś czas (średnio co idle_every sekund) i sounds.hurt przy ranie;
+-- młode mają wyższy głos.
+---------------------------------------------------------------------------
+engine.sounds.register("sheep.say", { files = { "sounds/sheep1.ogg", "sounds/sheep2.ogg" }, volume = 0.7, range = 20 })
+engine.sounds.register("cow.say", { files = { "sounds/cow1.ogg", "sounds/cow2.ogg" }, volume = 0.8, range = 24 })
+engine.sounds.register("chicken.say", { files = { "sounds/chicken1.ogg", "sounds/chicken2.ogg" }, volume = 0.6, range = 16 })
+engine.entities.def("sheep").sounds = { idle = "sheep.say", idle_every = 18 }
+engine.entities.def("cow").sounds = { idle = "cow.say", idle_every = 22 }
+engine.entities.def("chicken").sounds = { idle = "chicken.say", idle_every = 12 }

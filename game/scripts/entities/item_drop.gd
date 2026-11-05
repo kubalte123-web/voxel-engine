@@ -54,6 +54,7 @@ func _physics_process(delta: float) -> void:
 		var ctx: Dictionary = Mods.as_player(EntityManager.peer_of(near), func(): return Mods.before("item.pickup", {"item": item, "count": count}))
 		var taken := int(ctx.get("taken", 0))
 		if taken > 0:
+			Sfx.emit("item.pickup", global_position, 0.7)
 			count -= taken
 			if count <= 0:
 				manager.remove(id)

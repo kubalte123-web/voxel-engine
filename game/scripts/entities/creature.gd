@@ -242,6 +242,9 @@ func _think() -> void:
 			return
 	if state == "follow":
 		follow = null
+	var snd: Variant = def.get("sounds")
+	if snd is Dictionary and snd.has("idle") and dying <= 0.0 and randf() < 1.0 / maxf(1.0, float(snd.get("idle_every", 14.0))):
+		Sfx.emit(str(snd.idle), global_position + Vector3(0, 0.8, 0), 1.0, _voice())
 	if Mods.has_hook("event", "entity.tick"):
 		Mods.emit_event("entity.tick", {"id": id, "type": type, "state": state, "pos": global_position, "data": data})
 
@@ -455,6 +458,9 @@ func hit(amount: float, from: Vector3, cause: String) -> void:
 		return
 	health -= float(ctx.get("amount", amount))
 	hurt = 0.3
+	var snd: Variant = def.get("sounds")
+	if snd is Dictionary and (snd.has("hurt") or snd.has("idle")):
+		Sfx.emit(str(snd.get("hurt", snd.get("idle"))), global_position + Vector3(0, 0.8, 0), 1.0, _voice() * 1.15)
 	var push := global_position - from
 	push.y = 0
 	velocity += push.normalized() * 5.0 + Vector3(0, 4.0, 0)
@@ -465,6 +471,11 @@ func hit(amount: float, from: Vector3, cause: String) -> void:
 	if bool(ai.get("flee", true)):
 		flee_from = from
 		set_state("flee", 5.0)
+
+
+## Wysokość głosu: młode (mniejsze) piszczą wyżej.
+func _voice() -> float:
+	return clampf(1.0 / sqrt(maxf(0.3, scale_factor)), 0.7, 1.8)
 
 
 func die(cause: String) -> void:

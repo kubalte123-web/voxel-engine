@@ -8,3 +8,4 @@ engine.blocks.register("crafting_table", {
 	hardness = 1.5,
 	tool = "axe",
 })
+engine.blocks.get("crafting_table").sound = "wood"

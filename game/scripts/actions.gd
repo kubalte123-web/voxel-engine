@@ -36,6 +36,7 @@ static func break_at(actor: Node3D, world: World, pos: Vector3i) -> void:
 		return
 	if world.set_block(pos, Blocks.AIR):
 		actor.model.do_swing()
+		Sfx.block(block, "break", pos)
 		Mods.after("block.break", ctx)
 
 
@@ -80,6 +81,7 @@ static func place(actor: Node3D, world: World, entities: EntityManager, target: 
 	var block: int = actor.current_block()
 	if block <= 0:
 		return
+	block = oriented(block, actor.yaw)
 	var ctx := Mods.before("block.place", {"pos": p, "block": block, "slot": actor.selected + 1,
 		"item": str(actor.current_item().get("item", ""))})
 	if ctx.get("cancel", false):
@@ -89,11 +91,24 @@ static func place(actor: Node3D, world: World, entities: EntityManager, target: 
 	if Blocks.reg.loose(placed) != null and entities:
 		if entities.spawn_prop(placed, Vector3(p) + Vector3(0.5, 0.5, 0.5), Vector3(0, actor.yaw, 0)) >= 0:
 			actor.model.do_swing()
+			Sfx.block(placed, "place", p)
 			Mods.after("block.place", ctx)
 		return
 	if world.set_block(p, placed):
 		actor.model.do_swing()
+		Sfx.block(placed, "place", p)
 		Mods.after("block.place", ctx)
+
+
+## Blok ze stanem „facing” stawiamy przodem do gracza (chyba że definicja ma place_facing = false).
+static func oriented(block: int, yaw: float) -> int:
+	var d := Blocks.reg.def_of(Blocks.reg.base_of(block))
+	var states: Variant = d.get("states")
+	if not states is Dictionary or not states.has("facing") or not bool(d.get("place_facing", true)):
+		return block
+	var v := Vector3(sin(yaw), 0, cos(yaw))   # od bloku w stronę gracza
+	var dir := ("east" if v.x > 0 else "west") if absf(v.x) > absf(v.z) else ("south" if v.z > 0 else "north")
+	return Blocks.reg.with_state(block, {"facing": dir})
 
 
 static func attack(actor: Node3D, node: Node3D) -> void:

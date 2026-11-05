@@ -92,7 +92,7 @@ if has("raw_iron") then shaped({ "I I", " I " }, { I = "raw_iron" }, "bucket", 1
 if has("coal") then shapeless({ sand = 2, coal = 1 }, "glass", 2) end
 shaped({ "GGG", "GTG", "GGG" }, { G = "glass", T = "torch" }, "lamp", 2)
 if has("bread") and has("wheat") then shaped({ "WWW" }, { W = "wheat" }, "bread", 1) end
-if has("crate") then shaped({ "PPP", "P P", "PPP" }, { P = "planks" }, "crate", 2) end
+if has("crate") then shaped({ "SPS", "P P", "SPS" }, { P = "planks", S = "stick" }, "crate", 2) end
 if has("barrel") then shaped({ "PSP", "P P", "PSP" }, { P = "planks", S = "stick" }, "barrel", 2) end
 if has("ball") and has("leather") then shaped({ " L ", "LWL", " L " }, { L = "leather", W = "wool" }, "ball", 1) end
 shaped({ "SS", "SS" }, { S = "stone" }, "bricks", 4)

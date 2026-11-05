@@ -34,6 +34,7 @@ var item_keys: Array[String] = []
 var placeable: Array[String] = []  # przedmioty-bloki do stawiania (tryb kreatywny)
 var worldgen := {}
 var animations := {}
+var sounds := {}                   # nazwa dźwięku -> {file|files, volume, pitch, pitch_random, range, mod}
 var entities := {}                 # rodzaj stworzenia -> definicja (części modelu, AI, łup, pojawianie się)
 var errors: Array[String] = []
 
@@ -53,6 +54,11 @@ func _mod_path(mod_id: String) -> String:
 
 
 func _tile(spec: Variant, mod_id: String) -> int:
+	# tekstura z innego moda: "base:textures/dirt.png"
+	if spec is String and spec.find(":") > 0 and not spec.begins_with("res:") and not spec.begins_with("user:"):
+		var i: int = spec.find(":")
+		mod_id = spec.substr(0, i)
+		spec = spec.substr(i + 1)
 	var cache_key := mod_id + "|" + var_to_str(spec)
 	if _tex_index.has(cache_key):
 		return _tex_index[cache_key]
@@ -139,6 +145,7 @@ func build(content: Dictionary, paths: Dictionary = {}) -> void:
 	worldgen = content.get("worldgen", {}) if content.get("worldgen") is Dictionary else {}
 	animations = content.get("animations", {}) if content.get("animations") is Dictionary else {}
 	entities = content.get("entities", {}) if content.get("entities") is Dictionary else {}
+	sounds = content.get("sounds", {}) if content.get("sounds") is Dictionary else {}
 	_build_atlas()
 
 
@@ -249,6 +256,54 @@ static func _canon(v: Variant) -> Variant:
 
 
 # ---------- zapytania ----------
+
+## Stany bloku: wariant domyślny (klucz bloku), stan wariantu i wariant z innym stanem.
+func base_of(id: int) -> int:
+	var d := def_of(id)
+	if d.has("variant_of"):
+		return id_of(str(d.variant_of))
+	return id
+
+
+func state_of(id: int) -> Dictionary:
+	var st: Variant = def_of(id).get("state")
+	return st if st is Dictionary else {}
+
+
+func with_state(id: int, changes: Dictionary) -> int:
+	var base := base_of(id)
+	if base <= 0:
+		return id
+	var bd := def_of(base)
+	var states: Variant = bd.get("states")
+	if not states is Dictionary:
+		return id
+	var st := state_of(id).duplicate()
+	for k in changes:
+		var allowed: Variant = states.get(str(k))
+		if not allowed is Array:
+			continue
+		for v in allowed:
+			if _sv(v) == _sv(changes[k]):
+				st[str(k)] = v
+	var parts := []
+	var is_default := true
+	for n in bd.get("state_names", []):
+		var allowed: Array = states.get(n, [])
+		if allowed.is_empty() or _sv(st.get(n)) != _sv(allowed[0]):
+			is_default = false
+		parts.append("%s=%s" % [n, _sv(st.get(n))])
+	if is_default:
+		return base
+	return int(index.get("%s[%s]" % [keys[base], ",".join(parts)], id))
+
+
+## Wartość stanu jako tekst, tak jak w Lua (tostring): 2 -> "2", true -> "true".
+static func _sv(v: Variant) -> String:
+	if v is float and v == floorf(v) and absf(v) < 1e9:
+		return str(int(v))
+	return str(v)
+
 
 func id_of(key: String) -> int:
 	return int(index.get(key, -1))

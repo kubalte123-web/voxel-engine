@@ -80,6 +80,7 @@ func start_content(world_dir: String) -> Registry:
 	for id in ModManager.manifests:
 		paths[id] = ModManager.manifests[id].path
 	registry.build(content, paths)
+	Sfx.reset()
 	for e in registry.errors:
 		report_error("silnik", e)
 	Blocks.reg = registry
@@ -124,7 +125,7 @@ func _open_lua() -> bool:
 		push_error(load_errors["_"])
 		lua = null
 		return false
-	for k in ["dispatch", "make_env", "input", "window_action", "finalize", "run_chunk"]:
+	for k in ["dispatch", "make_env", "input", "window_action", "finalize", "run_chunk", "block_update"]:
 		_api[k] = res.get(k)
 	return true
 
@@ -180,6 +181,10 @@ func resolve_load_order() -> Array[String]:
 				if not wanted.has(r):
 					missing.append(r)
 				elif not out.has(r):
+					waiting = true
+			# "after": mody opcjonalne – jeśli są włączone, wczytujemy je wcześniej
+			for r in ModManager.manifests[id].get("after", []):
+				if wanted.has(r) and not out.has(r) and r != id:
 					waiting = true
 			if not missing.is_empty():
 				load_errors[id] = "wymaga wyłączonych lub brakujących modów: " + ", ".join(missing)
@@ -267,6 +272,11 @@ func press_bind(id: String) -> void:
 		return
 	if _api.has("input"):
 		_api.input.invoke(id)
+
+
+func block_update(key: String, ctx: Dictionary) -> void:
+	if _api.has("block_update"):
+		_api.block_update.invoke(key, ctx)
 
 
 func window_action(action: String, fields: Dictionary = {}) -> void:
@@ -570,7 +580,9 @@ func _host_table() -> Dictionary:
 		"entity_spawn", "entity_remove", "entity_exists", "entity_get", "entity_list", "entity_set",
 		"entity_damage", "entity_tag", "entity_data", "item_drop",
 		"player_id", "player_name", "player_is_host", "players_list", "set_ctx", "get_ctx",
-		"pstorage_get", "pstorage_set", "players_accept", "players_kick", "is_multiplayer", "hash"]
+		"pstorage_get", "pstorage_set", "players_accept", "players_kick", "is_multiplayer", "hash",
+		"block_state", "block_set_state", "block_with_state", "block_base", "block_data", "block_set_data",
+		"block_clear_data", "block_container", "block_listen", "block_schedule", "sound_play", "sound_stop"]
 	var t := {}
 	for n in names:
 		t[n] = Callable(self, "_h_" + n)
@@ -649,6 +661,86 @@ static func _v3i(pos: Variant) -> Vector3i:
 	if pos is Vector3i:
 		return pos
 	return Vector3i.ZERO
+
+
+# ---------- stany, dane i aktualizacje bloków ----------
+
+func _logic() -> BlockLogic:
+	return main.world.logic if main and main.world else null
+
+
+func _block_arg(block: Variant) -> int:
+	if block is String:
+		return registry.id_of(block) if registry else -1
+	return int(block)
+
+
+func _h_block_state(pos) -> Dictionary:
+	return registry.state_of(_h_get_block(pos)) if registry else {}
+
+
+func _h_block_set_state(pos, changes) -> bool:
+	var p := _v3i(pos)
+	var id := _h_get_block(p)
+	var nid := registry.with_state(id, changes if changes is Dictionary else {})
+	if nid == id:
+		return false
+	return main.world.set_block(p, nid)
+
+
+func _h_block_with_state(block, changes) -> int:
+	return registry.with_state(_block_arg(block), changes if changes is Dictionary else {}) if registry else -1
+
+
+func _h_block_base(block) -> String:
+	return registry.block_key(registry.base_of(_block_arg(block))) if registry else ""
+
+
+func _h_block_data(pos) -> Dictionary:
+	var l := _logic()
+	return l.get_data(_v3i(pos)).duplicate(true) if l else {}
+
+
+func _h_block_set_data(pos, key, value) -> void:
+	var l := _logic()
+	if l:
+		l.set_data(_v3i(pos), str(key), value)
+
+
+func _h_block_clear_data(pos) -> void:
+	var l := _logic()
+	if l:
+		l.data.erase(_v3i(pos))
+
+
+func _h_block_container(mod_id, pos, size) -> String:
+	var l := _logic()
+	return l.container(str(mod_id), _v3i(pos), clampi(int(size), 1, 108)) if l else ""
+
+
+func _h_block_listen(key) -> void:
+	var l := _logic()
+	if l:
+		l.add_listener(str(key))
+
+
+func _h_block_schedule(pos, seconds, tag) -> void:
+	var l := _logic()
+	if l:
+		l.schedule(_v3i(pos), float(seconds), str(tag))
+
+
+func _h_sound_play(name, opts) -> int:
+	var o: Dictionary = opts if opts is Dictionary else {}
+	var pos: Variant = null
+	if o.has("pos"):
+		pos = Vector3(_v3i(o.pos)) + Vector3(0.5, 0.5, 0.5) if o.pos is Dictionary or o.pos is Vector3i else Vector3(o.pos)
+	var peer := int(o.get("player", -1))
+	return Sfx.emit(str(name), pos, float(o.get("volume", 1.0)), float(o.get("pitch", 1.0)), bool(o.get("loop", false)), peer)
+
+
+func _h_sound_stop(id) -> void:
+	Sfx.stop(int(id))
 
 
 func _h_get_block(pos) -> int: return main.world.get_block(_v3i(pos)) if main else 0

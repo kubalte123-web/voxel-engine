@@ -179,3 +179,40 @@ engine.worldgen.biome("snowy", {
 		{ shape = "spruce", trunk = "log", leaves = "leaves", height = { 6, 8 }, radius = 2, chance = 0.012, max_height = 33 },
 	}) or {},
 })
+
+-- Dźwięki. Blok wybiera grupę polem sound ("stone", "wood", ...), a silnik gra "<grupa>.break" przy niszczeniu,
+-- "<grupa>.place" przy stawianiu, "<grupa>.dig" przy kopaniu i "<grupa>.step" przy chodzeniu
+-- (brakujące place/dig zastępuje break). Bloki bez pola sound: rośliny "leaves", reszta "stone".
+local function sound_group(name, opts)
+	opts = opts or {}
+	local files, steps = {}, {}
+	for i = 1, opts.variants or 3 do
+		files[i] = "sounds/" .. (opts.file or name) .. "_break" .. i .. ".ogg"
+		steps[i] = "sounds/" .. (opts.file or name) .. "_step" .. i .. ".ogg"
+	end
+	engine.sounds.register(name .. ".break", { files = files, volume = 0.9 })
+	engine.sounds.register(name .. ".place", { files = files, volume = 0.75, pitch = 0.85 })
+	engine.sounds.register(name .. ".dig", { files = files, volume = 0.45, pitch = 1.15 })
+	if not opts.no_step then
+		engine.sounds.register(name .. ".step", { files = steps, volume = 0.3, range = 12 })
+	end
+end
+for _, g in ipairs({ "stone", "dirt", "grass", "sand", "gravel", "snow", "leaves", "wood" }) do sound_group(g) end
+sound_group("glass", { variants = 2, no_step = true })
+engine.sounds.register("glass.step", { files = { "sounds/stone_step1.ogg", "sounds/stone_step2.ogg" }, volume = 0.3, pitch = 1.3, range = 12 })
+engine.sounds.register("glass.place", { files = { "sounds/stone_break1.ogg", "sounds/stone_break2.ogg" }, volume = 0.7, pitch = 1.3 })
+engine.sounds.register("water.splash", { files = { "sounds/water_splash1.ogg", "sounds/water_splash2.ogg" }, volume = 0.8 })
+engine.sounds.register("water.swim", { files = { "sounds/water_swim1.ogg", "sounds/water_swim2.ogg" }, volume = 0.5 })
+engine.sounds.register("water.break", { files = { "sounds/water_splash1.ogg" }, volume = 0.5 })
+engine.sounds.register("item.pickup", { file = "sounds/pop.ogg", volume = 0.5, pitch_random = 0.2, range = 12 })
+engine.sounds.register("player.hurt", { file = "sounds/hurt.ogg", volume = 0.8 })
+engine.sounds.register("ui.click", { file = "sounds/click.ogg", volume = 0.5 })
+
+local SOUNDS = {
+	grass = "grass", dirt = "dirt", sand = "sand", gravel = "gravel", snow = "snow", leaves = "leaves",
+	planks = "wood", log = "wood", cactus = "leaves", glass = "glass", ice = "glass", lamp = "glass", torch = "wood",
+}
+for key, group in pairs(SOUNDS) do
+	local b = engine.blocks.get(key)
+	if b and b.sound == nil then b.sound = group end
+end

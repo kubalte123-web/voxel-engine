@@ -50,6 +50,7 @@ tylko w fazie content; wywołane później zgłoszą błąd.
 | --- | --- |
 | `id` | Stały identyfikator, małe litery i podkreślenia |
 | `requires` | Mody, które muszą być włączone; wczytają się przed tym modem |
+| `after` | Mody opcjonalne: jeśli są włączone, wczytają się wcześniej (biblioteka przez `engine.optional(id)`) |
 | `content` | Pliki Lua fazy content (rejestracja treści) |
 | `scripts` | Pliki Lua fazy scripts (logika w świecie) |
 | `library` | Mod jest biblioteką dla innych (na liście trafia wyżej) |
@@ -80,8 +81,71 @@ engine.blocks.register("ruby_ore", {
 	breakable = true,        -- false: nie do wykopania
 	gravity = false,         -- true: spada bez podparcia (piasek, żwir)
 	loose = nil,             -- obiekt luźny (fizyczny), opis niżej
+	light = 0,               -- świecenie 0..15 (pochodnia 14)
+	sound = "stone",         -- grupa dźwięków (opis w „Dźwięki”)
+	tool = "pickaxe",        -- narzędzie, które kopie szybciej (mod tools)
+	random_tick = nil,       -- losowe aktualizacje średnio co tyle sekund (opis w „Aktualizacje bloków”)
+	states = nil,            -- stany bloku, opis niżej
 })
 ```
+
+Tekstura z innego moda: `"base:textures/dirt.png"` (tak samo dźwięki: `"base:sounds/pop.ogg"`).
+
+### Stany bloku
+
+Blok może mieć stany, np. kierunek, wiek rośliny, zapalony/zgaszony. Każda kombinacja to osobny wariant
+(osobny numer bloku), więc stan nic nie kosztuje przy rysowaniu i oświetleniu, a wariant może mieć inne
+tekstury, światło, łup czy nazwę.
+
+```lua
+engine.blocks.register("furnace", {
+	textures = { front = "furnace_front.png", side = "stone.png", top = "stone.png" },
+	states = { facing = { "north", "east", "south", "west" }, lit = { false, true } },
+	variant = function(state)               -- zmiany definicji dla wariantu (albo nil)
+		if state.lit then return { light = 13, textures = { front = "furnace_lit.png" } } end
+	end,
+})
+```
+
+- Pierwsza wartość każdego stanu to stan domyślny; ten wariant ma klucz bloku (`furnace`), pozostałe
+  `furnace[facing=east,lit=true]` i nie mają własnego przedmiotu (łup jest z bloku głównego).
+- Stan `facing` obraca tekstury: `front` (przód), `back` (tył, domyślnie jak boki), `side`. Blok ze stanem
+  `facing` gracz stawia przodem do siebie (`place_facing = false` to wyłącza).
+- W skryptach: `engine.blocks.state(pos)` → `{facing = "east", lit = false}`,
+  `engine.blocks.set_state(pos, {lit = true})`, `engine.blocks.with_state("furnace", {lit = true})` → numer wariantu,
+  `engine.blocks.base(id)` → klucz bloku głównego (dla każdego wariantu ten sam).
+- Liczba wszystkich bloków razem z wariantami jest ograniczona do 256 – nie przesadzaj z kombinacjami.
+
+### Dane i kontenery bloku
+
+Blok w świecie może mieć dane moda (np. postęp przetapiania) i własny kontener (np. skrzynia). Zapisują się
+ze światem i znikają razem z blokiem (zmiana stanu ich nie usuwa).
+
+```lua
+engine.blocks.set_data(pos, "progress", 3)        -- nil usuwa wpis
+local d = engine.blocks.data(pos)                 -- kopia: {progress = 3}
+local c = engine.blocks.container(pos, 27)        -- id kontenera ("@x,y,z"), tworzy go przy pierwszym użyciu
+engine.ui.window({ id = "chest", sections = { { type = "slots", container = c, columns = 9 } } })
+```
+
+Gdy blok zniknie, przedmioty z jego kontenera wypadają na ziemię, a mody dostają zdarzenie `block.removed`
+z danymi bloku.
+
+### Aktualizacje bloków
+
+```lua
+engine.blocks.on_update("wheat_crop", function(ctx)
+	-- ctx: pos, block, key (blok główny), state, data, reason
+	if ctx.reason == "random" then ... end     -- losowo, średnio co random_tick sekund (pole bloku)
+	if ctx.reason == "scheduled" then ... end  -- po engine.blocks.schedule(pos, sekundy, tag); ctx.tag
+	if ctx.reason == "neighbor" then ... end   -- zmienił się blok obok: ctx.from, ctx.from_block
+end)
+engine.blocks.schedule(pos, 1.5, "smelt")
+```
+
+Aktualizacje działają na serwerze, w chunkach wczytanych wokół graczy. Zaplanowane zapisują się ze światem,
+więc np. piec pracuje dalej po wczytaniu gry. Losowe dostają tylko bloki z polem `random_tick` (sekundy
+albo `true` = 60).
 
 ### Ciecze
 
@@ -115,8 +179,9 @@ Tekstura to plik PNG 16x16 w folderze moda albo wzór opisany danymi (bez rysowa
 texture = { pattern = "ore", color = "#7f7f84", color2 = "#96969b", spots = "#d0203a" }
 ```
 
-Wzory: `solid`, `noise`, `speckle`, `bricks`, `planks`, `stripes`, `ore`, `glass` (bloki) oraz
-`gem`, `ingot`, `food`, `plant` (ikony przedmiotów). Kolory w formacie `#rrggbb` albo `#rrggbbaa`.
+Wzory: `solid`, `noise`, `speckle`, `bricks`, `planks`, `stripes`, `ore`, `glass`, `lamp`, `chest`, `furnace`,
+`furrows` (bloki), `crop` (uprawa, `stage` 1..4) oraz `gem`, `ingot`, `food`, `plant`, `seeds`, `torch`, `stick`,
+`pickaxe`, `axe`, `shovel`, `sword`, `hoe`, `hammer` (ikony przedmiotów). Kolory w formacie `#rrggbb` albo `#rrggbbaa`.
 Piksele z przezroczystością poniżej 50% są niewidoczne.
 
 Zmiana bloku innego moda (w content.lua, mod musi wczytać się później):
@@ -129,6 +194,30 @@ engine.blocks.get("leaves").drops = { { item = "apple", chance = 0.08 } }
 Numer bloku (`id`) nadaje gra w kolejności rejestracji. W skryptach używaj kluczy tekstowych:
 `engine.blocks.id("stone")`, `engine.blocks.key(id)`. Świat zapisuje listę kluczy i przelicza numery,
 gdy zmieni się zestaw modów; bloki z wyłączonego moda stają się powietrzem.
+
+## Dźwięki
+
+Pliki OGG, WAV albo MP3 w folderze moda, rejestrowane w content.lua:
+
+```lua
+engine.sounds.register("sheep.say", {
+	files = { "sounds/sheep1.ogg", "sounds/sheep2.ogg" },   -- losowo jeden z nich (albo file = "...")
+	volume = 0.7, pitch = 1.0, pitch_random = 0.08, range = 20,   -- zasięg w blokach
+})
+```
+
+W skryptach: `engine.sound.play("sheep.say", { pos = pos })` – słyszą gracze w pobliżu; bez `pos` słyszy tylko
+gracz, w którego imieniu działa kod (dźwięki interfejsu); `player = id` – tylko ten gracz; `volume`, `pitch`;
+`loop = true` zwraca id do `engine.sound.stop(id)`.
+
+Silnik sam gra:
+- dźwięki bloków z grupy z pola `sound`: `<grupa>.break` (niszczenie), `.place` (stawianie), `.dig` (kopanie),
+  `.step` (kroki); brakujące `place` i `dig` zastępuje `break`. Mod base ma grupy `stone`, `dirt`, `grass`,
+  `sand`, `gravel`, `snow`, `leaves`, `wood`, `glass`, a bloki bez `sound` brzmią jak `stone` (rośliny jak `leaves`),
+- `water.splash`, `water.swim`, `item.pickup`, `player.hurt`, `ui.click`,
+- odgłosy stworzeń z pola `sounds = { idle = "sheep.say", idle_every = 18, hurt = "..." }` (młode wyżej).
+
+Gracz ustawia głośność w Opcjach.
 
 ## Przedmioty
 
@@ -267,16 +356,20 @@ Wyższy priorytet działa wcześniej. Po `cancel` kolejne haki „before” się
 | `entity.death` | `id`, `type`, `pos`, `cause`, `data` |
 | `entity.tick` | raz na sekundę dla każdego stworzenia: `id`, `type`, `state`, `pos`, `data` |
 | `entity.graze` | `id`, `type`, `pos` (blok, który stworzenie skubało) |
+| `block.removed` | `pos`, `block`, `key`, `data` – zniknął blok z danymi albo kontenerem |
 | `player.join` | `id`, `name` (konto) – gracz wszedł do gry (po zalogowaniu); tu twórz kontenery gracza |
 | `player.leave` | `id`, `name` – gracz wyszedł z serwera |
 | `ui.closed` | `id` okna zamkniętego przez gracza |
 
 ## API `engine`
 
+Pozycje można podawać jako wektor albo tabelę `{x = 1, y = 2, z = 3}`.
+
 | Funkcja | Opis |
 | --- | --- |
 | `engine.log(...)`, `print(...)` | Zapis do dziennika moda |
 | `engine.export(t)` / `engine.require(id)` | Udostępnienie tabeli innym modom / pobranie biblioteki |
+| `engine.optional(id)` | Biblioteka moda albo `nil`, gdy jest wyłączony (w mod.json `"after": [id]`) |
 | `engine.settings.get(klucz)` | Wartość ustawienia (serwer > świat > gracz > domyślna) |
 | `engine.storage.get(klucz, domyślna)` / `set(klucz, wartość)` | Dane moda zapisywane w świecie |
 | `engine.random()`, `random(n)`, `random(a, b)` | Liczba 0..1 albo całkowita z zakresu |
@@ -287,6 +380,10 @@ Wyższy priorytet działa wcześniej. Po `cancel` kolejne haki „before” się
 | `engine.items.get(id, i)`, `set(id, i, {item, count})`, `size(id)` | Miejsca w kontenerze, liczone od 1 |
 | `engine.worldgen.*` | Biomy, struktury, rudy (content), opis wyżej |
 | `engine.world.get_block(pos)`, `set_block(pos, id_lub_klucz)` | Bloki w świecie |
+| `engine.blocks.state/set_state/with_state/base` | Stany bloku (opis wyżej) |
+| `engine.blocks.data/set_data/clear_data/container` | Dane i kontener bloku |
+| `engine.blocks.on_update(klucze, fn)`, `schedule(pos, s, tag)` | Aktualizacje bloków |
+| `engine.sound.play(nazwa, opts)`, `stop(id)`; `engine.sounds.register` | Dźwięki |
 | `engine.world.biome(pos)`, `biome_key(pos)`, `height(x, z)`, `time()`, `set_time(h)` | Świat |
 | `engine.player.position()`, `teleport(pos)`, `velocity()`, `push(v)` | Ruch gracza |
 | `engine.player.set(stat, v)`, `get(stat)` | Statystyki: `speed`, `jump`, `gravity`, `reach`, `auto_jump`, `max_health`, `spawn`, `break_speed`, `swim_speed` |
@@ -444,6 +541,9 @@ Mod „Plecak i postać” udostępnia `engine.require("backpack").give(przedmio
 | `tools` | narzędzia, pole `tool` bloków, hak `block.dig` |
 | `crafting_classic` | rzemiosło jak w MC: hak `slot.click`, `block.use`, zdarzenie `ui.closed`, eksport przepisów |
 | `crafting_discovery` | rzemiosło odkrywcze: przycisk z polami, pasek postępu, dane gracza, `engine.as_player` |
+| `farming` | stany (wiek uprawy, wilgotność), losowe aktualizacje, aktualizacja od sąsiada, `item.use` z pozycją |
+| `storage` | skrzynia: kontener bloku, stan `facing`, mody opcjonalne (`after`, `engine.optional`) |
+| `smelting` | piec: dane bloku, zaplanowane aktualizacje, wariant świecący, okno odświeżane wszystkim patrzącym |
 
 ## Bezpieczeństwo
 
@@ -455,5 +555,7 @@ a wspólnej metatabeli tekstów nie da się zmienić. Test: `godot --headless --
 
 ## Co będzie dalej
 
-- Piece i przetapianie rud, zbroja, więcej stworzeń.
+- Kształty bloków (półbloki, schody, drzwi), modele z Blendera (glb), cząsteczki.
+- Czat i komendy, uprawnienia na serwerze.
+- Przedmioty z danymi (zużycie narzędzi), konsola modera i przeładowanie modów bez restartu.
 - Pobieranie brakujących modów z serwera przy dołączaniu.
